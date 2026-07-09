@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: onepws-production-portal
+    runtime: static
+    buildCommand: ""
+    staticPublishPath: .
+    pullRequestPreviewsEnabled: false

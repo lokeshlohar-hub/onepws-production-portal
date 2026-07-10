@@ -390,7 +390,7 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
       <label>Password</label>
       <input type="password" id="login_password" placeholder="Enter your password" autocomplete="current-password" onkeydown="if(event.key==='Enter')attemptLogin()">
     </div>
-    <button class="login-btn" onclick="attemptLogin()">Sign In</button>
+    <button class="login-btn" onclick="attemptLogin(this)">Sign In</button>
     <div class="login-demo-box">
       <b>Demo accounts</b> — Master Admin: <b>admin</b> / admin123 &nbsp;·&nbsp; Production Admin: <b>prod.admin</b> / prod123 &nbsp;·&nbsp; Quality Admin: <b>qc.admin</b> / qc123 &nbsp;·&nbsp; Maintenance Admin: <b>maint.admin</b> / maint123 &nbsp;·&nbsp; Viewer: <b>viewer</b> / view123
     </div>
@@ -937,7 +937,7 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
     <!-- SUBMIT -->
     <div style="display:flex;align-items:center;gap:10px;justify-content:flex-end;margin-bottom:20px">
       <button class="btn btn-outline" onclick="nav('tracker',null)">Cancel</button>
-      <button class="btn btn-primary btn-lg" onclick="saveProject()">&#10003; Create Project &amp; Generate Workflows</button>
+      <button class="btn btn-primary btn-lg" onclick="saveProject(this)">&#10003; Create Project &amp; Generate Workflows</button>
     </div>
   </div>
 </div>
@@ -2919,7 +2919,7 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
     </div>
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeMod('qcInspectModal')">Cancel</button>
-      <button class="btn btn-primary" onclick="confirmQcDecision()">✓ Confirm QC Decision</button>
+      <button class="btn btn-primary" onclick="confirmQcDecision(this)">✓ Confirm QC Decision</button>
     </div>
   </div>
 </div>
@@ -3597,6 +3597,149 @@ const DB = {
 
 let CUR_PROJ=null, charts={};
 
+// ============================================================================
+// ------ BACKEND API CLIENT (Phase 1: Auth, Projects/BOM, Stage Entry, QC) ------
+// ============================================================================
+// EDIT THIS if your backend's URL is different (e.g. you renamed the Render
+// Web Service, or you're pointing this at a local dev server for testing):
+const API_BASE = 'https://onepws-productionportal.onrender.com/api';
+
+let AUTH_TOKEN = null;
+
+// Wraps fetch() with auth header injection, JSON parsing, consistent error
+// messages, and a generous timeout — Render's free tier can take up to
+// ~50 seconds to wake a service that's been asleep from inactivity.
+async function apiRequest(path, opts) {
+  opts = opts || {};
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 55000);
+  try {
+    const headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {});
+    if (AUTH_TOKEN) headers['Authorization'] = 'Bearer ' + AUTH_TOKEN;
+    const res = await fetch(API_BASE + path, Object.assign({}, opts, { headers: headers, signal: controller.signal }));
+    clearTimeout(timeoutId);
+    let data = {};
+    try { data = await res.json(); } catch (e) { /* empty/non-JSON body */ }
+    if (!res.ok) throw new Error(data.error || ('Request failed (HTTP ' + res.status + ')'));
+    return data;
+  } catch (err) {
+    clearTimeout(timeoutId);
+    if (err.name === 'AbortError') {
+      throw new Error('The server took too long to respond. Render\'s free tier can take up to a minute to wake up after being idle — please wait a moment and try again.');
+    }
+    if (err instanceof TypeError) {
+      throw new Error('Could not reach the server. Check your internet connection, or that the backend is deployed and running.');
+    }
+    throw err;
+  }
+}
+
+function apiLogin(username, password) {
+  return apiRequest('/auth/login', { method: 'POST', body: JSON.stringify({ username: username, password: password }) });
+}
+function apiLoadProjects() {
+  return apiRequest('/projects', { method: 'GET' });
+}
+function apiCreateProject(payload) {
+  return apiRequest('/projects', { method: 'POST', body: JSON.stringify(payload) });
+}
+function apiSubmitStageEntry(lineId, payload) {
+  return apiRequest('/bom-lines/' + encodeURIComponent(lineId) + '/stage-entry', { method: 'POST', body: JSON.stringify(payload) });
+}
+function apiSubmitQcDecision(lineId, payload) {
+  return apiRequest('/bom-lines/' + encodeURIComponent(lineId) + '/qc-decision', { method: 'POST', body: JSON.stringify(payload) });
+}
+
+// ------ Server (snake_case) -> Frontend (camelCase) shape conversion ------
+// Postgres NUMERIC columns come back from node-pg as strings (to avoid
+// floating-point precision loss), so l/w/t/edgeMetersPerComp need explicit
+// Number() conversion; INTEGER columns already come back as real numbers.
+function serverBomLineToLocal(row) {
+  const stageData = {};
+  Object.keys(row.stage_data || {}).forEach(function (stage) {
+    const sd = row.stage_data[stage] || {};
+    stageData[stage] = {
+      completed: sd.completed || 0,
+      qcQueue: sd.qc_queue || 0,
+      qcApproved: sd.qc_approved || 0,
+      qcRejected: sd.qc_rejected || 0,
+      rework: sd.rework || 0,
+      scrap: sd.scrap || 0,
+      history: sd.history || [],
+    };
+  });
+  return {
+    lineId: row.line_id,
+    item: row.item,
+    seg: row.seg,
+    l: row.l != null ? Number(row.l) : null,
+    w: row.w != null ? Number(row.w) : null,
+    t: row.t != null ? Number(row.t) : null,
+    profile: row.profile,
+    uom: row.uom,
+    qty: row.qty,
+    originalQty: row.original_qty,
+    done: 0,
+    colorFinish: row.color_finish || '',
+    specialChars: row.special_chars || [],
+    componentsPerBoard: row.components_per_board,
+    edgeMetersPerComp: row.edge_meters_per_comp != null ? Number(row.edge_meters_per_comp) : null,
+    boardQty: row.board_qty,
+    componentsReleased: row.components_released || 0,
+    route: row.route || [],
+    stageData: stageData,
+    isRework: row.is_rework,
+    reworkOfLineId: row.rework_of_line_id,
+    reworkSourceStage: row.rework_source_stage,
+    reworkReason: row.rework_reason,
+    reworkDate: row.rework_date,
+    reworkGeneration: row.rework_generation || 0,
+    spawnedReworkLineIds: row.spawned_rework_line_ids || [],
+  };
+}
+
+function serverProjectToLocal(row) {
+  return {
+    id: row.id,
+    sap: row.sap,
+    type: row.type,
+    cat: row.category,
+    customer: row.customer,
+    pm: row.pm,
+    eng: row.eng,
+    po: row.po || '',
+    hasWood: row.has_wood,
+    hasExt: row.has_ext,
+    // p.wood / p.ext (segment-specific sub-objects) aren't modeled server-side
+    // yet — confirmed nothing in this app actually reads them back, only
+    // the flat fields below and the flat p.bom array, so this is safe.
+    wood: null, ext: null,
+    recWood: row.rec_wood, planWood: row.plan_wood, actWood: row.act_wood, dlyWood: row.dly_wood, woodSt: row.wood_status,
+    recExt: row.rec_ext, planExt: row.plan_ext, actExt: row.act_ext, dlyExt: row.dly_ext, extSt: row.ext_status,
+    progress: row.progress || 0,
+    remarks: row.remarks || '',
+    certifications: row.certifications || [],
+    stages: row.stages || [],
+    bom: (row.bom || []).map(serverBomLineToLocal),
+    docs: row.docs || [],
+    history: row.history || [],
+  };
+}
+
+// Replaces DB.projects with whatever's actually saved in the database. Called
+// right after login, so the app always starts from the real, current state
+// instead of the built-in demo seed data.
+async function loadProjectsFromServer() {
+  try {
+    const resp = await apiLoadProjects();
+    DB.projects = (resp.projects || []).map(serverProjectToLocal);
+    DB.projects.forEach(function (p) { (p.bom || []).forEach(ensureBomLineStructure); });
+  } catch (err) {
+    toast('Could not load saved projects from the server: ' + err.message, '⚠');
+    DB.projects = []; // don't show stale demo data pretending to be real saved data
+  }
+}
+
 // ------ NAVIGATION ------
 
 // ============================================================================
@@ -3741,25 +3884,37 @@ function hasPermission(moduleKey, subKey, action){
 function canView(moduleKey, subKey){ return hasPermission(moduleKey, subKey, 'view'); }
 
 // ------ Login / Logout ------
-function attemptLogin(){
+async function attemptLogin(btn){
+  btn = btn || document.querySelector('.login-btn');
   const username=document.getElementById('login_username')?.value.trim();
   const password=document.getElementById('login_password')?.value;
   const errEl=document.getElementById('loginError');
   if(errEl) errEl.style.display='none';
   if(!username||!password){ if(errEl){errEl.textContent='Enter both username and password.'; errEl.style.display='block';} return; }
-  const user=DB.users.find(u=>u.username.toLowerCase()===username.toLowerCase());
-  if(!user || user.password!==password){
-    if(errEl){ errEl.textContent='Invalid username or password.'; errEl.style.display='block'; }
-    return;
+
+  const originalBtnText = btn ? btn.textContent : '';
+  if(btn){ btn.disabled=true; btn.textContent='Signing in…'; }
+  try{
+    const resp = await apiLogin(username, password);
+    AUTH_TOKEN = resp.token;
+    const u = resp.user;
+    const user = {
+      id:u.id, username:u.username, fullName:u.full_name, role:u.role,
+      department:u.department, active:u.active, permissions:u.permissions,
+      lastLogin:u.last_login
+    };
+    ensureUserDefaults(user);
+    CURRENT_USER=user;
+
+    if(btn) btn.textContent='Loading your saved projects…';
+    await loadProjectsFromServer();
+
+    onLoginSuccess();
+  } catch(err){
+    if(errEl){ errEl.textContent = err.message || 'Login failed.'; errEl.style.display='block'; }
+  } finally {
+    if(btn){ btn.disabled=false; btn.textContent=originalBtnText||'Sign In'; }
   }
-  if(!user.active){
-    if(errEl){ errEl.textContent='This account has been deactivated. Contact your Master Admin.'; errEl.style.display='block'; }
-    return;
-  }
-  ensureUserDefaults(user);
-  user.lastLogin=new Date().toISOString().replace('T',' ').slice(0,16);
-  CURRENT_USER=user;
-  onLoginSuccess();
 }
 
 function onLoginSuccess(){
@@ -3777,6 +3932,7 @@ function onLoginSuccess(){
 function logout(){
   if(!confirm('Log out of ONEPWS Production Portal?')) return;
   CURRENT_USER=null;
+  AUTH_TOKEN=null;
   document.body.classList.add('app-locked');
   const u=document.getElementById('login_username'); if(u) u.value='';
   const p=document.getElementById('login_password'); if(p) p.value='';
@@ -5316,7 +5472,7 @@ function handleSegmentFiles(inp,seg){
 }
 function handleFiles(inp){ handleSegmentFiles(inp,'wood'); }
 
-function saveProject(){
+async function saveProject(btn){
   if(!hasPermission('newproject', null, 'create')){
     toast('You do not have permission to create new projects.','⚠');
     return;
@@ -5390,13 +5546,43 @@ function saveProject(){
   if(extData)  extData.stages.forEach(s=>{if(!allStages.some(e=>e.n===s.n))allStages.push(s);});
 
   const ts=new Date().toISOString().replace('T',' ').slice(0,16);
-  const nid=document.getElementById('np_id')?.value || 'PRJ-'+String(DB.projects.length+1).padStart(4,'0');
 
   const fullBom=[...(woodData?.bom||[]),...(extData?.bom||[])];
-  fullBom.forEach(ensureBomLineStructure); // attach route[] + per-stage QC-gated tracking to every BOM line
+  fullBom.forEach(ensureBomLineStructure); // attach route[] + per-stage QC-gated tracking to every BOM line (also computes each line's route, needed for the API payload below)
 
   // Project Certification Requirement — project-level, applies across the whole project
   const certifications = Array.from(document.querySelectorAll('#ms_panel_projcert .cert-option:checked')).map(c=>c.value);
+
+  // --- Persist to the real database first. The local project object below is
+  // only built once the server confirms it saved, using the IDs the server
+  // actually assigned — this way the browser and the database always agree on
+  // what a project/BOM line is called. ---
+  const originalBtnText = btn ? btn.textContent : '';
+  if(btn){ btn.disabled=true; btn.textContent='Saving to server…'; }
+  let serverResult;
+  try{
+    serverResult = await apiCreateProject({
+      sap, type, category:cat, customer, pm, eng, po:document.getElementById('np_po')?.value||'',
+      hasWood:!!hasWood, hasExt:!!hasExt,
+      recWood:woodData?.received||null, planWood:woodData?.tat||null,
+      recExt:extData?.received||null, planExt:extData?.tat||null,
+      certifications,
+      bom: fullBom.map(b=>({
+        item:b.item, seg:b.seg, l:b.l, w:b.w, t:b.t, profile:b.profile, uom:b.uom, qty:b.qty,
+        colorFinish:b.colorFinish, specialChars:b.specialChars,
+        componentsPerBoard:b.componentsPerBoard, edgeMetersPerComp:b.edgeMetersPerComp, boardQty:b.boardQty,
+        route:b.route
+      }))
+    });
+  } catch(err){
+    toast('Could not save this project to the server: '+err.message,'⚠');
+    if(btn){ btn.disabled=false; btn.textContent=originalBtnText||'✓ Create Project & Generate Workflows'; }
+    return;
+  }
+  if(btn){ btn.disabled=false; btn.textContent=originalBtnText||'✓ Create Project & Generate Workflows'; }
+
+  const nid = serverResult.projectId;
+  fullBom.forEach((b,i)=>{ b.lineId = serverResult.bomLineIds[i]; });
 
   const proj={
     id:nid,sap,type,cat,customer,pm,eng,
@@ -5682,7 +5868,7 @@ function applyBoardToComponentConversion(b, sawStageName, boardsApproved){
 // rejected amount, so project-level totals (refreshProjectProgress, which sums
 // qty across every BOM line) stay correct instead of double-counting the
 // rejected units on both the original and the new rework line.
-function spawnReworkBomLine(p, origLine, rejectQty, stageName, category, remarks){
+function spawnReworkBomLine(p, origLine, rejectQty, stageName, category, remarks, forcedLineId){
   ensureBomLineStructure(origLine);
   const newLine = {
     item: origLine.item,
@@ -5708,7 +5894,11 @@ function spawnReworkBomLine(p, origLine, rejectQty, stageName, category, remarks
     reworkGeneration: (origLine.reworkGeneration||0)+1,
     isRework: true
   };
-  ensureBomLineStructure(newLine); // assigns lineId, route (fresh, starts at stage 0), stageData, boardQty for the new qty
+  // If the server already persisted this rework line and gave us its real ID,
+  // use that instead of letting ensureBomLineStructure mint a local-only one —
+  // keeps the browser's copy and the database row referring to the same line.
+  if(forcedLineId) newLine.lineId = forcedLineId;
+  ensureBomLineStructure(newLine); // assigns lineId (if not already forced above), route (fresh, starts at stage 0), stageData, boardQty for the new qty
   origLine.spawnedReworkLineIds = origLine.spawnedReworkLineIds||[];
   origLine.spawnedReworkLineIds.push(newLine.lineId);
   p.bom.push(newLine);
@@ -5995,7 +6185,7 @@ function renderStageEntryForm(){
     +'<input type="number" class="form-input" id="ce_qty" min="1" max="'+pend+'" placeholder="Max '+pend+' '+unit.toLowerCase()+'">'
     +'<span class="form-hint">'+unit+' basis. Max: '+pend+'. Partial entries allowed.</span></div>'
     +'<div class="form-group"><label class="form-label">Remarks</label><textarea class="form-textarea" id="ce_remark" style="height:50px"></textarea></div>'
-    +'</div><div style="display:flex;gap:8px;margin-top:12px"><button class="btn btn-primary" onclick="submitStageEntry()">&#10003; Submit to QC Queue</button></div>';
+    +'</div><div style="display:flex;gap:8px;margin-top:12px"><button class="btn btn-primary" onclick="submitStageEntry(this)">&#10003; Submit to QC Queue</button></div>';
 }
 
 // Shift button toggle handler
@@ -6011,7 +6201,7 @@ function selectShift(shiftKey){
   if(nightLabel){ nightLabel.style.display = shiftKey==='night'?'inline':'none'; }
 }
 
-function submitStageEntry(){
+async function submitStageEntry(btn){
   const b=CUR_BOM_LINE, st=CUR_BOM_STAGE, p=CUR_PROJ;
   if(!b||!st||!p){toast('Select a component and stage first.','⚠');return;}
   const operator=document.getElementById('ce_operator')?.value||'';
@@ -6027,6 +6217,17 @@ function submitStageEntry(){
   if(!operator){toast('Please select the operator who performed this work.','⚠');return;}
   if(!qty||qty<=0){toast('Enter a valid completed quantity.','⚠');return;}
   if(qty>pend){toast('Completed qty ('+qty+') cannot exceed pending qty ('+pend+').','⚠');return;}
+
+  const originalBtnText = btn ? btn.textContent : '';
+  if(btn){ btn.disabled=true; btn.textContent='Saving to server…'; }
+  try{
+    await apiSubmitStageEntry(b.lineId, { stage:st, qty, operator, shift, remark });
+  } catch(err){
+    toast('Could not save this entry to the server: '+err.message,'⚠');
+    if(btn){ btn.disabled=false; btn.textContent=originalBtnText||'✓ Submit to QC Queue'; }
+    return;
+  }
+  if(btn){ btn.disabled=false; btn.textContent=originalBtnText||'✓ Submit to QC Queue'; }
 
   const ts=new Date().toISOString().replace('T',' ').slice(0,16);
   const wsIds = M.stageToWorkstation[st]||[];
@@ -6182,7 +6383,7 @@ function onQcApproveQtyChange(){
   document.getElementById('qcRootCauseReq').style.display = showRejFields?'inline':'none';
 }
 
-function confirmQcDecision(){
+async function confirmQcDecision(btn){
   if(!hasPermission('quality', null, 'approve')){
     toast('You do not have permission to record QC decisions.','⚠');
     return;
@@ -6217,12 +6418,29 @@ function confirmQcDecision(){
     if(!qcPerson){toast('Please select the QC Inspector Name.','⚠');return;}
   }
 
-  processQcDecision(p, b, stageName, approveQty, rejectQty, disposition, category, qcPerson, remarks, instrument);
+  const originalBtnText = btn ? btn.textContent : '';
+  if(btn){ btn.disabled=true; btn.textContent='Saving to server…'; }
+  let serverResult;
+  try{
+    serverResult = await apiSubmitQcDecision(b.lineId, {
+      stage:stageName, approveQty, rejectQty, disposition, category, qcPerson, remarks,
+      instrument: instrument ? {tagNo:instrument.tagNo, name:instrument.name, nextDueDate:instrument.nextDueDate} : null
+    });
+  } catch(err){
+    toast('Could not save this QC decision to the server: '+err.message,'⚠');
+    if(btn){ btn.disabled=false; btn.textContent=originalBtnText||'✓ Confirm QC Decision'; }
+    return;
+  }
+  if(btn){ btn.disabled=false; btn.textContent=originalBtnText||'✓ Confirm QC Decision'; }
+
+  // If the server spawned a rework line, use its real ID for the local copy too
+  const forcedReworkLineId = serverResult.reworkLine ? serverResult.reworkLine.line_id : null;
+  processQcDecision(p, b, stageName, approveQty, rejectQty, disposition, category, qcPerson, remarks, instrument, forcedReworkLineId);
   closeMod('qcInspectModal');
   QC_INSPECT_CTX=null;
 }
 
-function processQcDecision(p, b, stageName, approveQty, rejectQty, disposition, category, qcPerson, remarks, instrument){
+function processQcDecision(p, b, stageName, approveQty, rejectQty, disposition, category, qcPerson, remarks, instrument, forcedReworkLineId){
   const sd=b.stageData[stageName];
   const ts=new Date().toISOString().replace('T',' ').slice(0,16);
   const today=ts.split(' ')[0];
@@ -6249,7 +6467,7 @@ function processQcDecision(p, b, stageName, approveQty, rejectQty, disposition, 
       // This line's own remaining qty shrinks by the same amount, and its
       // stageData/history up to this point is left exactly as it happened —
       // nothing about the original record is rewritten, only its future qty.
-      reworkLine = spawnReworkBomLine(p, b, rejectQty, stageName, category, remarks);
+      reworkLine = spawnReworkBomLine(p, b, rejectQty, stageName, category, remarks, forcedReworkLineId);
       b.qty = Math.max(0, b.qty - rejectQty);
     } else {
       sd.scrap += rejectQty;

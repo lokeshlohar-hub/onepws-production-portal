@@ -381,18 +381,23 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
         <div class="login-subtitle">PRODUCTION CONTROL PORTAL</div>
       </div>
     </div>
-    <div class="login-error" id="loginError"></div>
-    <div class="login-field">
-      <label>Username</label>
-      <input type="text" id="login_username" placeholder="e.g. admin" autocomplete="username" onkeydown="if(event.key==='Enter')attemptLogin()">
+    <div id="sessionCheckMsg" style="text-align:center;padding:26px 0;color:var(--text-muted);font-size:13px">
+      Checking for a saved session…
     </div>
-    <div class="login-field">
-      <label>Password</label>
-      <input type="password" id="login_password" placeholder="Enter your password" autocomplete="current-password" onkeydown="if(event.key==='Enter')attemptLogin()">
-    </div>
-    <button class="login-btn" onclick="attemptLogin(this)">Sign In</button>
-    <div class="login-demo-box">
-      <b>Demo accounts</b> — Master Admin: <b>admin</b> / admin123 &nbsp;·&nbsp; Production Admin: <b>prod.admin</b> / prod123 &nbsp;·&nbsp; Quality Admin: <b>qc.admin</b> / qc123 &nbsp;·&nbsp; Maintenance Admin: <b>maint.admin</b> / maint123 &nbsp;·&nbsp; Viewer: <b>viewer</b> / view123
+    <div id="loginFormArea" style="display:none">
+      <div class="login-error" id="loginError"></div>
+      <div class="login-field">
+        <label>Username</label>
+        <input type="text" id="login_username" placeholder="e.g. admin" autocomplete="username" onkeydown="if(event.key==='Enter')attemptLogin()">
+      </div>
+      <div class="login-field">
+        <label>Password</label>
+        <input type="password" id="login_password" placeholder="Enter your password" autocomplete="current-password" onkeydown="if(event.key==='Enter')attemptLogin()">
+      </div>
+      <button class="login-btn" onclick="attemptLogin(this)">Sign In</button>
+      <div class="login-demo-box">
+        <b>Demo accounts</b> — Master Admin: <b>admin</b> / admin123 &nbsp;·&nbsp; Production Admin: <b>prod.admin</b> / prod123 &nbsp;·&nbsp; Quality Admin: <b>qc.admin</b> / qc123 &nbsp;·&nbsp; Maintenance Admin: <b>maint.admin</b> / maint123 &nbsp;·&nbsp; Viewer: <b>viewer</b> / view123
+      </div>
     </div>
   </div>
 </div>
@@ -3897,6 +3902,7 @@ async function attemptLogin(btn){
   try{
     const resp = await apiLogin(username, password);
     AUTH_TOKEN = resp.token;
+    try{ localStorage.setItem('onepws_token', AUTH_TOKEN); }catch(e){ /* storage unavailable — session just won't survive a refresh, login still works */ }
     const u = resp.user;
     const user = {
       id:u.id, username:u.username, fullName:u.full_name, role:u.role,
@@ -3917,7 +3923,44 @@ async function attemptLogin(btn){
   }
 }
 
-function onLoginSuccess(){
+// Runs once on page load. If a previous login left a token saved, verify it's
+// still valid with the server (also picks up any permission changes Master
+// Admin made since then) and skip straight past the login form. Otherwise —
+// or if the saved token turns out to be expired/revoked — show the normal
+// login form. This is the entire fix for "asks to log in on every refresh".
+async function restoreSession(){
+  const checkMsg = document.getElementById('sessionCheckMsg');
+  const formArea = document.getElementById('loginFormArea');
+  let token = null;
+  try{ token = localStorage.getItem('onepws_token'); }catch(e){ /* storage unavailable */ }
+
+  if(!token){
+    if(checkMsg) checkMsg.style.display='none';
+    if(formArea) formArea.style.display='block';
+    return;
+  }
+
+  AUTH_TOKEN = token;
+  try{
+    const resp = await apiRequest('/auth/me', {method:'GET'});
+    const u = resp.user;
+    const user = {
+      id:u.id, username:u.username, fullName:u.full_name, role:u.role,
+      department:u.department, active:u.active, permissions:u.permissions
+    };
+    ensureUserDefaults(user);
+    CURRENT_USER=user;
+    await loadProjectsFromServer();
+    onLoginSuccess(true);
+  } catch(err){
+    try{ localStorage.removeItem('onepws_token'); }catch(e){}
+    AUTH_TOKEN=null;
+    if(checkMsg) checkMsg.style.display='none';
+    if(formArea) formArea.style.display='block';
+  }
+}
+
+function onLoginSuccess(isRestore){
   document.body.classList.remove('app-locked');
   const errEl=document.getElementById('loginError'); if(errEl) errEl.style.display='none';
   const pw=document.getElementById('login_password'); if(pw) pw.value='';
@@ -3926,17 +3969,21 @@ function onLoginSuccess(){
   // Land on the first module the user can actually view
   const firstAllowed = PERMISSION_MODULES.find(m=>canView(m.key, null));
   nav(firstAllowed?firstAllowed.key:'dashboard', null);
-  toast('Welcome, '+CURRENT_USER.fullName+'.','✓');
+  toast((isRestore?'Welcome back, ':'Welcome, ')+CURRENT_USER.fullName+'.','✓');
 }
 
 function logout(){
   if(!confirm('Log out of ONEPWS Production Portal?')) return;
   CURRENT_USER=null;
   AUTH_TOKEN=null;
+  try{ localStorage.removeItem('onepws_token'); }catch(e){}
   document.body.classList.add('app-locked');
   const u=document.getElementById('login_username'); if(u) u.value='';
   const p=document.getElementById('login_password'); if(p) p.value='';
   const errEl=document.getElementById('loginError'); if(errEl) errEl.style.display='none';
+  // Next visit should see the login form immediately, not the "checking…" state
+  const checkMsg=document.getElementById('sessionCheckMsg'); if(checkMsg) checkMsg.style.display='none';
+  const formArea=document.getElementById('loginFormArea'); if(formArea) formArea.style.display='block';
 }
 
 function updateSidebarUserChip(){
@@ -13669,6 +13716,11 @@ window.addEventListener('DOMContentLoaded',()=>{
   DB.projects.forEach(p => rebuildProjectStages(p));
   // Re-run badge after backfill may have updated progress
   updatePendingBadge();
+
+  // Check for a saved login session (see restoreSession() for details) —
+  // this runs last so it can freely replace the placeholder DB.projects
+  // above with real data once a valid session is confirmed.
+  restoreSession();
 });
 </script>
 </body>

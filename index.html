@@ -809,6 +809,7 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
           <div class="text-xs text-muted" style="margin-top:2px">A project can contain independent Wood Production and/or Aluminium Extrusion segments under the same Project Reference</div>
         </div>
         <span class="badge badge-running" id="autoId">PRJ-0006</span>
+        <button class="btn btn-outline btn-sm" onclick="openBulkImportModal('projects')" style="margin-left:10px">&#128228; Bulk Import (CSV)</button>
       </div>
       <div class="card-body">
         <div class="section-title">Common Project Reference</div>
@@ -1613,6 +1614,7 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
     <button class="tab" data-module="maintenance" data-sub="pm" onclick="showMaintTab('pm',this)">🛡 Preventive Maintenance</button>
     <button class="tab" data-module="maintenance" data-sub="mttr" onclick="showMaintTab('mttr',this)">📊 MTTR / MTBF Dashboard</button>
     <button class="tab" data-module="maintenance" data-sub="toolinv" onclick="showMaintTab('toolinv',this)">🧰 Tool Inventory</button>
+    <button class="btn btn-outline btn-sm" style="margin:4px 0 4px auto" onclick="openBulkImportModal('breakdowns')">&#128228; Bulk Import (CSV)</button>
   </div>
 
   <!-- BREAKDOWN ENTRY TAB -->
@@ -1894,7 +1896,7 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
     <!-- TOOL MASTER & STOCK -->
     <div id="toolsub-master">
       <div class="card mb-4">
-        <div class="card-header"><div class="card-title">&#10133; Add New Tool to Inventory</div></div>
+        <div class="card-header"><div class="card-title">&#10133; Add New Tool to Inventory</div><button class="btn btn-outline btn-sm" onclick="openBulkImportModal('toolInventory')">&#128228; Bulk Import (CSV)</button></div>
         <div class="card-body">
           <div class="form-grid">
             <div class="form-row">
@@ -2066,6 +2068,7 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
         <input type="text" class="form-input" id="cal_schedule_search" placeholder="Search Tag No, Instrument, Owner..." style="width:220px;height:32px" oninput="renderCalibScheduleTable()">
         <select class="form-select" id="cal_filter_dept" style="height:32px" onchange="setCalibDeptFilter()"></select>
         <span class="text-xs text-muted" id="calibScheduleCount" style="margin-left:auto"></span>
+        <button class="btn btn-outline btn-sm" onclick="openBulkImportModal('calibration')">&#128228; Bulk Import (CSV)</button>
         <button class="btn btn-outline btn-sm" onclick="showCalibTab('history',document.querySelectorAll('#calibTabs .tab')[2])">📋 Completed History &rarr;</button>
       </div>
       <div class="table-wrap">
@@ -2472,6 +2475,7 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
     </div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <button class="btn btn-outline btn-sm" onclick="exportDCI()">📥 Export DCI</button>
+      <button class="btn btn-outline btn-sm" onclick="openBulkImportModal('dms')">&#128228; Bulk Import (CSV)</button>
       <button id="dmsUploadBtn" class="btn btn-primary btn-sm" onclick="openDmsUpload()">📤 Upload Document</button>
     </div>
   </div>
@@ -2963,6 +2967,28 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
   </div>
 </div>
 
+<!-- BULK CSV IMPORT MODAL (shared by Tool Inventory, Projects, Breakdowns, Calibration, DMS) -->
+<div class="modal-overlay" id="bulkImportModal">
+  <div class="modal" style="max-width:900px">
+    <div class="modal-header">
+      <div class="modal-title" id="bulkImportTitle">Bulk Import</div>
+      <button class="modal-close" onclick="closeMod('bulkImportModal')">×</button>
+    </div>
+    <div class="modal-body" style="max-height:72vh;overflow-y:auto">
+      <div class="alert alert-info" style="font-size:12px" id="bulkImportInstructions"></div>
+      <div style="display:flex;gap:10px;align-items:center;margin:14px 0;flex-wrap:wrap">
+        <button class="btn btn-outline btn-sm" onclick="downloadBulkImportTemplate()">⬇ Download Sample CSV Template</button>
+        <input type="file" id="bulkImportFile" accept=".csv" onchange="handleBulkImportFile(event)" style="flex:1;min-width:200px;height:34px;border:1.5px solid var(--border2);border-radius:7px;padding:0 8px;font-family:inherit;font-size:12.5px">
+      </div>
+      <div id="bulkImportPreview"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeMod('bulkImportModal')">Close</button>
+      <button class="btn btn-primary" id="bulkImportConfirmBtn" style="display:none" onclick="confirmBulkImport()">✓ Import Valid Records</button>
+    </div>
+  </div>
+</div>
+
 <!-- USER FORM MODAL (Add/Edit User) -->
 <div class="modal-overlay" id="userFormModal">
   <div class="modal modal-sm">
@@ -3217,60 +3243,11 @@ const DB = {
     {id:'U004', username:'maint.admin', password:'maint123', fullName:'Vikram Singh',  role:'admin',      department:'Maintenance',active:true, permissions:null, createdAt:'2026-01-05', lastLogin:null},
     {id:'U005', username:'viewer',      password:'view123',  fullName:'Guest Viewer',  role:'viewer',     department:null,         active:true, permissions:null, createdAt:'2026-01-10', lastLogin:null}
   ],
-
-  projects:[
-    {id:'PRJ-0001',sap:'CD-25-26-10175',type:'CD',cat:'Cat 2',customer:'HINDUSTHAN EQUIPMENT PVT LTD',pm:'SHYAM',eng:'RAJU',po:'1150002034',
-     recExt:'2026-02-20',planExt:'2026-02-27',actExt:'2026-02-23',dlyExt:-4,
-     recWood:'2026-02-20',planWood:'2026-03-20',actWood:'2026-04-01',dlyWood:12,
-     extSt:'Complete',woodSt:'complete',hasExt:true,hasWood:true,progress:100,dlyReason:'',remarks:'',
-     bom:[{item:'Table Top',l:1200,w:900,t:25,uom:'PC',qty:1,done:1},{item:'Shutter',l:540,w:586,t:18,uom:'PC',qty:2,done:2}],
-     stages:[{n:'File Received',s:'done',d:'2026-02-20',u:'SHYAM'},{n:'Extrusion Cutting',s:'done',d:'2026-02-23',u:'RAJU'},{n:'Hole Drilling',s:'done',d:'2026-02-23',u:'Deepak'},{n:'QC Check',s:'done',d:'2026-02-24',u:'QC'},{n:'Wood Production',s:'done',d:'2026-04-01',u:'Wood'},{n:'Assembly',s:'done',d:'2026-04-05',u:'Assembly'},{n:'Dispatch',s:'done',d:'2026-04-05',u:'Stores'}],
-     docs:['Drawing_CD10175.pdf','BOM_CD10175.xlsx'],history:[{ts:'2026-04-01 09:15',u:'SHYAM',act:'Status updated',f:'woodSt',old:'Running',nw:'complete'}]},
-    {id:'PRJ-0002',sap:'CD-25-26-10170',type:'CD',cat:'Cat 1',customer:'FLS SMIDTH',pm:'MANVEER',eng:'RAJU',po:'1150002030',
-     recExt:'2026-02-20',planExt:'2026-02-27',actExt:'2026-03-16',dlyExt:-3,
-     recWood:'2026-02-20',planWood:'2026-03-06',actWood:'2026-04-01',dlyWood:26,
-     extSt:'Complete',woodSt:'complete',hasExt:true,hasWood:true,progress:100,dlyReason:'Material Shortage',remarks:'40x54 received on 12-3-26',
-     bom:[{item:'Table Top',l:1200,w:900,t:25,uom:'PC',qty:5,done:5},{item:'Shutter',l:540,w:586,t:18,uom:'PC',qty:2,done:2}],
-     stages:[{n:'File Received',s:'done',d:'2026-02-20',u:'MANVEER'},{n:'Extrusion Cutting',s:'done',d:'2026-03-16',u:'RAJU'},{n:'Hole Drilling',s:'done',d:'2026-03-17',u:'bipesh'},{n:'QC Check',s:'done',d:'2026-03-19',u:'QC'},{n:'Wood Production',s:'done',d:'2026-04-01',u:'Wood'},{n:'Dispatch',s:'done',d:'2026-04-08',u:'Stores'}],
-     docs:['Drawing_CD10170.pdf'],history:[{ts:'2026-03-12 11:00',u:'MANVEER',act:'Remark added',f:'remarks',old:'',nw:'40x54 received on 12-3-26'}]},
-    {id:'PRJ-0003',sap:'CR-25-26-40038',type:'CR',cat:'Cat 3',customer:'JPPL PRADIP PET BATTEN',pm:'Harshit Kothari',eng:'Mohit',po:'',
-     recWood:'2026-04-03',planWood:'2026-05-15',actWood:'2026-04-24',dlyWood:-39,
-     extSt:'N/A',woodSt:'complete',hasExt:false,hasWood:true,progress:100,dlyReason:'',remarks:'Completed 39 days early',
-     bom:[{item:'Table Top',l:1200,w:900,t:25,uom:'PC',qty:5,done:5}],
-     stages:[{n:'File Received',s:'done',d:'2026-04-03',u:'Harshit Kothari'},{n:'Wood Production',s:'done',d:'2026-04-24',u:'Wood'},{n:'Assembly',s:'done',d:'2026-04-28',u:'Assembly'},{n:'Dispatch',s:'done',d:'2026-04-30',u:'Stores'}],
-     docs:[],history:[]},
-    {id:'PRJ-0004',sap:'CR-25-26-40039',type:'CR',cat:'Cat 3',customer:'PSIL SEOC EXT',pm:'Dipendra',eng:'KUSHAGRA',po:'1150002081',
-     recExt:'2026-04-02',planExt:'2026-04-09',actExt:'2026-04-09',dlyExt:0,
-     extSt:'COMPLETE',woodSt:'N/A',hasExt:true,hasWood:false,progress:100,dlyReason:'',remarks:'',
-     bom:[{item:'40x54 Profile',l:1500,w:0,t:0,uom:'PC',qty:8,done:8}],
-     stages:[{n:'File Received',s:'done',d:'2026-04-02',u:'Dipendra'},{n:'Extrusion Cutting',s:'done',d:'2026-04-09',u:'KUSHAGRA'},{n:'Hole Drilling',s:'done',d:'2026-04-11',u:'Bansi lal'},{n:'QC Check',s:'done',d:'2026-04-11',u:'QC'},{n:'Handover',s:'done',d:'2026-04-11',u:'Stores'}],
-     docs:[],history:[]},
-    {id:'PRJ-0005',sap:'RCD-26-27-10003',type:'R&D',cat:'R&D',customer:'IDEA CENTRE ATC EXT',pm:'MANIRAJ',eng:'VAIBHAV',po:'1150002105',
-     recExt:'2026-05-02',planExt:'2026-05-09',actExt:null,dlyExt:null,
-     recWood:'2026-05-02',planWood:'2026-05-27',actWood:null,dlyWood:null,
-     extSt:'Running',woodSt:'Running',hasExt:true,hasWood:true,progress:40,dlyReason:'',remarks:'',
-     bom:[{item:'Table Top',l:1200,w:900,t:18,uom:'PC',qty:1,done:0}],
-     stages:[{n:'File Received',s:'done',d:'2026-05-02',u:'MANIRAJ'},{n:'Extrusion Cutting',s:'active',d:null,u:''},{n:'Hole Drilling',s:'pending',d:null,u:''},{n:'QC Check',s:'pending',d:null,u:''},{n:'Wood Production',s:'pending',d:null,u:''},{n:'Assembly',s:'pending',d:null,u:''},{n:'Dispatch',s:'pending',d:null,u:''}],
-     docs:['RD_Brief_10003.pdf'],history:[{ts:'2026-05-02 08:45',u:'MANIRAJ',act:'Project created',f:'—',old:'',nw:'Running'}]}
-  ],
-  stageLog:[
-    {ts:'2026-05-29 09:00',proj:'RCD-26-27-10003',stage:'File Received',user:'MANIRAJ',remark:'Files received and reviewed'},
-    {ts:'2026-04-24 15:22',proj:'CR-25-26-40038',stage:'Wood Production',user:'Mohit',remark:'Completed ahead of schedule'},
-    {ts:'2026-04-11 17:00',proj:'CR-25-26-40039',stage:'QC Check',user:'KUSHAGRA',remark:'QC passed'}
-  ],
+  projects:[],
+  stageLog:[],
   rejectLog:[],
-  auditLog:[
-    {ts:'2026-05-29 09:00',user:'Admin',action:'Create',module:'Project',entity:'PRJ-0005',field:'—',old:'—',nw:'Project created',ip:'192.168.1.10'},
-    {ts:'2026-04-24 15:22',user:'Harshit Kothari',action:'Status Change',module:'Stage',entity:'CR-25-26-40038',field:'woodSt',old:'Running',nw:'complete',ip:'192.168.1.8'},
-    {ts:'2026-04-11 17:00',user:'KUSHAGRA',action:'Status Change',module:'Stage',entity:'CR-25-26-40039',field:'extSt',old:'Running',nw:'COMPLETE',ip:'192.168.1.9'},
-    {ts:'2026-04-01 09:15',user:'SHYAM',action:'Update',module:'Stage',entity:'CD-25-26-10175',field:'woodSt',old:'Running',nw:'complete',ip:'192.168.1.5'}
-  ],
-  notifications:[
-    {type:'danger',msg:'RCD-26-27-10003: Extrusion cutting overdue — 20+ days since file receipt',time:'1 hr ago'},
-    {type:'warn',msg:'CD-25-26-10170: Wood production delayed 26 days — Material Shortage',time:'2 days ago'},
-    {type:'success',msg:'CR-25-26-40038 completed 39 days ahead of schedule',time:'5 days ago'},
-    {type:'info',msg:'New project RCD-26-27-10003 created — workflow generated',time:'5 days ago'}
-  ],
+  auditLog:[],
+  notifications:[],
   dailyCap:{},
   dailyManpower:{},
   dailyCapSource:{},
@@ -3284,16 +3261,7 @@ const DB = {
   // Timeline Override Log — {id, projId, segment:'wood'|'ext'|'both', originalReceived, originalPlan,
   //   overrideReason, reasonCategory, revisedStartDate, revisedCompletion, delayDaysAdded,
   //   responsibilityCategory:'External'|'Client'|'Design'|'Internal', createdAt, createdBy, notes}
-  tatOverrideLog:[
-    {id:'TAT-0001',projId:'PRJ-0002',segment:'wood',
-     originalReceived:'2026-02-20',originalPlan:'2026-03-06',
-     overrideReason:'Raw material (40×54 profile) not received — supplier delay',
-     reasonCategory:'Material Not Available',
-     revisedStartDate:'2026-03-12',revisedCompletion:'2026-03-26',
-     delayDaysAdded:20,responsibilityCategory:'External',
-     createdAt:'2026-03-10 10:30',createdBy:'MANVEER',
-     notes:'Supplier confirmed material delivery on 12-Mar-26'}
-  ],
+  tatOverrideLog:[],
   // Optional manual monthly target override per workstation: key = wsId+'|'+'YYYY-MM' -> qty
   capacityTargetOverride:{},
 
@@ -3359,91 +3327,13 @@ const DB = {
   // {id, tagNo, name, make, range, leastCount, department, owner, frequencyMonths,
   //  lastCalDate, nextDueDate, agency, certNo, status:'Active'|'Retired', remarks,
   //  history:[{ts,calDate,dueDateAtEntry,certNo,resultStatus,remarks,agency,nextDueDate,documents:[],enteredBy}]}
-  calibrationInstruments:[
-    {id:'CAL-0001',tagNo:'PRD/SL-01',name:'Spirit Level 12"',make:'Stanley',range:'30 cm',leastCount:'1 mm',
-     department:'Production',owner:'Deepak',frequencyMonths:12,lastCalDate:'2025-07-23',nextDueDate:'2026-07-22',
-     agency:'AVI Calibration',certNo:'CC-4546',status:'Active',remarks:'',
-     history:[{ts:'2025-07-23 10:20',calDate:'2025-07-23',dueDateAtEntry:'2025-07-20',certNo:'CC-4546',resultStatus:'Accepted',remarks:'Routine calibration',agency:'AVI Calibration',nextDueDate:'2026-07-22',documents:['CC-4546_SpiritLevel.pdf'],enteredBy:'Admin User'}]},
-
-    {id:'CAL-0002',tagNo:'PRD/MT-3M-01',name:'Measuring Tape (3M)',make:'Stanley',range:'3 M',leastCount:'1 mm',
-     department:'Production',owner:'Durgesh',frequencyMonths:12,lastCalDate:'2025-09-09',nextDueDate:'2026-09-08',
-     agency:'WIKA Instruments',certNo:'CC-4504',status:'Active',remarks:'',
-     history:[{ts:'2025-09-09 09:00',calDate:'2025-09-09',dueDateAtEntry:'2025-09-08',certNo:'CC-4504',resultStatus:'Accepted',remarks:'',agency:'WIKA Instruments',nextDueDate:'2026-09-08',documents:['CC-4504_MeasuringTape.pdf'],enteredBy:'Admin User'}]},
-
-    {id:'CAL-0003',tagNo:'PRD/PVC-01',name:'Digital Vernier Caliper (300mm)',make:'Insize',range:'300 mm',leastCount:'0.01 mm',
-     department:'Production',owner:'Nand Lal',frequencyMonths:12,lastCalDate:'2026-04-14',nextDueDate:'2027-04-13',
-     agency:'WIKA Instruments',certNo:'CC-3672',status:'Active',remarks:'',
-     history:[{ts:'2026-04-14 11:40',calDate:'2026-04-14',dueDateAtEntry:'2026-04-13',certNo:'CC-3672',resultStatus:'Accepted',remarks:'',agency:'WIKA Instruments',nextDueDate:'2027-04-13',documents:['CC-3672_VernierCaliper.pdf'],enteredBy:'Admin User'}]},
-
-    {id:'CAL-0004',tagNo:'PRD/TG-02',name:'Thickness Gauge',make:'Mitutoyo',range:'0-25 mm',leastCount:'0.01 mm',
-     department:'Production',owner:'Nand Lal',frequencyMonths:6,lastCalDate:'2026-06-01',nextDueDate:'2026-12-01',
-     agency:'AVI Calibration',certNo:'CC-5011',status:'Active',remarks:'',
-     history:[{ts:'2026-06-01 10:00',calDate:'2026-06-01',dueDateAtEntry:'2026-06-05',certNo:'CC-5011',resultStatus:'Accepted',remarks:'',agency:'AVI Calibration',nextDueDate:'2026-12-01',documents:[],enteredBy:'Admin User'}]},
-
-    {id:'CAL-0005',tagNo:'QC/DVC-02',name:'Digital Vernier Caliper (300mm)',make:'Insize',range:'300 mm',leastCount:'0.01 mm',
-     department:'Quality',owner:'Priya Sharma',frequencyMonths:6,lastCalDate:'2026-01-05',nextDueDate:'2026-07-05',
-     agency:'NABL Metrology Lab',certNo:'CC-4890',status:'Active',remarks:'',
-     history:[
-       {ts:'2025-07-08 09:30',calDate:'2025-07-08',dueDateAtEntry:'2025-07-05',certNo:'CC-4212',resultStatus:'Accepted',remarks:'Completed 3 days late',agency:'NABL Metrology Lab',nextDueDate:'2026-01-05',documents:['CC-4212.pdf'],enteredBy:'Admin User'},
-       {ts:'2026-01-05 10:15',calDate:'2026-01-05',dueDateAtEntry:'2026-01-05',certNo:'CC-4890',resultStatus:'Accepted',remarks:'',agency:'NABL Metrology Lab',nextDueDate:'2026-07-05',documents:['CC-4890.pdf'],enteredBy:'Admin User'}
-     ]},
-
-    {id:'CAL-0006',tagNo:'QC/PHM-01',name:'pH Meter',make:'Hanna Instruments',range:'0-14 pH',leastCount:'0.01 pH',
-     department:'Quality',owner:'Priya Sharma',frequencyMonths:6,lastCalDate:'2025-12-20',nextDueDate:'2026-06-20',
-     agency:'AVI Calibration',certNo:'CC-4711',status:'Active',remarks:'Overdue — awaiting external lab slot',
-     history:[{ts:'2025-12-20 14:00',calDate:'2025-12-20',dueDateAtEntry:'2025-12-18',certNo:'CC-4711',resultStatus:'Accepted',remarks:'',agency:'AVI Calibration',nextDueDate:'2026-06-20',documents:['CC-4711.pdf'],enteredBy:'Admin User'}]},
-
-    {id:'CAL-0007',tagNo:'QC/WT-01',name:'Weighing Scale (Digital)',make:'Contech',range:'0-30 kg',leastCount:'1 g',
-     department:'Quality',owner:'Ramesh Iyer',frequencyMonths:12,lastCalDate:'2025-07-10',nextDueDate:'2026-07-10',
-     agency:'WIKA Instruments',certNo:'CC-4520',status:'Active',remarks:'',
-     history:[{ts:'2025-07-10 09:00',calDate:'2025-07-10',dueDateAtEntry:'2025-07-09',certNo:'CC-4520',resultStatus:'Accepted',remarks:'',agency:'WIKA Instruments',nextDueDate:'2026-07-10',documents:['CC-4520.pdf'],enteredBy:'Admin User'}]},
-
-    {id:'CAL-0008',tagNo:'MNT/TG-01',name:'Torque Wrench',make:'Tohnichi',range:'20-200 Nm',leastCount:'1 Nm',
-     department:'Maintenance',owner:'Vikram Singh',frequencyMonths:6,lastCalDate:'2026-01-10',nextDueDate:'2026-07-10',
-     agency:'AVI Calibration',certNo:'CC-4655',status:'Active',remarks:'',
-     history:[{ts:'2026-01-10 11:00',calDate:'2026-01-10',dueDateAtEntry:'2026-01-08',certNo:'CC-4655',resultStatus:'Accepted',remarks:'',agency:'AVI Calibration',nextDueDate:'2026-07-10',documents:['CC-4655.pdf'],enteredBy:'Admin User'}]},
-
-    {id:'CAL-0009',tagNo:'MNT/PG-01',name:'Pressure Gauge',make:'WIKA',range:'0-16 bar',leastCount:'0.1 bar',
-     department:'Maintenance',owner:'Vikram Singh',frequencyMonths:12,lastCalDate:'2025-07-25',nextDueDate:'2026-07-25',
-     agency:'WIKA Instruments',certNo:'CC-4560',status:'Active',remarks:'',
-     history:[{ts:'2025-07-25 10:30',calDate:'2025-07-25',dueDateAtEntry:'2025-07-24',certNo:'CC-4560',resultStatus:'Accepted',remarks:'',agency:'WIKA Instruments',nextDueDate:'2026-07-25',documents:['CC-4560.pdf'],enteredBy:'Admin User'}]},
-
-    {id:'CAL-0010',tagNo:'MNT/MM-01',name:'Digital Multimeter',make:'Fluke',range:'0-600 V',leastCount:'0.1 V',
-     department:'Maintenance',owner:'Suresh Kumar',frequencyMonths:12,lastCalDate:'2024-06-01',nextDueDate:'2025-06-01',
-     agency:'AVI Calibration',certNo:'CC-3890',status:'Active',remarks:'Long overdue — instrument flagged for repeated delay',
-     history:[
-       {ts:'2023-05-28 10:00',calDate:'2023-05-28',dueDateAtEntry:'2023-06-01',certNo:'CC-3210',resultStatus:'Accepted',remarks:'',agency:'AVI Calibration',nextDueDate:'2024-06-01',documents:['CC-3210.pdf'],enteredBy:'Admin User'},
-       {ts:'2024-06-15 09:45',calDate:'2024-06-15',dueDateAtEntry:'2024-06-01',certNo:'CC-3890',resultStatus:'Rejected',remarks:'Reading drift beyond tolerance — sent for repair, re-cal pending',agency:'AVI Calibration',nextDueDate:'2025-06-01',documents:['CC-3890_rejected.pdf'],enteredBy:'Admin User'}
-     ]},
-
-    {id:'CAL-0011',tagNo:'PRD/SL-02',name:'Spirit Level 24"',make:'Stanley',range:'60 cm',leastCount:'1 mm',
-     department:'Production',owner:'Deepak',frequencyMonths:12,lastCalDate:'2023-05-10',nextDueDate:'2024-05-09',
-     agency:'AVI Calibration',certNo:'CC-2210',status:'Retired',remarks:'Obsolete — pin damaged, withdrawn from service 14-Apr-2026',
-     history:[{ts:'2023-05-10 10:00',calDate:'2023-05-10',dueDateAtEntry:'2023-05-08',certNo:'CC-2210',resultStatus:'Accepted',remarks:'',agency:'AVI Calibration',nextDueDate:'2024-05-09',documents:[],enteredBy:'Admin User'}]}
-  ],
+  calibrationInstruments:[],
 
   // ------ MACHINE TOOL INVENTORY & TOOL LIFE MANAGEMENT ------
   // Master database of consumable/spare machine tools (Maintenance controls this).
   // {id, toolCode, name, category, compatibleMachine (workstation id), specification,
   //  qtyAvailable, minStock, supplier, purchaseDate, cost (per unit), status:'Active'|'Discontinued', remarks}
-  toolInventory:[
-    {id:'TL-0001',toolCode:'RT-12MM-01',name:'12mm Router Tool',category:'Router Tools',compatibleMachine:'cnc1',
-     specification:'12mm dia, 2-flute carbide',qtyAvailable:8,minStock:10,supplier:'ABC Tools Pvt Ltd',purchaseDate:'2026-01-15',cost:450,status:'Active',remarks:''},
-    {id:'TL-0002',toolCode:'DB-8MM-01',name:'8mm Drill Bit',category:'Drill Bits',compatibleMachine:'mb',
-     specification:'8mm HSS twist drill',qtyAvailable:25,minStock:15,supplier:'Bosch Tools',purchaseDate:'2026-02-10',cost:120,status:'Active',remarks:''},
-    {id:'TL-0003',toolCode:'CT-CNC-01',name:'CNC Cutting Tool 6mm',category:'CNC Cutting Tools',compatibleMachine:'cnc2',
-     specification:'6mm 2-flute end mill',qtyAvailable:12,minStock:8,supplier:'Sandvik',purchaseDate:'2026-01-20',cost:890,status:'Active',remarks:''},
-    {id:'TL-0004',toolCode:'SB-BEAM-01',name:'Beam Saw Blade 350mm',category:'Saw Blades',compatibleMachine:'bs1',
-     specification:'350mm TCT 96-tooth',qtyAvailable:4,minStock:5,supplier:'Leitz Tools',purchaseDate:'2025-11-05',cost:3200,status:'Active',remarks:''},
-    {id:'TL-0005',toolCode:'EBC-01',name:'Edge Banding Cutter',category:'Edge Banding Cutters',compatibleMachine:'eb1',
-     specification:'Standard trim cutter',qtyAvailable:18,minStock:10,supplier:'Homag Spares',purchaseDate:'2026-03-01',cost:650,status:'Active',remarks:''},
-    {id:'TL-0006',toolCode:'PSN-01',name:'PU Spray Nozzle',category:'PU Spray Nozzles',compatibleMachine:'pu',
-     specification:'1.8mm fan spray',qtyAvailable:30,minStock:20,supplier:'Graco India',purchaseDate:'2026-02-15',cost:85,status:'Active',remarks:''},
-    {id:'TL-0007',toolCode:'BW-01',name:'Buffing Wheel',category:'Buffing Wheels',compatibleMachine:'cl',
-     specification:'200mm cotton wheel',qtyAvailable:14,minStock:10,supplier:'3M India',purchaseDate:'2026-01-25',cost:210,status:'Active',remarks:''},
-    {id:'TL-0008',toolCode:'RT-10MM-01',name:'10mm Router Tool',category:'Router Tools',compatibleMachine:'cnc1',
-     specification:'10mm dia, 2-flute carbide',qtyAvailable:20,minStock:10,supplier:'ABC Tools Pvt Ltd',purchaseDate:'2026-04-01',cost:380,status:'Active',remarks:''}
-  ],
+  toolInventory:[],
 
   // Tool Issue Log — one record per issue transaction, doubling as the tool-life record
   // once the production operator marks it Discarded/Consumed.
@@ -3451,48 +3341,7 @@ const DB = {
   //  issueDate, issueLocation, status:'Active'|'Discarded',
   //  componentsProcessed, productionHoursUsed, discardDate, discardReason, totalUsageDays,
   //  enteredBy, ts}
-  toolIssueLog:[
-    {id:'TI-0001',toolId:'TL-0001',toolName:'12mm Router Tool',qtyIssued:8,machine:'cnc1',operator:'Vijay Yadav',
-     projectId:'PRJ-0003',projectSap:'CR-25-26-40038',issueDate:'2026-07-05',issueLocation:'Shop Floor - CNC Bay',status:'Active',
-     componentsProcessed:null,productionHoursUsed:null,discardDate:null,discardReason:'',totalUsageDays:null,
-     enteredBy:'Admin User',ts:'2026-07-05 09:20'},
-    {id:'TI-0002',toolId:'TL-0004',toolName:'Beam Saw Blade 350mm',qtyIssued:2,machine:'bs1',operator:'Suresh Singh',
-     projectId:'',projectSap:'',issueDate:'2026-06-20',issueLocation:'Shop Floor - Beam Saw Bay',status:'Active',
-     componentsProcessed:null,productionHoursUsed:null,discardDate:null,discardReason:'',totalUsageDays:null,
-     enteredBy:'Admin User',ts:'2026-06-20 10:05'},
-    {id:'TI-0003',toolId:'TL-0008',toolName:'10mm Router Tool',qtyIssued:1,machine:'cnc1',operator:'Pradeep Kumar',
-     projectId:'',projectSap:'',issueDate:'2026-04-01',issueLocation:'Shop Floor - CNC Bay',status:'Discarded',
-     componentsProcessed:3200,productionHoursUsed:410,discardDate:'2026-06-15',discardReason:'Worn Out',totalUsageDays:75,
-     enteredBy:'Admin User',ts:'2026-06-15 15:40'},
-    {id:'TI-0004',toolId:'TL-0003',toolName:'CNC Cutting Tool 6mm',qtyIssued:1,machine:'cnc2',operator:'Raju Patel',
-     projectId:'',projectSap:'',issueDate:'2026-03-10',issueLocation:'Shop Floor - CNC Bay',status:'Discarded',
-     componentsProcessed:1800,productionHoursUsed:290,discardDate:'2026-05-02',discardReason:'Broken / Damaged',totalUsageDays:53,
-     enteredBy:'Admin User',ts:'2026-05-02 11:15'},
-    {id:'TI-0005',toolId:'TL-0001',toolName:'12mm Router Tool',qtyIssued:1,machine:'cnc1',operator:'Vijay Yadav',
-     projectId:'',projectSap:'',issueDate:'2026-02-01',issueLocation:'Shop Floor - CNC Bay',status:'Discarded',
-     componentsProcessed:2600,productionHoursUsed:340,discardDate:'2026-03-20',discardReason:'Worn Out',totalUsageDays:47,
-     enteredBy:'Admin User',ts:'2026-03-20 14:00'},
-    {id:'TI-0006',toolId:'TL-0005',toolName:'Edge Banding Cutter',qtyIssued:1,machine:'eb1',operator:'Deepak Gupta',
-     projectId:'',projectSap:'',issueDate:'2026-01-15',issueLocation:'Shop Floor - Edge Bay',status:'Discarded',
-     componentsProcessed:5200,productionHoursUsed:520,discardDate:'2026-04-10',discardReason:'End of Life',totalUsageDays:85,
-     enteredBy:'Admin User',ts:'2026-04-10 09:50'},
-    {id:'TI-0007',toolId:'TL-0001',toolName:'12mm Router Tool',qtyIssued:1,machine:'cnc1',operator:'Pradeep Kumar',
-     projectId:'',projectSap:'',issueDate:'2026-05-01',issueLocation:'Shop Floor - CNC Bay',status:'Discarded',
-     componentsProcessed:900,productionHoursUsed:95,discardDate:'2026-05-25',discardReason:'Broken / Damaged',totalUsageDays:24,
-     enteredBy:'Admin User',ts:'2026-05-25 16:30'},
-    {id:'TI-0008',toolId:'TL-0002',toolName:'8mm Drill Bit',qtyIssued:1,machine:'mb',operator:'Sanjay Kumar',
-     projectId:'',projectSap:'',issueDate:'2026-06-01',issueLocation:'Shop Floor - Boring Bay',status:'Discarded',
-     componentsProcessed:1500,productionHoursUsed:180,discardDate:'2026-06-28',discardReason:'Worn Out',totalUsageDays:27,
-     enteredBy:'Admin User',ts:'2026-06-28 10:20'},
-    {id:'TI-0009',toolId:'TL-0006',toolName:'PU Spray Nozzle',qtyIssued:2,machine:'pu',operator:'Pradeep Tiwari',
-     projectId:'',projectSap:'',issueDate:'2026-07-01',issueLocation:'PU Booth',status:'Active',
-     componentsProcessed:null,productionHoursUsed:null,discardDate:null,discardReason:'',totalUsageDays:null,
-     enteredBy:'Admin User',ts:'2026-07-01 08:45'},
-    {id:'TI-0010',toolId:'TL-0007',toolName:'Buffing Wheel',qtyIssued:3,machine:'cl',operator:'Mohan Lal',
-     projectId:'',projectSap:'',issueDate:'2026-06-25',issueLocation:'Finishing Bay',status:'Active',
-     componentsProcessed:null,productionHoursUsed:null,discardDate:null,discardReason:'',totalUsageDays:null,
-     enteredBy:'Admin User',ts:'2026-06-25 13:10'}
-  ],
+  toolIssueLog:[],
 
   // ------ DOCUMENT MANAGEMENT SYSTEM ------
   // Each document = one master record with revisions[] array for version history
@@ -3501,103 +3350,7 @@ const DB = {
   //  firstIssueDate, auditRemarks, tags,
   //  revisions:[{revNo, revDate, revBy, approvedBy, changeSummary, fileRef, status, archivedAt}],
   //  accessLog:[{ts, user, action, ip}], createdAt, createdBy, updatedAt}
-  dmsDocuments:[
-    {id:'DOC-0001',docNo:'IMS-01-04-L4-01',name:'Document Revision Control Index',
-     dept:'Production',category:'Procedure',level:'L4',freq:'Real Time',status:'Active',
-     purpose:'Index for all controlled documents in the IMS system',
-     owner:'Quality / MR',prepBy:'Admin',approvedBy:'MR',
-     linkedDocs:'All',remarks:'',folderId:'quality-formats',
-     fileType:'xlsx',fileName:'DCI_FINAL.xlsx',fileSize:'245 KB',firstIssueDate:'2015-09-01',
-     tags:['DCI','Index','IMS','Audit'],
-     revisions:[
-       {revNo:'Rev 0',revDate:'2015-09-01',revBy:'Admin',approvedBy:'MR',changeSummary:'First Issue',fileRef:'DCI_Rev0.xlsx',status:'Archived',archivedAt:'2020-03-15'},
-       {revNo:'Rev 1',revDate:'2020-03-15',revBy:'SHYAM',approvedBy:'MR',changeSummary:'Changes in master copy, adding first issue final rev. Changed structure of DCI.',fileRef:'DCI_Rev1.xlsx',status:'Archived',archivedAt:'2026-03-15'},
-       {revNo:'Rev 2',revDate:'2026-03-15',revBy:'SHYAM',approvedBy:'MR',changeSummary:'Company name and logo changed. Migrated to ONEPWS format.',fileRef:'DCI_FINAL.xlsx',status:'Active',archivedAt:null}
-     ],
-     accessLog:[{ts:'2026-06-24 09:00',user:'Admin',action:'Upload',ip:'192.168.1.1'},{ts:'2026-06-20 14:30',user:'MANVEER',action:'Download',ip:'192.168.1.8'}],
-     createdAt:'2015-09-01',createdBy:'Admin',updatedAt:'2026-03-15'},
-    {id:'DOC-0002',docNo:'IMS-12-01-L4-01',name:'Production Objectives',
-     dept:'Production',category:'Quality Format',level:'L4',freq:'Monthly',status:'Active',
-     purpose:'Objectives for production — tracks achieved values on till-date basis',
-     owner:'Production Manager',prepBy:'SHYAM',approvedBy:'MR',
-     linkedDocs:'IMS-01-04-L4-01',remarks:'',folderId:'production-docs',
-     fileType:'xlsx',fileName:'Production_Objectives_Rev2.xlsx',fileSize:'128 KB',firstIssueDate:'2021-10-01',
-     tags:['Objectives','OTD','Capacity','Production'],
-     revisions:[
-       {revNo:'Rev 1',revDate:'2021-10-01',revBy:'SHYAM',approvedBy:'MR',changeSummary:'First issue. Annual basis tracking.',fileRef:'Prod_Obj_Rev1.xlsx',status:'Archived',archivedAt:'2026-02-10'},
-       {revNo:'Rev 2',revDate:'2026-02-10',revBy:'SHYAM',approvedBy:'MR',changeSummary:'Changed format to track Achieved value on till-date basis. Migrated to ONEPWS, updated logo and header.',fileRef:'Production_Objectives_Rev2.xlsx',status:'Active',archivedAt:null}
-     ],
-     accessLog:[{ts:'2026-06-01 10:00',user:'MANVEER',action:'Download',ip:'192.168.1.3'}],
-     createdAt:'2021-10-01',createdBy:'SHYAM',updatedAt:'2026-02-10'},
-    {id:'DOC-0003',docNo:'IMS-01-04-L4-05',name:'Risk Identification and Mitigation Plan',
-     dept:'Company Level',category:'Risk Assessment',level:'L4',freq:'Annual',status:'Active',
-     purpose:'Defined risks and mitigation strategy for all departments',
-     owner:'MR / Audit Team',prepBy:'Admin',approvedBy:'Director',
-     linkedDocs:'IMS-01-03-L4-02',remarks:'',folderId:'audit-docs',
-     fileType:'xlsx',fileName:'Risk_Mitigation_Rev4.xlsx',fileSize:'312 KB',firstIssueDate:'2015-09-01',
-     tags:['Risk','Mitigation','IMS','Audit','Annual'],
-     revisions:[
-       {revNo:'Rev 1',revDate:'2015-09-01',revBy:'Admin',approvedBy:'Director',changeSummary:'First Issue',fileRef:'Risk_Rev1.xlsx',status:'Archived',archivedAt:'2018-03-01'},
-       {revNo:'Rev 2',revDate:'2018-03-01',revBy:'Admin',approvedBy:'Director',changeSummary:'Updated risk categories',fileRef:'Risk_Rev2.xlsx',status:'Archived',archivedAt:'2021-06-01'},
-       {revNo:'Rev 3',revDate:'2021-06-01',revBy:'Admin',approvedBy:'Director',changeSummary:'Added new machinery risks',fileRef:'Risk_Rev3.xlsx',status:'Archived',archivedAt:'2026-05-20'},
-       {revNo:'Rev 4',revDate:'2026-05-20',revBy:'SHYAM',approvedBy:'Director',changeSummary:'Company name and logo changed. Baseline revision.',fileRef:'Risk_Mitigation_Rev4.xlsx',status:'Active',archivedAt:null}
-     ],
-     accessLog:[{ts:'2026-05-20 09:30',user:'Admin',action:'Upload',ip:'192.168.1.1'}],
-     createdAt:'2015-09-01',createdBy:'Admin',updatedAt:'2026-05-20'},
-    {id:'DOC-0004',docNo:'IMS-07-03-L4-26',name:'Dimensional Report',
-     dept:'Quality',category:'Quality Format',level:'L4',freq:'Half Yearly',status:'Active',
-     purpose:'Report for checking machine output against acceptance criteria, operator competency, and instrument accuracy',
-     owner:'QA Manager',prepBy:'QA Team',approvedBy:'QA Head',
-     linkedDocs:'',remarks:'',folderId:'quality-formats',
-     fileType:'xlsx',fileName:'Dimensional_Report_Rev2.xlsx',fileSize:'95 KB',firstIssueDate:'2016-03-01',
-     tags:['Dimensional','QC','Measurement','Instrument','Calibration'],
-     revisions:[
-       {revNo:'Rev 1',revDate:'2016-03-01',revBy:'QA Team',approvedBy:'QA Head',changeSummary:'First Issue',fileRef:'Dim_Report_Rev1.xlsx',status:'Archived',archivedAt:'2016-03-01'},
-       {revNo:'Rev 2',revDate:'2016-03-01',revBy:'QA Team',approvedBy:'QA Head',changeSummary:'Updated measurement criteria',fileRef:'Dimensional_Report_Rev2.xlsx',status:'Active',archivedAt:null}
-     ],
-     accessLog:[],createdAt:'2016-03-01',createdBy:'QA Team',updatedAt:'2016-03-01'},
-    {id:'DOC-0005',docNo:'IMS-07-03-06-14',name:'New Machine Qualification Format',
-     dept:'Maintenance',category:'Checklist',level:'L4',freq:'Real Time',status:'Active',
-     purpose:'Format for new machine qualification — validates machine meets operational requirements',
-     owner:'Maintenance Head',prepBy:'Maintenance Team',approvedBy:'Plant Head',
-     linkedDocs:'NA',remarks:'',folderId:'machine-manuals',
-     fileType:'xlsx',fileName:'Machine_Qualification_Rev4.xlsx',fileSize:'210 KB',firstIssueDate:'2017-09-01',
-     tags:['Machine','Qualification','Maintenance','Checklist','New Machine'],
-     revisions:[
-       {revNo:'Rev 1',revDate:'2017-09-01',revBy:'Maintenance',approvedBy:'Plant Head',changeSummary:'First Issue',fileRef:'MQ_Rev1.xlsx',status:'Archived',archivedAt:'2019-01-01'},
-       {revNo:'Rev 2',revDate:'2019-01-01',revBy:'Maintenance',approvedBy:'Plant Head',changeSummary:'Added parallel qualification',fileRef:'MQ_Rev2.xlsx',status:'Archived',archivedAt:'2022-06-01'},
-       {revNo:'Rev 3',revDate:'2022-06-01',revBy:'Maintenance',approvedBy:'Plant Head',changeSummary:'Changed to one-by-one qualification, added design/R&D approval',fileRef:'MQ_Rev3.xlsx',status:'Archived',archivedAt:'2026-03-15'},
-       {revNo:'Rev 4',revDate:'2026-03-15',revBy:'KUSHAGRA',approvedBy:'Plant Head',changeSummary:'Company name and logo changed. Added HSE team approval column.',fileRef:'Machine_Qualification_Rev4.xlsx',status:'Active',archivedAt:null}
-     ],
-     accessLog:[{ts:'2026-03-15 11:00',user:'KUSHAGRA',action:'Upload',ip:'192.168.1.9'}],
-     createdAt:'2017-09-01',createdBy:'Maintenance',updatedAt:'2026-03-15'},
-    {id:'DOC-0006',docNo:'IMS-01-03-L4-02',name:'Environment Aspect Impact Assessment',
-     dept:'HSE',category:'Risk Assessment',level:'L4',freq:'Annual',status:'Active',
-     purpose:'Assessment of machine and process impact on environment',
-     owner:'HSE / MR',prepBy:'HSE Team',approvedBy:'Director',
-     linkedDocs:'IMS-01-04-L4-05',remarks:'',folderId:'audit-docs',
-     fileType:'xlsx',fileName:'Environment_Aspect_Impact_Rev3.xlsx',fileSize:'178 KB',firstIssueDate:'2015-09-01',
-     tags:['Environment','HSE','Aspect','Impact','Annual','Audit'],
-     revisions:[
-       {revNo:'Rev 1',revDate:'2015-09-01',revBy:'HSE',approvedBy:'Director',changeSummary:'First Issue',fileRef:'EAI_Rev1.xlsx',status:'Archived',archivedAt:'2020-01-01'},
-       {revNo:'Rev 2',revDate:'2020-01-01',revBy:'HSE',approvedBy:'Director',changeSummary:'Updated environmental parameters',fileRef:'EAI_Rev2.xlsx',status:'Archived',archivedAt:'2026-04-17'},
-       {revNo:'Rev 3',revDate:'2026-04-17',revBy:'HSE Team',approvedBy:'Director',changeSummary:'Company name and logo changed. Baseline update.',fileRef:'Environment_Aspect_Impact_Rev3.xlsx',status:'Active',archivedAt:null}
-     ],
-     accessLog:[],createdAt:'2015-09-01',createdBy:'HSE Team',updatedAt:'2026-04-17'},
-    {id:'DOC-0007',docNo:'IMS-02-01-06-26',name:'Skill Matrix — Office & Production Operators',
-     dept:'HR',category:'Training Material',level:'L4',freq:'Annual',status:'Active',
-     purpose:'Operator and employee skill matrix defining competency levels',
-     owner:'HR Manager',prepBy:'HR Team',approvedBy:'Plant Head',
-     linkedDocs:'',remarks:'',folderId:'production-docs',
-     fileType:'xlsx',fileName:'Skill_Matrix_Rev3.xlsx',fileSize:'145 KB',firstIssueDate:'2021-06-01',
-     tags:['Skill','Matrix','HR','Training','Operator','Competency'],
-     revisions:[
-       {revNo:'Rev 1',revDate:'2021-06-01',revBy:'HR',approvedBy:'Plant Head',changeSummary:'First Issue',fileRef:'SM_Rev1.xlsx',status:'Archived',archivedAt:'2022-01-01'},
-       {revNo:'Rev 2',revDate:'2022-01-01',revBy:'HR',approvedBy:'Plant Head',changeSummary:'Added production operators',fileRef:'SM_Rev2.xlsx',status:'Archived',archivedAt:'2022-09-01'},
-       {revNo:'Rev 3',revDate:'2022-09-01',revBy:'HR',approvedBy:'Plant Head',changeSummary:'Updated competency criteria',fileRef:'Skill_Matrix_Rev3.xlsx',status:'Active',archivedAt:null}
-     ],
-     accessLog:[],createdAt:'2021-06-01',createdBy:'HR Team',updatedAt:'2022-09-01'}
-  ]
+  dmsDocuments:[]
 };
 
 let CUR_PROJ=null, charts={};
@@ -3743,6 +3496,585 @@ async function loadProjectsFromServer() {
     toast('Could not load saved projects from the server: ' + err.message, '⚠');
     DB.projects = []; // don't show stale demo data pretending to be real saved data
   }
+}
+
+// ============================================================================
+// ------ BULK IMPORT MODULE CONFIGURATIONS ------
+// ============================================================================
+// Each config's validateGroup/importRecord mirrors the exact validation and
+// creation logic of that module's existing single-entry "Add" function, so a
+// bulk-imported record is checked and stored identically to a manual one.
+
+const BULK_IMPORT_CONFIGS = {};
+
+// ------ 1. TOOL MASTER & STOCK ------
+BULK_IMPORT_CONFIGS.toolInventory = {
+  title: '📤 Bulk Import Tools (CSV)',
+  templateFilename: 'tool_inventory_template.csv',
+  instructions: 'Upload multiple tools at once. <b>Tool Code, Tool Name, Tool Category,</b> and <b>Compatible Machine</b> are mandatory. Tool Category must match: '+M.toolCategories.join(', ')+'. Compatible Machine must match an existing machine name exactly — see the sample template for the correct names.',
+  headers: ['Tool Code','Tool Name','Tool Category','Compatible Machine','Specification','Available Quantity','Minimum Stock Quantity','Supplier Name','Purchase Date (YYYY-MM-DD)','Tool Cost'],
+  sampleRows: [
+    ['RT-12MM-02','12mm Router Tool','Router Tools','CNC Router','12mm dia, carbide tip','16','10','ABC Tools Pvt Ltd','2026-01-15','450'],
+    ['DB-10MM-01','10mm Drill Bit','Drill Bits','Multi Boring (Woodtech)','10mm HSS twist drill','30','15','Bosch Tools','2026-02-01','130'],
+  ],
+  validateGroup(rows){
+    const raw = rows[0];
+    const errors = [];
+    const toolCode = (raw['Tool Code']||'').trim();
+    const name = (raw['Tool Name']||'').trim();
+    const category = (raw['Tool Category']||'').trim();
+    const machineName = (raw['Compatible Machine']||'').trim();
+    const qty = parseInt(raw['Available Quantity'])||0;
+    const minStock = parseInt(raw['Minimum Stock Quantity'])||0;
+    const supplier = (raw['Supplier Name']||'').trim();
+    const spec = (raw['Specification']||'').trim();
+    const purchaseDate = (raw['Purchase Date (YYYY-MM-DD)']||raw['Purchase Date']||'').trim();
+    const cost = parseFloat(raw['Tool Cost'])||0;
+
+    if(!toolCode) errors.push('Tool Code is required');
+    else if((DB.toolInventory||[]).some(t=>t.toolCode.toLowerCase()===toolCode.toLowerCase())) errors.push('Tool Code "'+toolCode+'" already exists');
+    if(!name) errors.push('Tool Name is required');
+    if(!category) errors.push('Tool Category is required');
+    else if(!M.toolCategories.includes(category)) errors.push('Tool Category "'+category+'" is not recognized');
+    let machineId = '';
+    if(!machineName) errors.push('Compatible Machine is required');
+    else {
+      const ws = M.workstations.find(w=>w.name.toLowerCase()===machineName.toLowerCase());
+      if(!ws) errors.push('Compatible Machine "'+machineName+'" was not found');
+      else machineId = ws.id;
+    }
+    if(errors.length) return {valid:false, errors};
+    return {valid:true, record:{toolCode,name,category,machineId,spec,qty,minStock,supplier,purchaseDate,cost}};
+  },
+  summaryOfRecord(rec){ return rec.toolCode+' — '+rec.name+' ('+rec.qty+' available)'; },
+  importRecord(rec){
+    const id='TL-'+String((DB.toolInventory||[]).length+1).padStart(4,'0');
+    const tool={id,toolCode:rec.toolCode,name:rec.name,category:rec.category,compatibleMachine:rec.machineId,
+      specification:rec.spec,qtyAvailable:rec.qty,minStock:rec.minStock,supplier:rec.supplier,
+      purchaseDate:rec.purchaseDate,cost:rec.cost,status:'Active',remarks:''};
+    DB.toolInventory.push(tool);
+    const ts=new Date().toISOString().replace('T',' ').slice(0,16);
+    DB.auditLog.unshift({ts,user:'Admin',action:'Create',module:'Tool Inventory',entity:rec.toolCode,field:'tool',old:'--',nw:'Bulk imported — '+rec.qty+' pcs @ min '+rec.minStock,ip:'192.168.1.1'});
+  },
+  afterImport(){
+    fillToolSelects(); renderToolMasterTable(); renderToolLowStockAlerts(); updateMaintBadge();
+  }
+};
+
+// ------ 2. NEW PROJECT ENTRY ------
+BULK_IMPORT_CONFIGS.projects = {
+  title: '📤 Bulk Import Projects (CSV)',
+  templateFilename: 'project_import_template.csv',
+  instructions: 'Upload multiple projects (and their components) at once. To add <b>multiple components to the same project</b>, repeat the same Project SAP No on multiple rows — the project-level fields only need to be filled on any one of those rows. Product Type, Project Category, Project Manager, Engineer, and Component Name must match values already configured in Admin Panel.',
+  headers: ['Project SAP No','Product Type','Project Category','Customer','PO Number','Project Manager','Engineer','Manufacturing Segment (Wood/Extrusion)','Component Name','Length (mm)','Width (mm)','Thickness (mm)','UOM','Quantity','Color / Finish','Certifications (semicolon separated)'],
+  sampleRows: [
+    ['CD-26-27-10200','CD','Cat 1','Acme Interiors','PO-88213','SHYAM','RAJU','Wood','Table Top','1200','900','25','PC','10','Matte White','ASTM;FSC Certified Product'],
+    ['CD-26-27-10200','CD','Cat 1','Acme Interiors','PO-88213','SHYAM','RAJU','Wood','Shutter','600','450','18','PC','20','Matte White',''],
+    ['CD-26-27-10201','CD','Cat 2','Beta Retail Fitouts','PO-88220','MANVEER','VAIBHAV','Extrusion','40x54 Profile','','','','KG','120','',''],
+  ],
+  groupRows(rawRows){
+    const groups = {}; const order = [];
+    rawRows.forEach((raw,i)=>{
+      const sap = (raw['Project SAP No']||'').trim();
+      const key = sap || ('__norow_'+i);
+      if(!groups[key]){ groups[key]=[]; order.push(key); }
+      groups[key].push(raw);
+    });
+    return order.map(key=>({rowLabel: key.startsWith('__norow_') ? 'Row (missing SAP No)' : key, rows: groups[key]}));
+  },
+  validateGroup(rows, rowLabel){
+    const errors = [];
+    const first = field => { for(const r of rows){ if((r[field]||'').trim()) return r[field].trim(); } return ''; };
+    const sap = first('Project SAP No');
+    const type = first('Product Type');
+    const cat = first('Project Category');
+    const customer = first('Customer');
+    const po = first('PO Number');
+    const pm = first('Project Manager');
+    const eng = first('Engineer');
+    const certificationsRaw = first('Certifications (semicolon separated)');
+    const certifications = certificationsRaw ? certificationsRaw.split(/[;,]/).map(c=>c.trim()).filter(Boolean) : [];
+
+    if(!sap) errors.push('Project SAP No is required');
+    else if(DB.projects.some(p=>p.sap.toLowerCase()===sap.toLowerCase())) errors.push('Project SAP No "'+sap+'" already exists');
+    if(!type) errors.push('Product Type is required');
+    else if(!M.productTypes.includes(type)) errors.push('Product Type "'+type+'" is not recognized');
+    if(!cat) errors.push('Project Category is required');
+    else if(!M.categories.includes(cat)) errors.push('Project Category "'+cat+'" is not recognized');
+    if(!customer) errors.push('Customer is required');
+    if(!pm) errors.push('Project Manager is required');
+    else if(!M.projectManagers.includes(pm)) errors.push('Project Manager "'+pm+'" is not recognized');
+    if(!eng) errors.push('Engineer is required');
+    else if(!M.engineers.includes(eng)) errors.push('Engineer "'+eng+'" is not recognized');
+    const invalidCerts = certifications.filter(c=>!M.certificationRequirements.includes(c));
+    if(invalidCerts.length) errors.push('Unrecognized certification(s): '+invalidCerts.join(', '));
+
+    const bom = [];
+    let hasWood=false, hasExt=false;
+    rows.forEach(r=>{
+      const segRaw = (r['Manufacturing Segment (Wood/Extrusion)']||'').trim().toLowerCase();
+      const item = (r['Component Name']||'').trim();
+      const qty = parseInt(r['Quantity'])||0;
+      if(!segRaw && !item && !qty) return; // row only repeats project-level fields — skip silently
+      if(!item){ errors.push('A component row for "'+sap+'" is missing Component Name'); return; }
+      if(!M.bomComponents.includes(item)){ errors.push('Component "'+item+'" is not recognized'); return; }
+      if(!qty || qty<=0){ errors.push('Component "'+item+'" has an invalid Quantity'); return; }
+      if(segRaw!=='wood' && segRaw!=='extrusion'){ errors.push('Component "'+item+'" has an invalid Manufacturing Segment (use Wood or Extrusion)'); return; }
+      const segKey = segRaw==='wood' ? 'wood' : 'ext';
+      if(segKey==='wood') hasWood=true; else hasExt=true;
+      bom.push({
+        item, seg:segKey,
+        l: parseFloat(r['Length (mm)'])||null, w: parseFloat(r['Width (mm)'])||null, t: parseFloat(r['Thickness (mm)'])||null,
+        uom: (r['UOM']||'PC').trim()||'PC', qty,
+        colorFinish: (r['Color / Finish']||'').trim(), specialChars: [],
+        componentsPerBoard: segKey==='wood' ? 8 : undefined,
+        route: (M.componentRouting[item]||[]).slice()
+      });
+    });
+    if(!bom.length && !errors.length) errors.push('At least one valid component row is required for this project');
+
+    if(errors.length) return {valid:false, errors};
+    return {valid:true, record:{sap,type,cat,customer,po,pm,eng,hasWood,hasExt,certifications,bom}};
+  },
+  summaryOfRecord(rec){ return rec.sap+' — '+rec.customer+' ('+rec.bom.length+' component'+(rec.bom.length===1?'':'s')+')'; },
+  async importRecord(rec){
+    // Mirrors saveProject(): persist to the real backend first, then build the
+    // local project object using the server-assigned IDs.
+    const today = new Date().toISOString().split('T')[0];
+    const serverResult = await apiCreateProject({
+      sap:rec.sap, type:rec.type, category:rec.cat, customer:rec.customer, pm:rec.pm, eng:rec.eng, po:rec.po||'',
+      hasWood:rec.hasWood, hasExt:rec.hasExt,
+      recWood: rec.hasWood?today:null, planWood:null,
+      recExt: rec.hasExt?today:null, planExt:null,
+      certifications: rec.certifications,
+      bom: rec.bom.map(b=>({item:b.item, seg:b.seg, l:b.l, w:b.w, t:b.t, uom:b.uom, qty:b.qty,
+        colorFinish:b.colorFinish, specialChars:b.specialChars, componentsPerBoard:b.componentsPerBoard, route:b.route}))
+    });
+    const nid = serverResult.projectId;
+    const ts=new Date().toISOString().replace('T',' ').slice(0,16);
+    const fullBom = rec.bom.map((b,i)=>{
+      const line = {item:b.item, l:b.l, w:b.w, t:b.t, uom:b.uom, qty:b.qty, done:0, seg:b.seg,
+        colorFinish:b.colorFinish, specialChars:b.specialChars, componentsPerBoard:b.componentsPerBoard,
+        lineId: serverResult.bomLineIds[i]};
+      ensureBomLineStructure(line);
+      return line;
+    });
+    const proj={
+      id:nid, sap:rec.sap, type:rec.type, cat:rec.cat, customer:rec.customer, pm:rec.pm, eng:rec.eng, po:rec.po||'',
+      hasWood:rec.hasWood, hasExt:rec.hasExt, wood:null, ext:null,
+      recWood:rec.hasWood?today:null, planWood:null, actWood:null, dlyWood:null, woodSt:rec.hasWood?'Running':'N/A',
+      recExt:rec.hasExt?today:null, planExt:null, actExt:null, dlyExt:null, extSt:rec.hasExt?'Running':'N/A',
+      progress:0, dlyReason:'', remarks:'',
+      stages:[], bom:fullBom, certifications:rec.certifications, docs:[],
+      history:[{ts,u:'Admin',act:'Project created (bulk import)',f:'segments',old:'',
+        nw:(rec.hasWood?'Wood':'')+(rec.hasWood&&rec.hasExt?' + ':'')+(rec.hasExt?'Extrusion':'')}]
+    };
+    DB.projects.push(proj);
+    rebuildProjectStages(proj);
+    DB.auditLog.unshift({ts,user:'Admin',action:'Create',module:'Project',entity:nid,field:'segments',old:'--',
+      nw:'Bulk imported — '+rec.sap,ip:'192.168.1.1'});
+  },
+  afterImport(){
+    renderTracker();
+  }
+};
+
+// ------ 3. MAINTENANCE — BREAKDOWN ENTRY ------
+BULK_IMPORT_CONFIGS.breakdowns = {
+  title: '📤 Bulk Import Breakdown Records (CSV)',
+  templateFilename: 'breakdown_import_template.csv',
+  instructions: 'Upload multiple breakdown records at once, across Production Machines, Utility Equipment, or Hand Machines. <b>Equipment Type</b> must be exactly "Production", "Utility", or "Hand Machine". <b>Technician Assigned</b> must match a technician configured in Admin Panel.',
+  headers: ['Equipment Type (Production/Utility/Hand Machine)','Equipment/Machine Name','Breakdown Category','Breakdown Date (YYYY-MM-DD)','Breakdown Start Time (HH:MM)','Problem Description','Priority Level (Low/Medium/High/Critical)','Technician Assigned','Repair Start Time (HH:MM)','Repair Completion Time (HH:MM)','Spare Parts Used','Corrective Action','Status After Repair (Running/Under Repair/Standby)','Restoration Confirmed (Yes/No)'],
+  sampleRows: [
+    ['Production','CNC Router','Mechanical Failure','2026-07-05','09:15','Spindle overheating during operation','High','Karan','09:30','11:00','Bearing set','Replaced spindle bearing and re-lubricated','Running','Yes'],
+    ['Utility','Air Compressor','Wear & Tear','2026-07-08','14:00','Pressure drop below threshold','Medium','Sandeep','14:20','15:10','Air filter','Cleaned and replaced air filter','Running','Yes'],
+  ],
+  validateGroup(rows){
+    const raw = rows[0];
+    const errors = [];
+    const typeRaw = (raw['Equipment Type (Production/Utility/Hand Machine)']||raw['Equipment Type']||'').trim().toLowerCase();
+    const segmentMap = {'production':'production','utility':'utility','hand machine':'handmachine','handmachine':'handmachine','hand':'handmachine'};
+    const segment = segmentMap[typeRaw];
+    const machineName = (raw['Equipment/Machine Name']||'').trim();
+    const category = (raw['Breakdown Category']||'').trim();
+    const date = (raw['Breakdown Date (YYYY-MM-DD)']||raw['Breakdown Date']||'').trim();
+    const startTime = (raw['Breakdown Start Time (HH:MM)']||raw['Breakdown Start Time']||'').trim();
+    const problem = (raw['Problem Description']||'').trim();
+    const priorityRaw = (raw['Priority Level (Low/Medium/High/Critical)']||raw['Priority Level']||'Medium').trim();
+    const priority = ['Low','Medium','High','Critical'].find(p=>p.toLowerCase()===priorityRaw.toLowerCase()) || 'Medium';
+    const techName = (raw['Technician Assigned']||'').trim();
+    const repairStart = (raw['Repair Start Time (HH:MM)']||raw['Repair Start Time']||'').trim();
+    const repairEnd = (raw['Repair Completion Time (HH:MM)']||raw['Repair Completion Time']||'').trim();
+    const spares = (raw['Spare Parts Used']||'').trim();
+    const action = (raw['Corrective Action']||'').trim();
+    const statusAfter = (raw['Status After Repair (Running/Under Repair/Standby)']||raw['Status After Repair']||'Running').trim();
+    const restoredRaw = (raw['Restoration Confirmed (Yes/No)']||raw['Restoration Confirmed']||'').trim().toLowerCase();
+    const restored = restoredRaw==='yes'||restoredRaw==='y'||restoredRaw==='true';
+
+    if(!segment) errors.push('Equipment Type must be Production, Utility, or Hand Machine');
+    let machineId = '';
+    if(!machineName) errors.push('Equipment/Machine Name is required');
+    else if(segment){
+      const cfg = BD_SEGMENTS[segment];
+      const eq = cfg.getEquipment().find(e=>e.name.toLowerCase()===machineName.toLowerCase());
+      if(!eq) errors.push('Equipment "'+machineName+'" was not found under '+cfg.label);
+      else machineId = eq.id;
+    }
+    if(!category) errors.push('Breakdown Category is required');
+    else if(!M.breakdownCategories.includes(category)) errors.push('Breakdown Category "'+category+'" is not recognized');
+    if(!date) errors.push('Breakdown Date is required');
+    else if(isNaN(Date.parse(date))) errors.push('Breakdown Date "'+date+'" is not a valid date');
+    if(!startTime) errors.push('Breakdown Start Time is required');
+    if(!problem) errors.push('Problem Description is required');
+    let techId = '';
+    if(!techName) errors.push('Technician Assigned is required');
+    else {
+      const tech = M.technicians.find(t=>t.name.toLowerCase()===techName.toLowerCase());
+      if(!tech) errors.push('Technician "'+techName+'" was not found');
+      else techId = tech.id;
+    }
+
+    if(errors.length) return {valid:false, errors};
+    return {valid:true, record:{segment,machineId,machineName,category,date,startTime,problem,priority,techId,techName,repairStart,repairEnd,spares,action,statusAfter,restored}};
+  },
+  summaryOfRecord(rec){ return rec.machineName+' — '+rec.category+' ('+rec.date+')'; },
+  importRecord(rec){
+    const cfg = BD_SEGMENTS[rec.segment];
+    const equipment = cfg.getById(rec.machineId);
+    const downtimeHours = computeBreakdownDowntime(rec.startTime, rec.repairEnd) || 0;
+    const ts = new Date().toISOString().replace('T',' ').slice(0,16);
+    const id = 'BD-'+Date.now()+'-'+Math.floor(Math.random()*1000);
+    const record = {
+      id, segment:rec.segment, machineId:rec.machineId, machineName:rec.machineName,
+      breakdownDate:rec.date, startTime:rec.startTime, problem:rec.problem, category:rec.category, priority:rec.priority,
+      technicianId:rec.techId, technicianName:rec.techName,
+      repairStart:rec.repairStart, repairEnd:rec.repairEnd, sparePartsUsed:rec.spares,
+      correctiveAction:rec.action, restorationConfirmed:rec.restored,
+      statusAfterRepair:rec.statusAfter, downtimeHours,
+      whyWhyId:null, createdAt:ts, createdBy:'Admin User'
+    };
+    DB.breakdownLog.unshift(record);
+    if(rec.segment==='production' && downtimeHours>0){
+      DB.downtimeLog.push({date:rec.date, wsId:rec.machineId, hours:downtimeHours, reason:'Breakdown — '+rec.category, remarks:rec.problem});
+    }
+    if(rec.segment==='production' && equipment) equipment.maintenanceStatus = rec.statusAfter;
+    if(downtimeHours > 2){
+      const wwId = 'WW-'+Date.now()+'-'+Math.floor(Math.random()*1000);
+      DB.whyWhyLog.unshift({
+        id:wwId, breakdownId:id, segment:rec.segment,
+        machineName:rec.machineName, breakdownDate:rec.date, downtimeHours,
+        why1:'', why2:'', why3:'', why4:'', why5:'', rootCause:'',
+        immediateAction:rec.action||'', preventiveAction:'', responsiblePerson:rec.techName||'',
+        targetDate:'', closureRemarks:'', status:'Open', createdAt:ts
+      });
+      record.whyWhyId = wwId;
+    }
+    DB.auditLog.unshift({ts,user:'Admin User',action:'Create',module:'Maintenance',
+      entity:rec.machineName, field:'Breakdown ['+cfg.label+'] (bulk import)',
+      old:'',nw:downtimeHours+'h — '+rec.category+' | Tech: '+rec.techName,ip:'192.168.1.1'});
+  },
+  afterImport(){
+    renderBreakdownLog(); renderWhyWhyLog(); renderMTTRDashboard(); renderMaintMachineStatus(); updateMaintBadge();
+  }
+};
+
+// ------ 4. CALIBRATION MANAGEMENT ------
+BULK_IMPORT_CONFIGS.calibration = {
+  title: '📤 Bulk Import Calibration Instruments (CSV)',
+  templateFilename: 'calibration_import_template.csv',
+  instructions: 'Upload multiple calibration instruments at once. <b>Tag Number, Instrument Name, Department, Owner,</b> and <b>Last Calibration Date</b> are mandatory. Department must match: '+M.calibrationDepartments.join(', ')+'. Next Due Date is calculated automatically from Last Calibration Date + Calibration Frequency — any value you put in that column is for your reference only and will be recalculated by the system.',
+  headers: ['Tag Number','Instrument Name','Make','Range','Least Count','Department','Owner','Calibration Frequency (Months)','Last Calibration Date (YYYY-MM-DD)','Calibration Agency','Certificate Number','Status (Active/Retired)'],
+  sampleRows: [
+    ['QC/PHM-02','pH Meter (Backup)','Hanna Instruments','0-14 pH','0.01 pH','Quality','Priya Sharma','6','2026-05-10','WIKA Instruments','CC-5521','Active'],
+    ['MNT/MM-02','Digital Multimeter (Spare)','Fluke','600V AC/DC','0.1','Maintenance','Vikram Singh','12','2026-02-20','AVI Calibration','CC-5488','Active'],
+  ],
+  validateGroup(rows){
+    const raw = rows[0];
+    const errors = [];
+    const tagNo = (raw['Tag Number']||'').trim();
+    const name = (raw['Instrument Name']||'').trim();
+    const make = (raw['Make']||'').trim();
+    const range = (raw['Range']||'').trim();
+    const leastCount = (raw['Least Count']||'').trim();
+    const dept = (raw['Department']||'').trim();
+    const owner = (raw['Owner']||'').trim();
+    const freq = parseInt(raw['Calibration Frequency (Months)']||raw['Calibration Frequency']) || 12;
+    const lastCal = (raw['Last Calibration Date (YYYY-MM-DD)']||raw['Last Calibration Date']||'').trim();
+    const agency = (raw['Calibration Agency']||'').trim();
+    const certNo = (raw['Certificate Number']||'').trim();
+    const statusRaw = (raw['Status (Active/Retired)']||raw['Status']||'Active').trim();
+    const status = ['Active','Retired'].find(s=>s.toLowerCase()===statusRaw.toLowerCase()) || 'Active';
+
+    if(!tagNo) errors.push('Tag Number is required');
+    else if((DB.calibrationInstruments||[]).some(i=>i.tagNo.toLowerCase()===tagNo.toLowerCase())) errors.push('Tag Number "'+tagNo+'" already exists');
+    if(!name) errors.push('Instrument Name is required');
+    if(!dept) errors.push('Department is required');
+    else if(!M.calibrationDepartments.includes(dept)) errors.push('Department "'+dept+'" is not recognized');
+    if(!owner) errors.push('Owner is required');
+    if(!lastCal) errors.push('Last Calibration Date is required');
+    else if(isNaN(Date.parse(lastCal))) errors.push('Last Calibration Date "'+lastCal+'" is not a valid date');
+
+    if(errors.length) return {valid:false, errors};
+    return {valid:true, record:{tagNo,name,make,range,leastCount,dept,owner,freq,lastCal,agency,certNo,status}};
+  },
+  summaryOfRecord(rec){ return rec.tagNo+' — '+rec.name; },
+  importRecord(rec){
+    const nextDueDate = calibNextDueDate(rec.lastCal, rec.freq);
+    const id='CAL-'+String((DB.calibrationInstruments||[]).length+1).padStart(4,'0');
+    const ts=new Date().toISOString().replace('T',' ').slice(0,16);
+    const inst={id,tagNo:rec.tagNo,name:rec.name,make:rec.make,range:rec.range,leastCount:rec.leastCount,
+      department:rec.dept,owner:rec.owner,frequencyMonths:rec.freq,lastCalDate:rec.lastCal,nextDueDate,
+      agency:rec.agency,certNo:rec.certNo,status:rec.status,remarks:'',
+      history:[{ts,calDate:rec.lastCal,dueDateAtEntry:rec.lastCal,certNo:rec.certNo,resultStatus:'Accepted',
+        remarks:'Instrument added to calibration control (bulk import)',agency:rec.agency,nextDueDate,documents:[],enteredBy:'Admin User'}]};
+    DB.calibrationInstruments.push(inst);
+    DB.auditLog.unshift({ts,user:'Admin',action:'Create',module:'Calibration',entity:rec.tagNo,field:'instrument',old:'--',nw:'Bulk imported — next due '+nextDueDate,ip:'192.168.1.1'});
+  },
+  afterImport(){
+    fillCalibSelects(); updateCalibBadge(); renderCalibSchedule();
+  }
+};
+
+// ------ 5. DOCUMENT LIBRARY ------
+BULK_IMPORT_CONFIGS.dms = {
+  title: '📤 Bulk Import Document Metadata (CSV)',
+  templateFilename: 'document_library_import_template.csv',
+  instructions: 'Upload multiple document records at once (<b>metadata only</b> — this does not attach files; use "Upload Document" afterward for the actual file if needed, exactly as before). Department, Category, Document Level, Revision Number, Revision Date, Prepared By, and Approved By are mandatory. Department must match: '+M.dmsDepts.map(d=>d.name).join(', ')+'.',
+  headers: ['Document Number','Document Name','Department','Category','Document Level (L1/L2/L3/L4)','Review Frequency','Status (Active/Draft/Under Review/Obsolete)','Revision Number','Revision Date (YYYY-MM-DD)','First Issue Date (YYYY-MM-DD)','Purpose','Prepared By','Approved By','Owner','Linked Documents','Keywords / Tags (semicolon separated)','Remarks'],
+  sampleRows: [
+    ['IMS-05-02-L3-01','Beam Saw Operating Procedure','Production','Work Instruction','L3','Annual','Active','Rev 0','2026-05-01','2026-05-01','Standard operating steps for the beam saw','Admin','Quality Manager','Production Head','','SOP;Beam Saw',''],
+    ['IMS-09-01-L4-02','Incoming Material Inspection Format','Quality','Quality Format','L4','Real Time','Active','Rev 0','2026-04-15','2026-04-15','Format for recording incoming material inspection','Admin','Quality Manager','QC Lead','','Inspection;Format',''],
+  ],
+  validateGroup(rows){
+    const raw = rows[0];
+    const errors = [];
+    const docNo = (raw['Document Number']||'').trim();
+    const name = (raw['Document Name']||'').trim();
+    const deptName = (raw['Department']||'').trim();
+    const category = (raw['Category']||'').trim();
+    const levelRaw = (raw['Document Level (L1/L2/L3/L4)']||raw['Document Level']||'').trim().toUpperCase();
+    const level = ['L1','L2','L3','L4'].includes(levelRaw) ? levelRaw : '';
+    const freq = (raw['Review Frequency']||'NA').trim();
+    const statusRaw = (raw['Status (Active/Draft/Under Review/Obsolete)']||raw['Status']||'Active').trim();
+    const status = ['Active','Draft','Under Review','Obsolete'].find(s=>s.toLowerCase()===statusRaw.toLowerCase()) || 'Active';
+    const revNo = (raw['Revision Number']||'').trim();
+    const revDate = (raw['Revision Date (YYYY-MM-DD)']||raw['Revision Date']||'').trim();
+    const issueDate = (raw['First Issue Date (YYYY-MM-DD)']||raw['First Issue Date']||'').trim() || revDate;
+    const purpose = (raw['Purpose']||'').trim();
+    const prepBy = (raw['Prepared By']||'').trim();
+    const approvedBy = (raw['Approved By']||'').trim();
+    const owner = (raw['Owner']||'').trim();
+    const linked = (raw['Linked Documents']||'').trim();
+    const tagsRaw = (raw['Keywords / Tags (semicolon separated)']||raw['Keywords / Tags']||'').trim();
+    const tags = tagsRaw ? tagsRaw.split(/[;,]/).map(t=>t.trim()).filter(Boolean) : [];
+    const remarks = (raw['Remarks']||'').trim();
+
+    if(!name) errors.push('Document Name is required');
+    if(docNo && (DB.dmsDocuments||[]).some(d=>(d.docNo||'').toLowerCase()===docNo.toLowerCase())) errors.push('Document Number "'+docNo+'" already exists');
+    let deptFolder = null;
+    if(!deptName) errors.push('Department is required');
+    else {
+      deptFolder = M.dmsDepts.find(d=>d.name.toLowerCase()===deptName.toLowerCase());
+      if(!deptFolder) errors.push('Department "'+deptName+'" is not recognized');
+    }
+    if(!category) errors.push('Category is required');
+    if(!level) errors.push('Document Level must be L1, L2, L3, or L4');
+    if(!revNo) errors.push('Revision Number is required');
+    if(!revDate) errors.push('Revision Date is required');
+    else if(isNaN(Date.parse(revDate))) errors.push('Revision Date "'+revDate+'" is not a valid date');
+    if(!prepBy) errors.push('Prepared By is required');
+    if(!approvedBy) errors.push('Approved By is required');
+
+    if(errors.length) return {valid:false, errors};
+    return {valid:true, record:{docNo,name,deptName,folderId:deptFolder?deptFolder.id:'',category,level,freq,status,revNo,revDate,issueDate,purpose,prepBy,approvedBy,owner,linked,tags,remarks}};
+  },
+  summaryOfRecord(rec){ return (rec.docNo?rec.docNo+' — ':'')+rec.name; },
+  importRecord(rec){
+    const id='DOC-'+String(DB.dmsDocuments.length+1).padStart(4,'0');
+    const ts=new Date().toISOString().replace('T',' ').slice(0,16);
+    const newDoc={
+      id, docNo:rec.docNo, name:rec.name, dept:rec.deptName, category:rec.category, level:rec.level,
+      freq:rec.freq, status:rec.status, purpose:rec.purpose,
+      owner:rec.owner, prepBy:rec.prepBy, approvedBy:rec.approvedBy, linkedDocs:rec.linked,
+      remarks:'', auditRemarks:rec.remarks,
+      folderId:rec.folderId,
+      fileType:'', fileName:'', fileSize:'', firstIssueDate:rec.issueDate,
+      tags: rec.tags.length ? rec.tags : [rec.deptName, rec.category, rec.level].filter(Boolean),
+      revisions:[{revNo:rec.revNo,revDate:rec.revDate,revBy:rec.prepBy,approvedBy:rec.approvedBy,changeSummary:'First Issue (bulk import)',fileRef:'',status:'Active',archivedAt:null}],
+      accessLog:[{ts,user:'Admin User',action:'Bulk Import',ip:'192.168.1.1'}],
+      createdAt:ts,createdBy:'Admin User',updatedAt:ts
+    };
+    DB.dmsDocuments.push(newDoc);
+    DB.auditLog.unshift({ts,user:'Admin User',action:'Create',module:'DMS',entity:rec.docNo||id,
+      field:'Document',old:'',nw:rec.name+' | '+rec.category+' | '+rec.level+' (bulk import)',ip:'192.168.1.1'});
+  },
+  afterImport(){
+    renderDmsFolderTree(); renderDmsList(); renderDmsKPIs();
+  }
+};
+
+// ============================================================================
+// ------ BULK CSV IMPORT ENGINE (shared by Tool Inventory, Projects, ------
+// ------ Maintenance Breakdowns, Calibration, and Document Library)   ------
+// ============================================================================
+// One generic engine + modal, configured per-module via BULK_IMPORT_CONFIGS.
+// Each module supplies: its column headers + sample rows (for the downloadable
+// template), a per-row validator that checks mandatory fields and produces a
+// ready-to-save record, and an importer that actually saves that record using
+// the exact same code path the module's own "Add" form already uses — so
+// bulk-imported data is validated and stored identically to a manual entry.
+
+// ---- CSV parsing (handles quoted fields, embedded commas/quotes/newlines) ----
+function parseCSVText(text){
+  const rows = [];
+  let row = [], field = '', inQuotes = false;
+  text = String(text||'').replace(/\r\n/g,'\n').replace(/\r/g,'\n');
+  for(let i=0;i<text.length;i++){
+    const c = text[i];
+    if(inQuotes){
+      if(c === '"'){
+        if(text[i+1] === '"'){ field+='"'; i++; }
+        else inQuotes = false;
+      } else field += c;
+    } else {
+      if(c === '"') inQuotes = true;
+      else if(c === ','){ row.push(field); field=''; }
+      else if(c === '\n'){ row.push(field); rows.push(row); row=[]; field=''; }
+      else field += c;
+    }
+  }
+  if(field.length || row.length){ row.push(field); rows.push(row); }
+  return rows.filter(r => !(r.length===1 && r[0].trim()===''));
+}
+
+function csvToObjects(text){
+  const rows = parseCSVText(text);
+  if(!rows.length) return [];
+  const headers = rows[0].map(h=>h.trim());
+  return rows.slice(1).map(r=>{
+    const obj = {};
+    headers.forEach((h,i)=>{ obj[h] = (r[i]!==undefined ? String(r[i]).trim() : ''); });
+    return obj;
+  });
+}
+
+function downloadCSVFile(filename, headerRow, sampleRows){
+  const esc = v => { v = String(v==null?'':v); return /[",\n]/.test(v) ? '"'+v.replace(/"/g,'""')+'"' : v; };
+  const lines = [headerRow.map(esc).join(',')].concat((sampleRows||[]).map(r=>r.map(esc).join(',')));
+  const blob = new Blob([lines.join('\n')], {type:'text/csv;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+}
+
+// ---- Generic modal state/flow ----
+let _bulkImportCtx = null;
+let _bulkImportParsedRows = [];
+
+function openBulkImportModal(moduleKey){
+  _bulkImportCtx = BULK_IMPORT_CONFIGS[moduleKey];
+  if(!_bulkImportCtx) return;
+  document.getElementById('bulkImportTitle').textContent = _bulkImportCtx.title;
+  document.getElementById('bulkImportInstructions').innerHTML = _bulkImportCtx.instructions;
+  const fileInput = document.getElementById('bulkImportFile');
+  if(fileInput) fileInput.value = '';
+  document.getElementById('bulkImportPreview').innerHTML = '';
+  document.getElementById('bulkImportConfirmBtn').style.display = 'none';
+  _bulkImportParsedRows = [];
+  document.getElementById('bulkImportModal').classList.add('open');
+}
+
+function downloadBulkImportTemplate(){
+  if(!_bulkImportCtx) return;
+  downloadCSVFile(_bulkImportCtx.templateFilename, _bulkImportCtx.headers, _bulkImportCtx.sampleRows);
+}
+
+function handleBulkImportFile(evt){
+  const file = evt.target.files[0];
+  if(!file || !_bulkImportCtx) return;
+  const reader = new FileReader();
+  reader.onload = function(e){
+    const text = e.target.result;
+    const rawRows = csvToObjects(text);
+    if(!rawRows.length){
+      document.getElementById('bulkImportPreview').innerHTML = '<div class="alert alert-danger" style="margin-top:10px">No data rows found in this file. Make sure the first row is the header row and there is at least one data row below it.</div>';
+      document.getElementById('bulkImportConfirmBtn').style.display='none';
+      return;
+    }
+    // Grouping hook (used by Project import, where multiple CSV rows can
+    // belong to the same project) — modules that don't need it just return
+    // the rows unchanged, one CSV row = one record.
+    const groups = _bulkImportCtx.groupRows ? _bulkImportCtx.groupRows(rawRows) : rawRows.map((raw,i)=>({rowLabel:'Row '+(i+2), rows:[raw]}));
+    _bulkImportParsedRows = groups.map(g=>{
+      const result = _bulkImportCtx.validateGroup(g.rows, g.rowLabel);
+      return {rowLabel:g.rowLabel, valid:result.valid, errors:result.errors||[], record:result.record};
+    });
+    renderBulkImportPreview();
+  };
+  reader.readAsText(file);
+}
+
+function renderBulkImportPreview(){
+  const validCount = _bulkImportParsedRows.filter(r=>r.valid).length;
+  const invalidCount = _bulkImportParsedRows.length - validCount;
+  let html = '<div style="display:flex;gap:10px;margin:14px 0">'
+    +'<div class="kpi-card blue" style="flex:1;padding:10px"><div class="kpi-label" style="font-size:10px">Total Records</div><div class="kpi-value" style="font-size:20px">'+_bulkImportParsedRows.length+'</div></div>'
+    +'<div class="kpi-card green" style="flex:1;padding:10px"><div class="kpi-label" style="font-size:10px">Valid — Ready to Import</div><div class="kpi-value" style="font-size:20px">'+validCount+'</div></div>'
+    +'<div class="kpi-card red" style="flex:1;padding:10px"><div class="kpi-label" style="font-size:10px">Invalid — Will Be Skipped</div><div class="kpi-value" style="font-size:20px">'+invalidCount+'</div></div>'
+    +'</div>';
+  html += '<div class="table-wrap" style="max-height:280px;overflow-y:auto"><table style="font-size:11.5px"><thead><tr><th style="width:90px">Record</th><th style="width:80px">Status</th><th>Details</th></tr></thead><tbody>';
+  _bulkImportParsedRows.forEach(r=>{
+    html += '<tr><td>'+r.rowLabel+'</td>'
+      + (r.valid
+          ? '<td><span class="badge badge-complete">Valid</span></td><td class="text-xs text-muted">'+(_bulkImportCtx.summaryOfRecord?_bulkImportCtx.summaryOfRecord(r.record):'')+'</td>'
+          : '<td><span class="badge badge-delayed">Invalid</span></td><td class="text-xs text-danger">'+r.errors.map(e=>e.replace(/</g,'&lt;')).join('; ')+'</td>')
+      + '</tr>';
+  });
+  html += '</tbody></table></div>';
+  document.getElementById('bulkImportPreview').innerHTML = html;
+  document.getElementById('bulkImportConfirmBtn').style.display = validCount>0 ? 'inline-flex' : 'none';
+}
+
+async function confirmBulkImport(){
+  const btn = document.getElementById('bulkImportConfirmBtn');
+  const validRows = _bulkImportParsedRows.filter(r=>r.valid);
+  if(!validRows.length || !_bulkImportCtx) return;
+  const originalText = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Importing…';
+
+  let success = 0;
+  const failures = [];
+  for(const r of validRows){
+    try{
+      await _bulkImportCtx.importRecord(r.record);
+      success++;
+    } catch(err){
+      failures.push({label:r.rowLabel, reason: (err && err.message) || 'Import failed'});
+    }
+  }
+  btn.disabled = false; btn.textContent = originalText;
+
+  const invalidRows = _bulkImportParsedRows.filter(r=>!r.valid);
+  const totalFailed = failures.length + invalidRows.length;
+
+  let summaryHtml = '<div class="alert alert-'+(totalFailed?'warning':'success')+'" style="margin-top:12px">'
+    +'<b>Import Summary</b><br>'
+    +'Total Records: <b>'+_bulkImportParsedRows.length+'</b> &nbsp;·&nbsp; '
+    +'Successfully Imported: <b style="color:var(--green)">'+success+'</b> &nbsp;·&nbsp; '
+    +'Failed: <b style="color:var(--red)">'+totalFailed+'</b>'
+    +'</div>';
+  if(totalFailed){
+    summaryHtml += '<div class="table-wrap" style="max-height:220px;overflow-y:auto"><table style="font-size:11.5px"><thead><tr><th style="width:90px">Record</th><th>Reason</th></tr></thead><tbody>'
+      + invalidRows.map(r=>'<tr><td>'+r.rowLabel+'</td><td class="text-danger text-xs">'+r.errors.map(e=>e.replace(/</g,'&lt;')).join('; ')+'</td></tr>').join('')
+      + failures.map(f=>'<tr><td>'+f.label+'</td><td class="text-danger text-xs">'+f.reason.replace(/</g,'&lt;')+'</td></tr>').join('')
+      + '</tbody></table></div>';
+  }
+  document.getElementById('bulkImportPreview').insertAdjacentHTML('beforeend', summaryHtml);
+  document.getElementById('bulkImportConfirmBtn').style.display = 'none';
+
+  if(_bulkImportCtx.afterImport) _bulkImportCtx.afterImport();
+  toast(success+' of '+_bulkImportParsedRows.length+' record(s) imported successfully.', success>0?'✓':'⚠');
 }
 
 // ------ NAVIGATION ------

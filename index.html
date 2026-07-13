@@ -1086,6 +1086,7 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
   <div id="drBar-capacity" class="date-range-bar"></div>
   <div class="tabs" id="capTabs">
     <button class="tab active" data-module="capacity" data-sub="daily" onclick="showCapTab('daily',this)">📊 Daily Capacity Entry</button>
+    <button class="tab" data-module="capacity" data-sub="summary" onclick="showCapTab('summary',this)">📅 Monthly Summary</button>
     <button class="tab" data-module="capacity" data-sub="machine" onclick="showCapTab('machine',this)">⚙️ Machine Utilization</button>
     <button class="tab" data-module="capacity" data-sub="oee" onclick="showCapTab('oee',this)">📈 Performance &amp; OEE</button>
     <button class="tab" data-module="capacity" data-sub="blocking" onclick="showCapTab('blocking',this)">🧱 Machine Blocking</button>
@@ -1129,6 +1130,52 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
       <div class="card"><div class="card-header"><div class="card-title">Production Efficiency Trend (7 Days)</div></div><div class="card-body"><div class="chart-wrap" style="height:240px"><canvas id="trendChart"></canvas></div></div></div>
     </div>
     <div class="card"><div class="card-header"><div class="card-title">⚠ Bottleneck & Overload Analysis</div></div><div class="card-body" id="btPanel"></div></div>
+  </div>
+
+  <!-- MONTHLY SUMMARY / HISTORICAL PRODUCTION RECORD TAB -->
+  <div id="cap-summary" style="display:none">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:10px">
+      <div>
+        <div style="font-family:'Space Grotesk',sans-serif;font-size:15px;font-weight:700">📅 Monthly & Historical Production Summary</div>
+        <div class="text-sm text-muted">Every day's achieved quantity, capacity, and helper count — whether entered manually or synced automatically from Stage Updates — is permanently recorded here and is never overwritten by later entries.</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <select class="fsel" id="capSummaryPeriodType" style="height:32px" onchange="renderCapSummaryTab()">
+          <option value="monthly" selected>Monthly</option>
+          <option value="weekly">Weekly</option>
+          <option value="daily">Daily</option>
+        </select>
+        <input type="date" class="fsel" id="capSummaryDate" style="height:32px" onchange="renderCapSummaryTab()">
+        <button class="btn btn-outline btn-sm" onclick="exportCapSummaryCSV()">📥 Export CSV</button>
+      </div>
+    </div>
+    <div class="text-xs text-muted" id="capSummaryPeriodLabel" style="margin-bottom:12px"></div>
+
+    <div class="kpi-grid" id="capSummaryKPIs" style="grid-template-columns:repeat(4,1fr);margin-bottom:14px"></div>
+
+    <div class="charts-grid charts-2 mb-4">
+      <div class="card"><div class="card-header"><div class="card-title">📈 Daily Achieved vs Capacity — Selected Period</div></div><div class="card-body"><div class="chart-wrap" style="height:260px"><canvas id="capSummaryTrendChart"></canvas></div></div></div>
+      <div class="card"><div class="card-header"><div class="card-title">🏭 Machine-wise Achieved vs Capacity — Selected Period</div></div><div class="card-body"><div class="chart-wrap" style="height:260px"><canvas id="capSummaryMachineChart"></canvas></div></div></div>
+    </div>
+
+    <div class="charts-grid charts-2 mb-4">
+      <div class="card"><div class="card-header"><div class="card-title">🏆 Best Performing Day</div></div><div class="card-body" id="capSummaryBestDay"></div></div>
+      <div class="card"><div class="card-header"><div class="card-title">⚠ Worst Performing Day</div></div><div class="card-body" id="capSummaryWorstDay"></div></div>
+    </div>
+
+    <div class="card mb-4">
+      <div class="card-header"><div class="card-title">📋 Date-wise Production Record</div><span class="text-xs text-muted" id="capSummaryDateCount"></span></div>
+      <div class="table-wrap" style="max-height:380px;overflow-y:auto">
+        <table><thead><tr><th>Date</th><th>Achieved Qty</th><th>Daily Capacity</th><th>Pending</th><th>Utilization %</th><th>Helper Count</th></tr></thead><tbody id="capSummaryDateBody"></tbody></table>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><div class="card-title">🏭 Machine-wise Performance — Selected Period</div></div>
+      <div class="table-wrap">
+        <table><thead><tr><th>Machine</th><th>Achieved</th><th>Capacity</th><th>Pending</th><th>Utilization %</th><th>Best Day</th><th>Worst Day</th></tr></thead><tbody id="capSummaryMachineBody"></tbody></table>
+      </div>
+    </div>
   </div>
 
   <!-- MACHINE UTILIZATION TAB — real Planned vs Actual, period-selectable -->
@@ -4103,6 +4150,7 @@ const PERMISSION_MODULES = [
     {key:'oee',      label:'Performance & OEE',         actions:['view']},
     {key:'blocking', label:'Machine Blocking',          actions:['view','edit']},
     {key:'planning', label:'Monthly Planning',          actions:['view','edit']},
+    {key:'summary',  label:'Monthly Summary',           actions:['view','export']},
     {key:'toolcons', label:'Tool Consumption Tracking', actions:['view','edit']}
   ]},
   {key:'quality',      label:'Quality Control',                actions:['view','create','approve','export']},
@@ -4135,7 +4183,7 @@ function noPerm(){ return {}; }
 // freely override any of this afterward via the permission matrix; it's just a
 // sensible starting point so a newly created Admin account isn't empty.
 const DEPARTMENT_DEFAULT_MODULES = {
-  'Production':  {tracker:'full', newproject:'full', stageupdate:'full', capacity:{daily:'full',machine:'full',oee:'full',blocking:'full',planning:'full',toolcons:'view'}, dashboard:'view', analytics:'view'},
+  'Production':  {tracker:'full', newproject:'full', stageupdate:'full', capacity:{daily:'full',machine:'full',oee:'full',blocking:'full',planning:'full',summary:'full',toolcons:'view'}, dashboard:'view', analytics:'view'},
   'Quality':     {quality:'full', calibration:'full', stageupdate:'full', dashboard:'view', analytics:'view', tracker:'view'},
   'Maintenance': {maintenance:'full', calibration:'full', capacity:{toolcons:'full'}, dashboard:'view', analytics:'view'},
   'Planning':    {capacity:'full', tracker:'full', reports:{view:true,export:true}, dashboard:'view', analytics:'view'},
@@ -7777,10 +7825,11 @@ function initCapacity(){
   document.getElementById('dailyDate').value=new Date().toISOString().split('T')[0];
   document.getElementById('muDate').value=new Date().toISOString().split('T')[0];
   document.getElementById('oeeDate').value=new Date().toISOString().split('T')[0];
+  document.getElementById('capSummaryDate').value=new Date().toISOString().split('T')[0];
   fillWsSelects();
-  const firstSub=firstAllowedSub('capacity',['daily','machine','oee','blocking','planning','toolcons']);
+  const firstSub=firstAllowedSub('capacity',['daily','machine','oee','blocking','planning','summary','toolcons']);
   showCapTab(firstSub, findTabButton('capTabs',firstSub));
-  renderDailyTab();renderMachTab();renderOeeTab();renderBlockingTab();renderPAChart();
+  renderDailyTab();renderMachTab();renderOeeTab();renderBlockingTab();renderPAChart();renderCapSummaryTab();
 }
 
 function fillWsSelects(){
@@ -7795,13 +7844,14 @@ function showCapTab(t,el){
     toast('You do not have permission to view this section.','⚠');
     return;
   }
-  ['daily','machine','oee','blocking','planning','toolcons'].forEach(x=>{const e=document.getElementById('cap-'+x);if(e)e.style.display=x===t?'block':'none';});
+  ['daily','machine','oee','blocking','planning','summary','toolcons'].forEach(x=>{const e=document.getElementById('cap-'+x);if(e)e.style.display=x===t?'block':'none';});
   document.querySelectorAll('#capTabs .tab').forEach(x=>x.classList.remove('active'));
   if(el)el.classList.add('active');else{const f=document.querySelector('#capTabs .tab');if(f)f.classList.add('active');}
   if(t==='machine') renderMachTab();
   if(t==='oee') renderOeeTab();
   if(t==='blocking') renderBlockingTab();
   if(t==='planning') renderPAChart();
+  if(t==='summary') renderCapSummaryTab();
   if(t==='toolcons') renderToolConsumptionTab();
 }
 
@@ -8423,6 +8473,151 @@ function resolvePeriod(periodType, refDate){
   const monthNames=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   return {start:s, end:e, label:monthNames[m]+' '+y};
 }
+
+// ------ MONTHLY SUMMARY / HISTORICAL PRODUCTION RECORD ------
+// Reads-only aggregation over the existing DB.dailyCap / DB.dailyManpower
+// records (written by saveDailyEntry() and autoUpdateCapacityFromStage(),
+// both unchanged) — every date already has its own permanent entry, this
+// just summarizes a selected range of them. Respects the same Date Range
+// Filter (DATE_FILTER.capacity) that Machine Utilization / OEE already use,
+// via the shared resolvePeriod() helper.
+function renderCapSummaryTab(){
+  const periodType = document.getElementById('capSummaryPeriodType')?.value || 'monthly';
+  const refDate = document.getElementById('capSummaryDate')?.value || new Date().toISOString().split('T')[0];
+  const {start,end,label} = resolvePeriod(periodType, refDate);
+  const days = _dateRange(start,end);
+  const totalDailyCap = M.workstations.reduce((a,w)=>a+w.cap,0);
+
+  const labelEl = document.getElementById('capSummaryPeriodLabel');
+  if(labelEl) labelEl.textContent = 'Showing: '+label+' — '+days.length+' day'+(days.length===1?'':'s')
+    + (DATE_FILTER.capacity && DATE_FILTER.capacity.from ? ' (via the Date Range Filter above)' : '');
+
+  // Per-day totals across every workstation
+  const dayRows = days.map(d=>{
+    const dd = DB.dailyCap[d]||{};
+    const dm = DB.dailyManpower[d]||{};
+    const achieved = M.workstations.reduce((s,w)=>s+(dd[w.id]||0),0);
+    const helpers = M.workstations.reduce((s,w)=>s+(parseInt(dm['hp_'+w.id])||0),0);
+    const hasEntry = Object.keys(dd).length>0;
+    const pending = Math.max(0, totalDailyCap-achieved);
+    const util = totalDailyCap>0 ? Math.round((achieved/totalDailyCap)*100) : 0;
+    return {date:d, achieved, cap:totalDailyCap, pending, util, helpers, hasEntry};
+  });
+
+  const monthlyAchieved = dayRows.reduce((s,r)=>s+r.achieved,0);
+  const monthlyCapacity = dayRows.reduce((s,r)=>s+r.cap,0);
+  const avgUtil = monthlyCapacity>0 ? Math.round((monthlyAchieved/monthlyCapacity)*100) : 0;
+  const totalHelperDays = dayRows.reduce((s,r)=>s+r.helpers,0);
+
+  // Best/Worst are ranked only among days that actually have a recorded entry —
+  // an empty/not-yet-entered day isn't "worst", it's just not recorded yet.
+  const recordedDays = dayRows.filter(r=>r.hasEntry);
+  const bestDay = recordedDays.length ? recordedDays.reduce((a,b)=>b.util>a.util?b:a) : null;
+  const worstDay = recordedDays.length ? recordedDays.reduce((a,b)=>b.util<a.util?b:a) : null;
+
+  document.getElementById('capSummaryKPIs').innerHTML = [
+    {l:'Monthly Achieved Qty', v:monthlyAchieved, s:'Across all workstations', c:'blue'},
+    {l:'Monthly Capacity',     v:monthlyCapacity, s:days.length+' day(s) × '+totalDailyCap+'/day', c:'purple'},
+    {l:'Average Utilization',  v:avgUtil+'%',     s:'Achieved ÷ Capacity for the period', c:avgUtil>=80?'green':avgUtil>=50?'yellow':'red'},
+    {l:'Total Helper-Days',    v:totalHelperDays, s:'Sum of helper counts logged', c:'teal'},
+  ].map(k=>'<div class="kpi-card '+k.c+'"><div class="kpi-label">'+k.l+'</div><div class="kpi-value">'+k.v+'</div><div class="kpi-sub">'+k.s+'</div></div>').join('');
+
+  const dayPanel = r => !r ? '<div class="text-sm text-muted">No recorded production days in this period yet.</div>'
+    : '<div style="font-family:\'Space Grotesk\',sans-serif;font-size:22px;font-weight:700">'+r.date+'</div>'
+      +'<div class="text-sm text-muted" style="margin-top:4px">Achieved '+r.achieved+' / '+r.cap+' &nbsp;·&nbsp; <b>'+r.util+'% utilization</b> &nbsp;·&nbsp; '+r.helpers+' helper-day(s)</div>';
+  document.getElementById('capSummaryBestDay').innerHTML = dayPanel(bestDay);
+  document.getElementById('capSummaryWorstDay').innerHTML = dayPanel(worstDay);
+
+  document.getElementById('capSummaryDateCount').textContent = days.length+' day(s) in range';
+  document.getElementById('capSummaryDateBody').innerHTML = dayRows.slice().reverse().map(r=>
+    '<tr><td class="font-mono text-sm">'+r.date+'</td><td class="fw-600">'+r.achieved+'</td><td>'+r.cap+'</td>'
+    +'<td class="'+(r.pending>0?'text-danger':'text-muted')+'">'+r.pending+'</td>'
+    +'<td><span class="badge '+(r.util>=80?'badge-complete':r.util>=50?'badge-running':'badge-delayed')+'">'+r.util+'%</span></td>'
+    +'<td>'+r.helpers+'</td></tr>'
+  ).join('') || '<tr><td colspan="6" class="text-sm text-muted" style="padding:12px">No data for this period.</td></tr>';
+
+  // Per-machine totals across the same period
+  const machineRows = M.workstations.map(w=>{
+    const achieved = days.reduce((s,d)=>s+wsAchievedOn(w.id,d),0);
+    const cap = days.length*w.cap;
+    const pending = Math.max(0,cap-achieved);
+    const util = cap>0?Math.round((achieved/cap)*100):0;
+    const perDay = days.map(d=>({date:d, v:wsAchievedOn(w.id,d)})).filter(x=>x.v>0);
+    const best = perDay.length?perDay.reduce((a,b)=>b.v>a.v?b:a):null;
+    const worst = perDay.length?perDay.reduce((a,b)=>b.v<a.v?b:a):null;
+    return {w, achieved, cap, pending, util, best, worst};
+  });
+  document.getElementById('capSummaryMachineBody').innerHTML = machineRows.map(r=>
+    '<tr><td class="fw-600">'+r.w.name+'</td><td>'+r.achieved+'</td><td>'+r.cap+'</td>'
+    +'<td class="'+(r.pending>0?'text-danger':'text-muted')+'">'+r.pending+'</td>'
+    +'<td><span class="badge '+(r.util>=80?'badge-complete':r.util>=50?'badge-running':'badge-delayed')+'">'+r.util+'%</span></td>'
+    +'<td class="text-xs">'+(r.best?r.best.date+' ('+r.best.v+')':'—')+'</td>'
+    +'<td class="text-xs">'+(r.worst?r.worst.date+' ('+r.worst.v+')':'—')+'</td></tr>'
+  ).join('');
+
+  renderCapSummaryTrendChart(dayRows);
+  renderCapSummaryMachineChart(machineRows);
+}
+
+function renderCapSummaryTrendChart(dayRows){
+  const ctx = document.getElementById('capSummaryTrendChart');
+  if(!ctx || typeof Chart==='undefined') return;
+  if(charts.capSummaryTrend) charts.capSummaryTrend.destroy();
+  charts.capSummaryTrend = new Chart(ctx, {
+    type:'line',
+    data:{
+      labels: dayRows.map(r=>r.date.slice(5)),
+      datasets:[
+        {label:'Achieved', data:dayRows.map(r=>r.achieved), borderColor:'#2563eb', backgroundColor:'rgba(37,99,235,.12)', tension:.3, fill:true},
+        {label:'Capacity', data:dayRows.map(r=>r.cap), borderColor:'#94a3b8', borderDash:[5,5], tension:0, fill:false, pointRadius:0}
+      ]
+    },
+    options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'bottom'}}, scales:{x:{ticks:{maxRotation:0, autoSkip:true}}}}
+  });
+}
+
+function renderCapSummaryMachineChart(machineRows){
+  const ctx = document.getElementById('capSummaryMachineChart');
+  if(!ctx || typeof Chart==='undefined') return;
+  if(charts.capSummaryMachine) charts.capSummaryMachine.destroy();
+  charts.capSummaryMachine = new Chart(ctx, {
+    type:'bar',
+    data:{
+      labels: machineRows.map(r=>r.w.name),
+      datasets:[
+        {label:'Achieved', data:machineRows.map(r=>r.achieved), backgroundColor:'#2563eb'},
+        {label:'Capacity', data:machineRows.map(r=>r.cap), backgroundColor:'#e2e8f0'}
+      ]
+    },
+    options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'bottom'}}, scales:{x:{ticks:{maxRotation:30, minRotation:0}}}}
+  });
+}
+
+function exportCapSummaryCSV(){
+  if(!hasPermission('capacity','summary','export')){ toast('You do not have permission to export this report.','⚠'); return; }
+  const periodType = document.getElementById('capSummaryPeriodType')?.value || 'monthly';
+  const refDate = document.getElementById('capSummaryDate')?.value || new Date().toISOString().split('T')[0];
+  const {start,end} = resolvePeriod(periodType, refDate);
+  const days = _dateRange(start,end);
+  const totalDailyCap = M.workstations.reduce((a,w)=>a+w.cap,0);
+  const rows = [['Date','Achieved Qty','Daily Capacity','Pending','Utilization %','Helper Count']];
+  days.forEach(d=>{
+    const dd = DB.dailyCap[d]||{};
+    const dm = DB.dailyManpower[d]||{};
+    const achieved = M.workstations.reduce((s,w)=>s+(dd[w.id]||0),0);
+    const helpers = M.workstations.reduce((s,w)=>s+(parseInt(dm['hp_'+w.id])||0),0);
+    const util = totalDailyCap>0?Math.round((achieved/totalDailyCap)*100):0;
+    rows.push([d, achieved, totalDailyCap, Math.max(0,totalDailyCap-achieved), util, helpers]);
+  });
+  const csv = rows.map(r=>r.map(c=>'"'+String(c).replace(/"/g,'""')+'"').join(',')).join('\n');
+  const blob = new Blob([csv],{type:'text/csv'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'capacity_monthly_summary_'+start+'_to_'+end+'.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  toast('Monthly summary exported.','✓');
+}
+
 
 function onMuPeriodTypeChange(){ renderMachTab(); }
 function onOeePeriodTypeChange(){ renderOeeTab(); }

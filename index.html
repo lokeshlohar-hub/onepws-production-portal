@@ -797,6 +797,49 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
     </div>
   </div>
 
+  <!-- DELETE PROJECT CONFIRMATION MODAL -->
+  <div class="modal-overlay" id="deleteProjectModal">
+    <div class="modal" style="max-width:480px">
+      <div class="modal-header">
+        <div>
+          <div class="modal-title" style="color:var(--red)">🗑 Delete Project — Permanent Action</div>
+          <div class="text-xs text-muted" id="deleteProjectModalSub" style="margin-top:2px"></div>
+        </div>
+        <button class="modal-close" onclick="closeMod('deleteProjectModal')">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="alert alert-danger" style="font-size:12.5px;font-weight:600">
+          ⚠ Are you sure you want to permanently delete this project? This action cannot be undone. All BOM lines, stage history, QC records, and linked data for this project will be permanently removed.
+        </div>
+        <div class="form-group" style="margin-top:12px">
+          <label class="form-label">Reason for Deletion <span class="req">*</span></label>
+          <select class="form-select" id="deleteProjectReason">
+            <option value="">— Select Reason —</option>
+            <option>Created in Error / Duplicate Entry</option>
+            <option>Order Cancelled by Customer</option>
+            <option>Test / Demo Project</option>
+            <option>Data Cleanup</option>
+            <option>Other</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Additional Remarks</label>
+          <textarea class="form-textarea" id="deleteProjectRemarks" style="height:60px" placeholder="Optional additional detail for the audit trail…"></textarea>
+        </div>
+        <div class="form-group" style="margin-bottom:0">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12.5px">
+            <input type="checkbox" id="deleteProjectConfirmCheck" style="width:16px;height:16px">
+            I understand this will permanently delete this project and cannot be undone.
+          </label>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="closeMod('deleteProjectModal')">Cancel</button>
+        <button class="btn btn-danger" onclick="confirmDeleteProject(this)">🗑 Permanently Delete Project</button>
+      </div>
+    </div>
+  </div>
+
 </div>
 <!-- NEW PROJECT PAGE -->
 <div class="page" id="page-newproject">
@@ -3461,6 +3504,9 @@ function apiLoadProjects() {
 function apiCreateProject(payload) {
   return apiRequest('/projects', { method: 'POST', body: JSON.stringify(payload) });
 }
+function apiDeleteProject(id) {
+  return apiRequest('/projects/' + encodeURIComponent(id), { method: 'DELETE' });
+}
 function apiSubmitStageEntry(lineId, payload) {
   return apiRequest('/bom-lines/' + encodeURIComponent(lineId) + '/stage-entry', { method: 'POST', body: JSON.stringify(payload) });
 }
@@ -4158,7 +4204,7 @@ async function confirmBulkImport(){
 const PERMISSION_MODULES = [
   {key:'dashboard',    label:'Dashboard',                    actions:['view']},
   {key:'analytics',    label:'Analytics & MIS',               actions:['view','export']},
-  {key:'tracker',      label:'Master Project Tracker',        actions:['view','edit','export','print']},
+  {key:'tracker',      label:'Master Project Tracker',        actions:['view','edit','export','print','delete']},
   {key:'newproject',   label:'New Project Entry',             actions:['view','create']},
   {key:'stageupdate',  label:'Stage-wise Production Updates',  actions:['view','create','edit']},
   {key:'capacity',     label:'Capacity Planning',              actions:['view'], subs:[
@@ -4200,10 +4246,10 @@ function noPerm(){ return {}; }
 // freely override any of this afterward via the permission matrix; it's just a
 // sensible starting point so a newly created Admin account isn't empty.
 const DEPARTMENT_DEFAULT_MODULES = {
-  'Production':  {tracker:'full', newproject:'full', stageupdate:'full', capacity:{daily:'full',machine:'full',oee:'full',blocking:'full',planning:'full',summary:'full',toolcons:'view'}, dashboard:'view', analytics:'view'},
+  'Production':  {tracker:{view:true,create:true,edit:true,export:true,print:true}, newproject:'full', stageupdate:'full', capacity:{daily:'full',machine:'full',oee:'full',blocking:'full',planning:'full',summary:'full',toolcons:'view'}, dashboard:'view', analytics:'view'},
   'Quality':     {quality:'full', calibration:'full', stageupdate:'full', dashboard:'view', analytics:'view', tracker:'view'},
   'Maintenance': {maintenance:'full', calibration:'full', capacity:{toolcons:'full'}, dashboard:'view', analytics:'view'},
-  'Planning':    {capacity:'full', tracker:'full', reports:{view:true,export:true}, dashboard:'view', analytics:'view'},
+  'Planning':    {capacity:'full', tracker:{view:true,create:true,edit:true,export:true,print:true}, reports:{view:true,export:true}, dashboard:'view', analytics:'view'},
   'Store':       {dms:'full', maintenance:{toolinv:'view'}, reports:{view:true,export:true}, dashboard:'view'},
   'Purchase':    {maintenance:{toolinv:'full'}, reports:{view:true,export:true}, dashboard:'view'},
   'HR':          {dashboard:'view', reports:{view:true}},
@@ -5673,6 +5719,72 @@ function removeHold(projId){
   toast(p.sap+' is back to Running.','✓');
 }
 
+// ------ DELETE PROJECT (Master Admin, or Admin with delete explicitly granted) ------
+let _deleteProjectTargetId = null;
+
+function openDeleteProjectModal(projId){
+  if(!hasPermission('tracker', null, 'delete')){
+    toast('You do not have permission to delete projects.','⚠');
+    return;
+  }
+  const p=DB.projects.find(x=>x.id===projId); if(!p) return;
+  _deleteProjectTargetId=projId;
+  document.getElementById('deleteProjectModalSub').textContent=p.sap+' — '+p.customer;
+  document.getElementById('deleteProjectReason').value='';
+  document.getElementById('deleteProjectRemarks').value='';
+  document.getElementById('deleteProjectConfirmCheck').checked=false;
+  document.getElementById('deleteProjectModal').classList.add('open');
+}
+
+async function confirmDeleteProject(btn){
+  // Re-check permission here too — never trust that the button being visible
+  // is the only thing standing between a user and this action.
+  if(!hasPermission('tracker', null, 'delete')){
+    toast('You do not have permission to delete projects.','⚠');
+    return;
+  }
+  const p=DB.projects.find(x=>x.id===_deleteProjectTargetId); if(!p) return;
+  const reason=document.getElementById('deleteProjectReason').value;
+  const remarks=document.getElementById('deleteProjectRemarks').value.trim();
+  const confirmed=document.getElementById('deleteProjectConfirmCheck').checked;
+  if(!reason){toast('Select a reason for deletion.','⚠');return;}
+  if(!confirmed){toast('Please confirm you understand this action is permanent.','⚠');return;}
+
+  const originalText = btn ? btn.textContent : '';
+  if(btn){ btn.disabled=true; btn.textContent='Deleting…'; }
+  try{
+    await apiDeleteProject(p.id);
+  } catch(err){
+    toast('Could not delete this project: '+err.message,'⚠');
+    if(btn){ btn.disabled=false; btn.textContent=originalText||'🗑 Permanently Delete Project'; }
+    return;
+  }
+  if(btn){ btn.disabled=false; btn.textContent=originalText||'🗑 Permanently Delete Project'; }
+
+  // Remove the project and clean up records that belong ONLY to this project.
+  // DB.auditLog is intentionally never purged — the whole point of an audit
+  // trail is that it survives the thing it's recording, including deletions.
+  // DB.dailyCap / DB.dailyManpower are also left untouched — those are shared,
+  // workstation-level historical capacity records, not project-specific, and
+  // must never be retroactively altered (see the Monthly Summary feature).
+  const projId=p.id, projSap=p.sap;
+  DB.projects = DB.projects.filter(x=>x.id!==projId);
+  DB.rejectLog = (DB.rejectLog||[]).filter(r=>r.projId!==projId);
+  DB.stageLog = (DB.stageLog||[]).filter(s=>s.proj!==projSap);
+  DB.shiftLog = (DB.shiftLog||[]).filter(s=>s.projId!==projId);
+  DB.tatOverrideLog = (DB.tatOverrideLog||[]).filter(t=>t.projId!==projId);
+
+  const ts=new Date().toISOString().replace('T',' ').slice(0,16);
+  const actorName = CURRENT_USER ? CURRENT_USER.fullName : 'Admin';
+  DB.auditLog.unshift({ts,user:actorName,action:'Delete',module:'Tracker',
+    entity:projSap,field:'Project',old:'Existed',nw:'PERMANENTLY DELETED — '+reason+(remarks?' | '+remarks:''),ip:'192.168.1.1'});
+
+  closeMod('deleteProjectModal');
+  _deleteProjectTargetId=null;
+  renderTracker();
+  toast('Project "'+projSap+'" has been permanently deleted.','🗑');
+}
+
 function renderTracker(){
   const fy=getActiveFY();
   const q=(document.getElementById('trackerSearch')?.value||'').toLowerCase();
@@ -5762,6 +5874,7 @@ function renderTracker(){
           ?'<button class="btn btn-sm" style="background:#f0fdf4;color:#166534;border:1px solid #bbf7d0" data-action="resume" data-pid="'+pid+'">▶ Resume</button>'
           :p.progress<100?'<button class="btn btn-sm" style="background:#fef9c3;color:#854d0e;border:1px solid #fde047" data-action="hold" data-pid="'+pid+'">⏸ Hold</button>':'')
         +'<button class="btn btn-sm" style="background:var(--yellow-light);color:var(--yellow);border:1px solid #fde047" data-action="override" data-pid="'+pid+'">📅 TAT</button>'
+        +(hasPermission('tracker',null,'delete')?'<button class="btn btn-sm" style="background:var(--red-light);color:var(--red);border:1px solid #fca5a5" data-action="delete" data-pid="'+pid+'">🗑 Delete</button>':'')
       +'</div></td>';
     tr.querySelector('[data-pid]').addEventListener('click',function(){openProj(this.dataset.pid);});
     tr.querySelectorAll('button[data-action]').forEach(btn=>{
@@ -5772,6 +5885,7 @@ function renderTracker(){
         else if(this.dataset.action==='hold') openHoldModal(id);
         else if(this.dataset.action==='resume') removeHold(id);
         else if(this.dataset.action==='override') openTatOverride(id);
+        else if(this.dataset.action==='delete') openDeleteProjectModal(id);
       });
     });
     return tr;

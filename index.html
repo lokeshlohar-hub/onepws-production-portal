@@ -2422,6 +2422,7 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
         <div class="nav-item" onclick="renderAdmin('handtools',this)">🛠 Hand Tool Master</div>
         <div class="nav-section-title">DOCUMENT MANAGEMENT</div>
         <div class="nav-item" onclick="renderAdmin('dmsdepts',this)">📁 Document Departments</div>
+        <div class="nav-item" onclick="renderAdmin('dmsorigins',this)">🏷 Document Origins</div>
       </div>
     </div>
     <div id="adminContent"></div>
@@ -2555,9 +2556,12 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
       </div>
       <!-- Search & filter bar -->
       <div class="dms-search-bar">
-        <input type="text" id="dmsSearch" placeholder="Search by Doc No, Name, Keyword, Owner, Department…" oninput="renderDmsList()">
+        <input type="text" id="dmsSearch" placeholder="Search by Doc No, Name, Keyword, Owner, Department, Origin…" oninput="renderDmsList()">
         <select class="fsel" id="dmsFilterDept" onchange="renderDmsList()" style="height:34px">
           <option value="">All Departments</option>
+        </select>
+        <select class="fsel" id="dmsFilterOrigin" onchange="renderDmsList()" style="height:34px">
+          <option value="">All Origins</option>
         </select>
         <select class="fsel" id="dmsFilterStatus" onchange="renderDmsList()" style="height:34px">
           <option value="">All Status</option>
@@ -2632,11 +2636,18 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
           <div class="form-group"><label class="form-label">Document Name <span class="req">*</span></label><input type="text" class="form-input" id="dms_name" placeholder="Full document title"></div>
         </div>
         <div class="form-row">
-          <div class="form-group"><label class="form-label">Department <span class="req">*</span></label>
+          <div class="form-group"><label class="form-label">Department (Responsible / Filed Under) <span class="req">*</span></label>
             <select class="form-select" id="dms_dept">
               <option value="">— Select Department —</option>
             </select>
           </div>
+          <div class="form-group"><label class="form-label">Document Origin <span class="req">*</span></label>
+            <select class="form-select" id="dms_origin">
+              <option value="">— Select Origin —</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
           <div class="form-group"><label class="form-label">Document Category <span class="req">*</span></label>
             <select class="form-select" id="dms_cat">
               <option value="">— Select —</option>
@@ -2647,8 +2658,6 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
               <option>Training Material</option><option>Risk Assessment</option><option>Other</option>
             </select>
           </div>
-        </div>
-        <div class="form-row">
           <div class="form-group"><label class="form-label">Document Level <span class="req">*</span></label>
             <select class="form-select" id="dms_level">
               <option value="">— Select —</option>
@@ -2658,11 +2667,19 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
               <option value="L4">L4 — Format / Record</option>
             </select>
           </div>
+        </div>
+        <div class="form-row">
           <div class="form-group"><label class="form-label">Review Frequency <span class="req">*</span></label>
             <select class="form-select" id="dms_freq">
               <option>Real Time</option><option>Daily</option><option>Weekly</option>
               <option>Monthly</option><option>Quarterly</option><option>Half Yearly</option>
               <option>Annual</option><option>Project Based</option><option>NA</option>
+            </select>
+          </div>
+          <div class="form-group"><label class="form-label">Document Status <span class="req">*</span></label>
+            <select class="form-select" id="dms_status">
+              <option value="Active">Active</option><option value="Draft">Draft</option>
+              <option value="Under Review">Under Review</option><option value="Obsolete">Obsolete</option>
             </select>
           </div>
         </div>
@@ -2672,12 +2689,6 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
         </div>
         <div class="form-row">
           <div class="form-group"><label class="form-label">First Issue Date</label><input type="date" class="form-input" id="dms_issuedate"></div>
-          <div class="form-group"><label class="form-label">Document Status <span class="req">*</span></label>
-            <select class="form-select" id="dms_status">
-              <option value="Active">Active</option><option value="Draft">Draft</option>
-              <option value="Under Review">Under Review</option><option value="Obsolete">Obsolete</option>
-            </select>
-          </div>
         </div>
         <div class="form-row">
           <div class="form-group"><label class="form-label">Prepared By <span class="req">*</span></label><input type="text" class="form-input" id="dms_prepby" placeholder="Name / Designation"></div>
@@ -3263,13 +3274,15 @@ const M = {
 
   // -- DMS Department Master — Admin-controlled, drives DMS upload + filter dropdowns --
   dmsDepts:[
-    {id:'dept-prod',  name:'Production',    icon:'🏭', color:'#1e40af', desc:'Production floor documents, SOPs, work instructions'},
-    {id:'dept-qual',  name:'Quality',       icon:'✅', color:'#065f46', desc:'Quality formats, inspection records, calibration'},
-    {id:'dept-maint', name:'Maintenance',   icon:'⚙️', color:'#c2410c', desc:'Machine manuals, maintenance records, PM schedules'},
-    {id:'dept-hse',   name:'HSE',           icon:'⚠️', color:'#ca8a04', desc:'Health, Safety & Environment documents'},
-    {id:'dept-co',    name:'Company Level', icon:'🏢', color:'#7c3aed', desc:'Policies, procedures, and cross-department documents'},
-    {id:'dept-hr',    name:'HR',            icon:'👥', color:'#0891b2', desc:'HR policies, skill matrices, training records'},
+    {id:'dept-prod',  name:'Production',    icon:'🏭', color:'#1e40af', desc:'Documents maintained/used by Production — including SOPs, work instructions, and records originating from other departments (HR, HSE, etc.) that Production is responsible for keeping current'},
+    {id:'dept-qual',  name:'Quality',       icon:'✅', color:'#065f46', desc:'Documents maintained/used by Quality (QC) — inspection records, quality formats, calibration, and any originating-department documents Quality is responsible for'},
+    {id:'dept-maint', name:'Maintenance',   icon:'⚙️', color:'#c2410c', desc:'Documents maintained/used by Maintenance — machine manuals, PM schedules, and any originating-department documents Maintenance is responsible for'},
   ],
+  // Where a document actually originated from — independent of which of the 3
+  // folders above it's filed under (the "responsible" department). E.g. an
+  // HR-issued training record that Production is responsible for keeping
+  // current is filed under Production with Origin = "HR".
+  dmsOrigins:['Production','Quality','Maintenance','HR','HSE','Engineering','Purchase','Company Management','Other'],
 };
 
 // ------ LIVE DATABASE ------
@@ -3886,18 +3899,20 @@ BULK_IMPORT_CONFIGS.calibration = {
 BULK_IMPORT_CONFIGS.dms = {
   title: '📤 Bulk Import Document Metadata (CSV)',
   templateFilename: 'document_library_import_template.csv',
-  instructions: 'Upload multiple document records at once (<b>metadata only</b> — this does not attach files; use "Upload Document" afterward for the actual file if needed, exactly as before). Department, Category, Document Level, Revision Number, Revision Date, Prepared By, and Approved By are mandatory. Department must match: '+M.dmsDepts.map(d=>d.name).join(', ')+'.',
-  headers: ['Document Number','Document Name','Department','Category','Document Level (L1/L2/L3/L4)','Review Frequency','Status (Active/Draft/Under Review/Obsolete)','Revision Number','Revision Date (YYYY-MM-DD)','First Issue Date (YYYY-MM-DD)','Purpose','Prepared By','Approved By','Owner','Linked Documents','Keywords / Tags (semicolon separated)','Remarks'],
+  instructions: 'Upload multiple document records at once (<b>metadata only</b> — this does not attach files; use "Upload Document" afterward for the actual file if needed, exactly as before). Department, Document Origin, Category, Document Level, Revision Number, Revision Date, Prepared By, and Approved By are mandatory. Department is the folder it\'s filed under and must match: '+M.dmsDepts.map(d=>d.name).join(', ')+'. Document Origin is where it actually came from and must match: '+M.dmsOrigins.join(', ')+' — these can differ (e.g. an HR-issued form that Production is responsible for is filed under Production with Origin = HR).',
+  headers: ['Document Number','Document Name','Department (Responsible/Filed Under)','Document Origin','Category','Document Level (L1/L2/L3/L4)','Review Frequency','Status (Active/Draft/Under Review/Obsolete)','Revision Number','Revision Date (YYYY-MM-DD)','First Issue Date (YYYY-MM-DD)','Purpose','Prepared By','Approved By','Owner','Linked Documents','Keywords / Tags (semicolon separated)','Remarks'],
   sampleRows: [
-    ['IMS-05-02-L3-01','Beam Saw Operating Procedure','Production','Work Instruction','L3','Annual','Active','Rev 0','2026-05-01','2026-05-01','Standard operating steps for the beam saw','Admin','Quality Manager','Production Head','','SOP;Beam Saw',''],
-    ['IMS-09-01-L4-02','Incoming Material Inspection Format','Quality','Quality Format','L4','Real Time','Active','Rev 0','2026-04-15','2026-04-15','Format for recording incoming material inspection','Admin','Quality Manager','QC Lead','','Inspection;Format',''],
+    ['IMS-05-02-L3-01','Beam Saw Operating Procedure','Production','Production','Work Instruction','L3','Annual','Active','Rev 0','2026-05-01','2026-05-01','Standard operating steps for the beam saw','Admin','Quality Manager','Production Head','','SOP;Beam Saw',''],
+    ['IMS-09-01-L4-02','Incoming Material Inspection Format','Quality','Quality','Quality Format','L4','Real Time','Active','Rev 0','2026-04-15','2026-04-15','Format for recording incoming material inspection','Admin','Quality Manager','QC Lead','','Inspection;Format',''],
+    ['IMS-11-01-L4-03','New Joiner Safety Training Record','Production','HR','Training Material','L4','Project Based','Active','Rev 0','2026-06-01','2026-06-01','Training record maintained by Production for shop-floor new joiners','Admin','Production Head','HR','','Training;HSE',''],
   ],
   validateGroup(rows){
     const raw = rows[0];
     const errors = [];
     const docNo = (raw['Document Number']||'').trim();
     const name = (raw['Document Name']||'').trim();
-    const deptName = (raw['Department']||'').trim();
+    const deptName = (raw['Department (Responsible/Filed Under)']||raw['Department']||'').trim();
+    const originName = (raw['Document Origin']||'').trim();
     const category = (raw['Category']||'').trim();
     const levelRaw = (raw['Document Level (L1/L2/L3/L4)']||raw['Document Level']||'').trim().toUpperCase();
     const level = ['L1','L2','L3','L4'].includes(levelRaw) ? levelRaw : '';
@@ -3922,8 +3937,10 @@ BULK_IMPORT_CONFIGS.dms = {
     if(!deptName) errors.push('Department is required');
     else {
       deptFolder = M.dmsDepts.find(d=>d.name.toLowerCase()===deptName.toLowerCase());
-      if(!deptFolder) errors.push('Department "'+deptName+'" is not recognized');
+      if(!deptFolder) errors.push('Department "'+deptName+'" is not recognized — must be Production, Maintenance, or Quality');
     }
+    if(!originName) errors.push('Document Origin is required');
+    else if(!M.dmsOrigins.some(o=>o.toLowerCase()===originName.toLowerCase())) errors.push('Document Origin "'+originName+'" is not recognized');
     if(!category) errors.push('Category is required');
     if(!level) errors.push('Document Level must be L1, L2, L3, or L4');
     if(!revNo) errors.push('Revision Number is required');
@@ -3933,20 +3950,20 @@ BULK_IMPORT_CONFIGS.dms = {
     if(!approvedBy) errors.push('Approved By is required');
 
     if(errors.length) return {valid:false, errors};
-    return {valid:true, record:{docNo,name,deptName,folderId:deptFolder?deptFolder.id:'',category,level,freq,status,revNo,revDate,issueDate,purpose,prepBy,approvedBy,owner,linked,tags,remarks}};
+    return {valid:true, record:{docNo,name,deptName,originName,folderId:deptFolder?deptFolder.id:'',category,level,freq,status,revNo,revDate,issueDate,purpose,prepBy,approvedBy,owner,linked,tags,remarks}};
   },
-  summaryOfRecord(rec){ return (rec.docNo?rec.docNo+' — ':'')+rec.name; },
+  summaryOfRecord(rec){ return (rec.docNo?rec.docNo+' — ':'')+rec.name+' (from '+rec.originName+')'; },
   importRecord(rec){
     const id='DOC-'+String(DB.dmsDocuments.length+1).padStart(4,'0');
     const ts=new Date().toISOString().replace('T',' ').slice(0,16);
     const newDoc={
-      id, docNo:rec.docNo, name:rec.name, dept:rec.deptName, category:rec.category, level:rec.level,
+      id, docNo:rec.docNo, name:rec.name, dept:rec.deptName, origin:rec.originName, category:rec.category, level:rec.level,
       freq:rec.freq, status:rec.status, purpose:rec.purpose,
       owner:rec.owner, prepBy:rec.prepBy, approvedBy:rec.approvedBy, linkedDocs:rec.linked,
       remarks:'', auditRemarks:rec.remarks,
       folderId:rec.folderId,
       fileType:'', fileName:'', fileSize:'', firstIssueDate:rec.issueDate,
-      tags: rec.tags.length ? rec.tags : [rec.deptName, rec.category, rec.level].filter(Boolean),
+      tags: rec.tags.length ? rec.tags : [rec.deptName, rec.originName, rec.category, rec.level].filter(Boolean),
       revisions:[{revNo:rec.revNo,revDate:rec.revDate,revBy:rec.prepBy,approvedBy:rec.approvedBy,changeSummary:'First Issue (bulk import)',fileRef:'',status:'Active',archivedAt:null}],
       accessLog:[{ts,user:'Admin User',action:'Bulk Import',ip:'192.168.1.1'}],
       createdAt:ts,createdBy:'Admin User',updatedAt:ts
@@ -11831,6 +11848,7 @@ function getAdminHTML(sec){
   if(sec==='routing')    return getRoutingAdmin();
   if(sec==='cycletime') return getCycleTimeAdmin();
   if(sec==='dmsdepts')  return getDmsDeptsAdmin();
+  if(sec==='dmsorigins') return getDmsOriginsAdmin();
 
   if(sec==='tat') return `
     <div class="card">
@@ -13703,11 +13721,29 @@ function fillDmsDeptSelects(){
   }
 }
 
+function fillDmsOriginSelect(){
+  // Populate both the upload form's Origin select and the filter dropdown from M.dmsOrigins
+  const opts = (M.dmsOrigins||[]).map(o=>`<option value="${o}">${o}</option>`).join('');
+  const uploadSel = document.getElementById('dms_origin');
+  if(uploadSel){
+    const cur = uploadSel.value;
+    uploadSel.innerHTML = '<option value="">— Select Origin —</option>' + opts;
+    if(cur) uploadSel.value = cur;
+  }
+  const filterSel = document.getElementById('dmsFilterOrigin');
+  if(filterSel){
+    const cur = filterSel.value;
+    filterSel.innerHTML = '<option value="">All Origins</option>' + opts;
+    if(cur) filterSel.value = cur;
+  }
+}
+
 function initDMS(){
   _dmsFolder = 'all';
   // Defer rendering until the page DOM is fully visible
   setTimeout(()=>{
     fillDmsDeptSelects();
+    fillDmsOriginSelect();
     renderDmsFolderTree();
     renderDmsKPIs();
     renderDmsList();
@@ -13740,6 +13776,7 @@ function dmsNav(folderId){
 function dmsFilteredDocs(){
   const q=(document.getElementById('dmsSearch')?.value||'').toLowerCase().trim();
   const dept=document.getElementById('dmsFilterDept')?.value||'';
+  const origin=document.getElementById('dmsFilterOrigin')?.value||'';
   const status=document.getElementById('dmsFilterStatus')?.value||'';
   const level=document.getElementById('dmsFilterLevel')?.value||'';
   let docs=[...DB.dmsDocuments];
@@ -13749,9 +13786,10 @@ function dmsFilteredDocs(){
     if(folder?.dept) docs=docs.filter(d=>d.dept===folder.dept);
   }
   if(dept) docs=docs.filter(d=>d.dept===dept);
+  if(origin) docs=docs.filter(d=>d.origin===origin);
   if(status) docs=docs.filter(d=>d.status===status);
   if(level) docs=docs.filter(d=>d.level===level);
-  if(q) docs=docs.filter(d=>[d.docNo,d.name,d.dept,d.category,d.owner,d.prepBy,d.approvedBy,...(d.tags||[])].some(v=>(v||'').toLowerCase().includes(q)));
+  if(q) docs=docs.filter(d=>[d.docNo,d.name,d.dept,d.origin,d.category,d.owner,d.prepBy,d.approvedBy,...(d.tags||[])].some(v=>(v||'').toLowerCase().includes(q)));
   return docs;
 }
 
@@ -13840,7 +13878,7 @@ function renderDmsList(){
         <div style="font-size:10.5px;color:var(--accent);font-family:'JetBrains Mono',monospace;margin-top:1px">${d.docNo||'—'}</div>
         <div style="font-size:10px;color:var(--text-muted);margin-top:1px">${d.category}</div>
       </div>
-      <div class="text-xs text-muted fw-600">${d.dept}</div>
+      <div class="text-xs text-muted fw-600">${d.dept}${d.origin && d.origin!==d.dept ? '<div style="font-size:9.5px;color:var(--text-muted);font-weight:400;margin-top:1px">from '+d.origin+'</div>' : ''}</div>
       <div><span class="dms-level-badge">${d.level}</span></div>
       <div class="font-mono text-sm fw-600">${latestRev.revNo}</div>
       <div class="text-xs text-muted">${latestRev.revDate}</div>
@@ -13869,7 +13907,7 @@ function openDmsDetail(docId){
   // — Metadata tab —
   const fields=[
     ['Document Number',d.docNo||'—'],['Document Name',d.name],
-    ['Department',d.dept],['Category',d.category],
+    ['Department',d.dept],['Document Origin',d.origin||'—'],['Category',d.category],
     ['Document Level','<span class="dms-level-badge">'+d.level+'</span>'],
     ['Review Frequency',d.freq],['Document Status',dmsStatusBadge(d.status)],
     ['Current Revision',latestRev.revNo||'—'],['Revision Date',latestRev.revDate||'—'],
@@ -13944,11 +13982,12 @@ function simulateDownload(docId, revNo){
 function openDmsUpload(){
   _dmsEditId = null;
   fillDmsDeptSelects();
+  fillDmsOriginSelect();
   document.getElementById('dmsUploadTitle').textContent='📤 Upload New Document';
   ['dms_docno','dms_name','dms_purpose','dms_revlog','dms_prepby','dms_appby','dms_owner','dms_linked','dms_remarks'].forEach(id=>{
     const el=document.getElementById(id);if(el)el.value='';
   });
-  ['dms_dept','dms_cat','dms_level','dms_status'].forEach(id=>{
+  ['dms_dept','dms_origin','dms_cat','dms_level','dms_status'].forEach(id=>{
     const el=document.getElementById(id);if(el)el.value='';
   });
   document.getElementById('dms_freq').value='Real Time';
@@ -13966,11 +14005,13 @@ function openDmsEdit(docId){
   const d=DB.dmsDocuments.find(x=>x.id===docId); if(!d) return;
   _dmsEditId=docId;
   fillDmsDeptSelects();
+  fillDmsOriginSelect();
   const latestRev=d.revisions?.find(r=>r.status==='Active')||d.revisions?.[d.revisions.length-1]||{};
   document.getElementById('dmsUploadTitle').textContent='✏ Upload New Revision — '+d.name;
   document.getElementById('dms_docno').value=d.docNo||'';
   document.getElementById('dms_name').value=d.name||'';
   document.getElementById('dms_dept').value=d.dept||'';
+  document.getElementById('dms_origin').value=d.origin||'';
   document.getElementById('dms_cat').value=d.category||'';
   document.getElementById('dms_level').value=d.level||'';
   document.getElementById('dms_freq').value=d.freq||'Real Time';
@@ -14003,6 +14044,7 @@ function saveDmsDocument(){
   const docNo=document.getElementById('dms_docno').value.trim();
   const name=document.getElementById('dms_name').value.trim();
   const dept=document.getElementById('dms_dept').value;
+  const origin=document.getElementById('dms_origin').value;
   const cat=document.getElementById('dms_cat').value;
   const level=document.getElementById('dms_level').value;
   const freq=document.getElementById('dms_freq').value;
@@ -14022,6 +14064,7 @@ function saveDmsDocument(){
 
   if(!name){toast('Document name is required.','⚠');return;}
   if(!dept){toast('Select a department.','⚠');return;}
+  if(!origin){toast('Select the document\'s origin.','⚠');return;}
   if(!cat){toast('Select a document category.','⚠');return;}
   if(!level){toast('Select a document level.','⚠');return;}
   if(!revNo){toast('Enter revision number.','⚠');return;}
@@ -14043,7 +14086,7 @@ function saveDmsDocument(){
     (d.revisions||[]).forEach(r=>{ if(r.status==='Active'){r.status='Archived';r.archivedAt=ts;} });
     // Push new revision
     d.revisions.push({revNo,revDate,revBy:prepBy,approvedBy:appBy,changeSummary:revLog||'Revision update',fileRef:fileName||d.fileName,status:'Active',archivedAt:null});
-    d.name=name;d.dept=dept;d.category=cat;d.level=level;d.freq=freq;d.status=status;
+    d.name=name;d.dept=dept;d.origin=origin;d.category=cat;d.level=level;d.freq=freq;d.status=status;
     d.purpose=purpose;d.prepBy=prepBy;d.approvedBy=appBy;d.owner=owner;d.linkedDocs=linked;
     d.auditRemarks=remarks;d.updatedAt=ts;
     if(file){d.fileType=fileExt;d.fileName=fileName;d.fileSize=fileSize;}
@@ -14055,12 +14098,12 @@ function saveDmsDocument(){
     // New document
     const id='DOC-'+String(DB.dmsDocuments.length+1).padStart(4,'0');
     const newDoc={
-      id,docNo,name,dept,category:cat,level,freq,status,purpose,
+      id,docNo,name,dept,origin,category:cat,level,freq,status,purpose,
       owner,prepBy,approvedBy:appBy,linkedDocs:linked,
       remarks:'',auditRemarks:remarks,
       folderId:'dept-'+dept.toLowerCase().replace(/\s+/g,'-'),
       fileType:fileExt,fileName,fileSize,firstIssueDate:issueDate,
-      tags:[dept,cat,level].filter(Boolean),
+      tags:[dept,origin,cat,level].filter(Boolean),
       revisions:[{revNo,revDate,revBy:prepBy,approvedBy:appBy,changeSummary:revLog||'First Issue',fileRef:fileName,status:'Active',archivedAt:null}],
       accessLog:[{ts,user:'Admin User',action:'Upload',ip:'192.168.1.1'}],
       createdAt:ts,createdBy:'Admin User',updatedAt:ts
@@ -14117,7 +14160,7 @@ function getDmsDeptsAdmin(){
     <div class="card-header">
       <div>
         <div class="card-title">📁 Document Department Master ${lockBadge('ADMIN ONLY')}</div>
-        <div class="text-xs text-muted" style="margin-top:2px">Departments listed here become folders in the Document Library and appear in all upload &amp; filter dropdowns. Changes apply immediately across the portal.</div>
+        <div class="text-xs text-muted" style="margin-top:2px">These are the folders documents are physically filed under — kept to Production, Maintenance, and Quality since they're the departments responsible for maintaining and controlling documents. A document that originates elsewhere (HR, HSE, Purchase, etc.) is still filed under whichever of these is responsible for it — capture the actual source using the separate <b>Document Origins</b> master instead of adding more folders here.</div>
       </div>
     </div>
     <div class="alert alert-info" style="margin:12px 14px 6px;font-size:12px">
@@ -14209,6 +14252,61 @@ function deleteDmsDept(i){
   }
   renderAdmin('dmsdepts',null);
   toast('Department "'+d.name+'" deleted.','✓');
+}
+
+// ------ DMS ORIGIN MASTER — Admin Panel ------
+// Origins are informational traceability only — they never determine which
+// folder a document is filed under (that's always Production/Maintenance/Quality).
+function getDmsOriginsAdmin(){
+  return '<div class="card">'
+    +'<div class="card-header">'
+      +'<div><div class="card-title">🏷 Document Origin Master'+lockBadge('ADMIN ONLY')+'</div>'
+      +'<div class="text-xs text-muted" style="margin-top:2px">The departments a document can originate from. Documents are still physically filed under Production, Maintenance, or Quality — Origin is a traceability tag only, and doesn\'t change where a document is stored.</div></div>'
+      +'<button class="btn btn-primary btn-sm" onclick="addDmsOrigin()">+ Add Origin</button>'
+    +'</div>'
+    +'<div class="card-body">'
+    +'<table><thead><tr><th>#</th><th>Origin Name</th><th>Documents</th><th>Actions</th></tr></thead><tbody>'
+    +M.dmsOrigins.map((o,i)=>{
+      const docCount = DB.dmsDocuments.filter(d=>d.origin===o).length;
+      return '<tr><td class="text-muted text-sm">'+(i+1)+'</td>'
+      +'<td><input type="text" class="form-input" style="height:28px;min-width:220px" value="'+o+'" id="dmso_nm_'+i+'"></td>'
+      +'<td class="text-xs text-muted">'+docCount+' doc'+(docCount!==1?'s':'')+'</td>'
+      +'<td style="display:flex;gap:4px">'
+        +'<button class="btn btn-success btn-sm" onclick="saveDmsOrigin('+i+')">💾 Save</button>'
+        +'<button class="btn btn-danger btn-sm" onclick="deleteDmsOrigin('+i+')" '+(docCount>0?'disabled title="Documents use this origin — reassign first"':'')+'>🗑 Delete</button>'
+      +'</td></tr>';
+    }).join('')
+    +'</tbody></table></div></div>';
+}
+function addDmsOrigin(){
+  const name=prompt('Origin / originating department name:');
+  if(!name||!name.trim())return;
+  if(M.dmsOrigins.some(o=>o.toLowerCase()===name.trim().toLowerCase())){toast('This origin already exists.','⚠');return;}
+  M.dmsOrigins.push(name.trim());
+  if(document.getElementById('page-dms')?.classList.contains('active')) fillDmsOriginSelect();
+  renderAdmin('dmsorigins',null);
+  toast('Origin "'+name.trim()+'" added.','✓');
+}
+function saveDmsOrigin(i){
+  const name=document.getElementById('dmso_nm_'+i)?.value.trim();
+  if(!name){toast('Origin name cannot be empty.','⚠');return;}
+  if(M.dmsOrigins.some((o,idx)=>idx!==i&&o.toLowerCase()===name.toLowerCase())){toast('An origin named "'+name+'" already exists.','⚠');return;}
+  const oldName=M.dmsOrigins[i];
+  M.dmsOrigins[i]=name;
+  if(oldName!==name){ DB.dmsDocuments.forEach(d=>{ if(d.origin===oldName) d.origin=name; }); }
+  if(document.getElementById('page-dms')?.classList.contains('active')){ fillDmsOriginSelect(); renderDmsList(); }
+  renderAdmin('dmsorigins',null);
+  toast('Origin "'+name+'" saved.'+(oldName!==name?' Existing documents updated.':''),'✓');
+}
+function deleteDmsOrigin(i){
+  const name=M.dmsOrigins[i]; if(!name) return;
+  const docCount=DB.dmsDocuments.filter(d=>d.origin===name).length;
+  if(docCount>0){toast('Cannot delete "'+name+'" — '+docCount+' document(s) use this origin. Reassign them first.','⚠');return;}
+  if(!confirm('Delete origin "'+name+'"?')) return;
+  M.dmsOrigins.splice(i,1);
+  if(document.getElementById('page-dms')?.classList.contains('active')) fillDmsOriginSelect();
+  renderAdmin('dmsorigins',null);
+  toast('Origin "'+name+'" deleted.','✓');
 }
 
 function exportDCI(){

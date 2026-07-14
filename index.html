@@ -2399,6 +2399,9 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
       <!-- Summary KPI row -->
       <div class="kpi-grid" id="reportPreviewKPIs" style="grid-template-columns:repeat(4,1fr);margin:0 16px 14px"></div>
 
+      <!-- Charts / breakdown sections -->
+      <div id="reportPreviewCharts" style="margin:0 16px 14px"></div>
+
       <!-- Preview data table -->
       <div class="report-preview-table" id="reportPreviewTable" style="max-height:420px;overflow-y:auto;border-top:1px solid var(--border)"></div>
 
@@ -12813,6 +12816,94 @@ function closeReportPreview(){
   _currentReport=null; _reportData=[];
 }
 
+
+// ============================================================================
+// ------ REPORT CHART & BREAKDOWN HELPERS (shared across all reports) ------
+// ============================================================================
+function rptChartsRow(containerId, chartsSpec){
+  const container = document.getElementById(containerId);
+  if(!container) return;
+  container.innerHTML = chartsSpec.map(c=>
+    '<div class="card mb-3"><div class="card-header"><div class="card-title" style="font-size:12.5px">'+c.title+'</div></div>'
+    +'<div class="card-body"><div class="chart-wrap" style="height:'+(c.height||240)+'px"><canvas id="'+c.id+'"></canvas></div></div></div>'
+  ).join('');
+  chartsSpec.forEach(c=>{
+    const ctx=document.getElementById(c.id);
+    if(!ctx || typeof Chart==='undefined') return;
+    if(charts[c.id]) charts[c.id].destroy();
+    charts[c.id]=new Chart(ctx, c.config);
+  });
+}
+function rptChartsGrid(containerId, chartsSpec){
+  const container = document.getElementById(containerId);
+  if(!container) return;
+  container.innerHTML = '<div class="charts-grid charts-2">' + chartsSpec.map(c=>
+    '<div class="card mb-3"><div class="card-header"><div class="card-title" style="font-size:12.5px">'+c.title+'</div></div>'
+    +'<div class="card-body"><div class="chart-wrap" style="height:'+(c.height||240)+'px"><canvas id="'+c.id+'"></canvas></div></div></div>'
+  ).join('') + '</div>';
+  chartsSpec.forEach(c=>{
+    const ctx=document.getElementById(c.id);
+    if(!ctx || typeof Chart==='undefined') return;
+    if(charts[c.id]) charts[c.id].destroy();
+    charts[c.id]=new Chart(ctx, c.config);
+  });
+}
+function rptBreakdownTable(title, headers, rows, note){
+  return '<div class="card mb-3"><div class="card-header"><div class="card-title" style="font-size:12.5px">'+title+'</div>'
+    +(note?'<span class="text-xs text-muted">'+note+'</span>':'')+'</div>'
+    +'<div class="table-wrap" style="max-height:240px;overflow-y:auto">'+rptTable(rows, headers)+'</div></div>';
+}
+const RPT_PALETTE = ['#1a56db','#dc2626','#0e9f6e','#c2410c','#7c3aed','#0891b2','#ca8a04','#374151','#065f46','#be185d'];
+
+function rptParetoConfig(labels, values){
+  const total = values.reduce((a,b)=>a+b,0)||1;
+  let cum=0;
+  const cumPct = values.map(v=>{ cum+=v; return Math.round(cum/total*100); });
+  return {
+    type:'bar',
+    data:{ labels, datasets:[
+      {type:'bar', label:'Qty', data:values, backgroundColor:'#dc2626', order:2, yAxisID:'y'},
+      {type:'line', label:'Cumulative %', data:cumPct, borderColor:'#1a56db', backgroundColor:'#1a56db', yAxisID:'y1', tension:.3, order:1, pointRadius:3}
+    ]},
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'bottom'}},
+      scales:{ y:{beginAtZero:true, position:'left'}, y1:{beginAtZero:true, max:100, position:'right', grid:{drawOnChartArea:false}, ticks:{callback:v=>v+'%'}} } }
+  };
+}
+function rptBarConfig(labels, datasets, opts){
+  return {
+    type:'bar',
+    data:{ labels, datasets: datasets.map((d,i)=>({backgroundColor:RPT_PALETTE[i%RPT_PALETTE.length], ...d})) },
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'bottom'}}, indexAxis: (opts&&opts.horizontal)?'y':'x', scales:{x:{ticks:{maxRotation:30}}}, ...(opts&&opts.scales?{scales:opts.scales}:{}) }
+  };
+}
+function rptLineConfig(labels, datasets){
+  return {
+    type:'line',
+    data:{ labels, datasets: datasets.map((d,i)=>({borderColor:RPT_PALETTE[i%RPT_PALETTE.length], backgroundColor:RPT_PALETTE[i%RPT_PALETTE.length]+'22', tension:.3, fill:!!d.fill, ...d})) },
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'bottom'}}, scales:{x:{ticks:{maxRotation:0,autoSkip:true}}} }
+  };
+}
+function rptPieConfig(labels, values){
+  return {
+    type:'pie',
+    data:{ labels, datasets:[{data:values, backgroundColor:RPT_PALETTE}] },
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'right'}} }
+  };
+}
+// Groups an array by a key function, summing a value function (or counting if none given)
+function rptGroupSum(arr, keyFn, valFn){
+  const map = {};
+  arr.forEach(item=>{
+    const k = keyFn(item) || 'Unspecified';
+    map[k] = (map[k]||0) + (valFn ? (valFn(item)||0) : 1);
+  });
+  return map;
+}
+function rptSortedEntries(map, limit){
+  const entries = Object.entries(map).sort((a,b)=>b[1]-a[1]);
+  return limit ? entries.slice(0,limit) : entries;
+}
+
 function buildReportPreview(type){
   const fy=getActiveFY();
   const fyLabel=getFYLabel();
@@ -12820,15 +12911,28 @@ function buildReportPreview(type){
   // Build filter bar
   const filterBar = document.getElementById('reportFilterBar');
   const kpiEl = document.getElementById('reportPreviewKPIs');
+  const chartsEl = document.getElementById('reportPreviewCharts');
   const tableEl = document.getElementById('reportPreviewTable');
   const countEl = document.getElementById('reportRowCount');
   const dlEl = document.getElementById('reportDownloadBtns');
   const metaEl = document.getElementById('reportPreviewMeta');
   metaEl.textContent = `Generated: ${today} · Period: ${fyLabel} · ${dateRangeStatusText('reports')} · Live data from system`;
+  if(chartsEl) chartsEl.innerHTML='';
 
   if(type==='otd'){
-    filterBar.innerHTML=rptFilter('rptFY','Financial Year','',true)+rptFilter('rptType','Project Type',['All Types',...M.productTypes]);
-    const src=fyProjects().filter(p=>inDateRange('reports',p.recWood||p.recExt));
+    const custList=[...new Set(fyProjects().map(p=>p.customer).filter(Boolean))].sort();
+    const pmList=[...new Set(fyProjects().map(p=>p.pm).filter(Boolean))].sort();
+    filterBar.innerHTML=rptFilter('rptFY','Financial Year','',true)
+      +rptFilter('rptType','Project Type',['All Types',...M.productTypes])
+      +rptFilter('rptCustomer','Customer',['All Customers',...custList])
+      +rptFilter('rptPM','Project Manager',['All PMs',...pmList]);
+    const fType=document.getElementById('rptType')?.value||'All Types';
+    const fCust=document.getElementById('rptCustomer')?.value||'All Customers';
+    const fPM=document.getElementById('rptPM')?.value||'All PMs';
+    let src=fyProjects().filter(p=>inDateRange('reports',p.recWood||p.recExt));
+    if(fType!=='All Types') src=src.filter(p=>p.type===fType);
+    if(fCust!=='All Customers') src=src.filter(p=>p.customer===fCust);
+    if(fPM!=='All PMs') src=src.filter(p=>p.pm===fPM);
     _reportData=src.map(p=>({
       'Project No':p.sap,'Type':p.type,'Category':p.cat,'Customer':p.customer,'PM':p.pm,
       'File Received':p.recWood||p.recExt||'','Planned Date':p.planWood||p.planExt||'',
@@ -12844,14 +12948,55 @@ function buildReportPreview(type){
       {l:'Total Projects',v:total,c:'blue'},{l:'Completed',v:comp,c:'green'},
       {l:'OTD %',v:otdPct+'%',c:otdPct>=95?'green':'red'},{l:'Delayed',v:comp-otdN,c:'red'}
     ]);
+
+    const monthMap={};
+    src.forEach(p=>{
+      const d=p.recWood||p.recExt; if(!d) return;
+      const mk=String(d).slice(0,7);
+      if(!monthMap[mk]) monthMap[mk]={total:0,otd:0};
+      monthMap[mk].total++;
+      if(p.progress===100 && !isProductionDelay(p,'wood') && !isProductionDelay(p,'ext')) monthMap[mk].otd++;
+    });
+    const months=Object.keys(monthMap).sort();
+    const custGroups={};
+    src.forEach(p=>{
+      const c=p.customer||'Unspecified';
+      if(!custGroups[c]) custGroups[c]={total:0,otd:0};
+      custGroups[c].total++;
+      if(p.progress===100 && !isProductionDelay(p,'wood') && !isProductionDelay(p,'ext')) custGroups[c].otd++;
+    });
+    const custEntries=Object.entries(custGroups).sort((a,b)=>b[1].total-a[1].total).slice(0,8);
+    const delayed=src.filter(p=>isProductionDelay(p,'wood')||isProductionDelay(p,'ext'));
+    const reasonMap=rptGroupSum(delayed, p=>p.dlyReason||'Not Specified');
+    const reasonEntries=rptSortedEntries(reasonMap,8);
+
+    rptChartsGrid('reportPreviewCharts',[
+      {id:'otdTrendChart', title:'📈 Monthly OTD % Trend', config: rptLineConfig(months.map(m=>m.slice(5)+'/'+m.slice(2,4)), [{label:'OTD %',data:months.map(m=>monthMap[m].total?Math.round(monthMap[m].otd/monthMap[m].total*100):0)}])},
+      {id:'otdCustChart', title:'🏢 Customer-wise OTD %', config: rptBarConfig(custEntries.map(e=>e[0]), [{label:'OTD %',data:custEntries.map(e=>e[1].total?Math.round(e[1].otd/e[1].total*100):0)}])},
+      {id:'otdSegChart', title:'🪵 Wood vs Extrusion — On-Time vs Delayed', config: rptPieConfig(['Wood On-Time','Wood Delayed','Ext On-Time','Ext Delayed'], [
+        src.filter(p=>p.hasWood&&!isProductionDelay(p,'wood')).length,
+        src.filter(p=>p.hasWood&&isProductionDelay(p,'wood')).length,
+        src.filter(p=>p.hasExt&&!isProductionDelay(p,'ext')).length,
+        src.filter(p=>p.hasExt&&isProductionDelay(p,'ext')).length,
+      ])},
+      {id:'otdReasonChart', title:'⚠ Delay Reasons (Among Delayed Projects)', config: rptBarConfig(reasonEntries.map(e=>e[0]), [{label:'Count',data:reasonEntries.map(e=>e[1])}], {horizontal:true})},
+    ]);
+
     tableEl.innerHTML=rptTable(_reportData,['Project No','Type','Category','Customer','PM','File Received','Planned Date','Actual Date','Delay (days)','Status','OTD','Override']);
-    countEl.textContent=total+' projects in preview';
+    countEl.textContent=total+' projects in preview'+((fType!=='All Types'||fCust!=='All Customers'||fPM!=='All PMs')?' (filtered)':'');
     dlEl.innerHTML=dlBtns('OTD_Performance',['csv','pdf']);
   }
 
   else if(type==='delay'){
-    filterBar.innerHTML=rptFilter('rptFY','Financial Year','',true)+rptFilter('rptType','Project Type',['All Types',...M.productTypes]);
-    const src=fyProjects().filter(p=>((p.dlyWood||0)>0||(p.dlyExt||0)>0)&&inDateRange('reports',p.recWood||p.recExt));
+    const pmList=[...new Set(fyProjects().map(p=>p.pm).filter(Boolean))].sort();
+    filterBar.innerHTML=rptFilter('rptFY','Financial Year','',true)
+      +rptFilter('rptType','Project Type',['All Types',...M.productTypes])
+      +rptFilter('rptPM','Project Manager',['All PMs',...pmList]);
+    const fType=document.getElementById('rptType')?.value||'All Types';
+    const fPM=document.getElementById('rptPM')?.value||'All PMs';
+    let src=fyProjects().filter(p=>((p.dlyWood||0)>0||(p.dlyExt||0)>0)&&inDateRange('reports',p.recWood||p.recExt));
+    if(fType!=='All Types') src=src.filter(p=>p.type===fType);
+    if(fPM!=='All PMs') src=src.filter(p=>p.pm===fPM);
     _reportData=src.map(p=>({
       'Project No':p.sap,'Type':p.type,'Customer':p.customer,'PM':p.pm,
       'File Received':p.recWood||p.recExt||'','Planned':p.planWood||p.planExt||'',
@@ -12860,48 +13005,108 @@ function buildReportPreview(type){
       'Override Applied':((DB.tatOverrideLog||[]).some(o=>o.projId===p.id))?'Yes':'No',
       'Override Reason':((DB.tatOverrideLog||[]).filter(o=>o.projId===p.id).map(o=>o.reasonCategory)).join('; ')||'—'
     }));
-    // Reason breakdown
-    const reasons={};
-    src.forEach(p=>{const r=p.dlyReason||'Not Specified';reasons[r]=(reasons[r]||0)+1;});
-    const topReason=Object.entries(reasons).sort((a,b)=>b[1]-a[1])[0]||['None',0];
+    const reasons=rptGroupSum(src, p=>p.dlyReason||'Not Specified');
+    const topReason=rptSortedEntries(reasons,1)[0]||['None',0];
     kpiEl.innerHTML=kpiCards([
       {l:'Delayed Projects',v:src.length,c:'red'},{l:'Total Delay Days',v:src.reduce((s,p)=>s+Math.max(p.dlyWood||0,p.dlyExt||0),0),c:'orange'},
-      {l:'Top Reason',v:topReason[0],c:'yellow'},{l:'With Override',v:(DB.tatOverrideLog||[]).length,c:'blue'}
+      {l:'Top Reason',v:topReason[0],c:'yellow'},{l:'With Override',v:src.filter(p=>(DB.tatOverrideLog||[]).some(o=>o.projId===p.id)).length,c:'blue'}
     ]);
+
+    const reasonEntries=rptSortedEntries(reasons,8);
+    const pmDelay=rptGroupSum(src, p=>p.pm||'Unspecified', p=>Math.max(p.dlyWood||0,p.dlyExt||0));
+    const pmEntries=rptSortedEntries(pmDelay,8);
+    const monthMap=rptGroupSum(src, p=>String(p.recWood||p.recExt||'').slice(0,7));
+    delete monthMap[''];
+    const months=Object.keys(monthMap).sort();
+
+    rptChartsGrid('reportPreviewCharts',[
+      {id:'delayReasonChart', title:'⚠ Delay Reason Breakdown', config: rptPieConfig(reasonEntries.map(e=>e[0]), reasonEntries.map(e=>e[1]))},
+      {id:'delayPMChart', title:'👤 Total Delay Days by Project Manager', config: rptBarConfig(pmEntries.map(e=>e[0]), [{label:'Delay Days',data:pmEntries.map(e=>e[1])}])},
+      {id:'delayTrendChart', title:'📈 Delayed Projects per Month', config: rptLineConfig(months.map(m=>m.slice(5)+'/'+m.slice(2,4)), [{label:'Delayed Projects',data:months.map(m=>monthMap[m])}])},
+    ]);
+
     tableEl.innerHTML=rptTable(_reportData,['Project No','Type','Customer','PM','File Received','Planned','Actual','Delay (days)','Delay Reason','Override Applied','Override Reason']);
-    countEl.textContent=src.length+' delayed projects';
+    countEl.textContent=src.length+' delayed projects'+((fType!=='All Types'||fPM!=='All PMs')?' (filtered)':'');
     dlEl.innerHTML=dlBtns('Delay_Analysis',['csv','pdf']);
   }
 
   else if(type==='capacity'){
-    filterBar.innerHTML=rptFilter('rptCapDate','Month','',false,'month');
-    const today2=new Date().toISOString().slice(0,7);
-    const dayKeys=Object.keys(DB.dailyCap||{}).filter(d=>d.startsWith(today2));
-    _reportData=M.workstations.map(w=>{
-      const totalAch=dayKeys.reduce((s,dk)=>s+(DB.dailyCap[dk][w.id]||0),0);
-      const totalCap=w.cap*dayKeys.length;
+    filterBar.innerHTML=rptFilter('rptCapPeriodType','Period Type',['Monthly','Weekly','Daily'])
+      +rptFilter('rptCapDate','Reference Date','',false,'date')
+      +rptFilter('rptCapMachine','Machine',['All Machines',...M.workstations.map(w=>w.name)]);
+    const periodTypeRaw=(document.getElementById('rptCapPeriodType')?.value||'Monthly').toLowerCase();
+    const refDate=document.getElementById('rptCapDate')?.value||today;
+    const fMachine=document.getElementById('rptCapMachine')?.value||'All Machines';
+    const {start,end,label}=resolvePeriod(periodTypeRaw, refDate);
+    const days=_dateRange(start,end);
+    const machines = fMachine==='All Machines' ? M.workstations : M.workstations.filter(w=>w.name===fMachine);
+
+    _reportData=machines.map(w=>{
+      const totalAch=days.reduce((s,d)=>s+wsAchievedOn(w.id,d),0);
+      const totalCap=w.cap*days.length;
       const util=totalCap>0?Math.round(totalAch/totalCap*100):0;
-      const bds=DB.breakdownLog.filter(b=>b.machineId===w.id&&b.breakdownDate.startsWith(today2)).length;
-      return {'Machine':w.name,'Frequency':w.pmFrequency,'Daily Capacity':w.cap,'Days Tracked':dayKeys.length,'Total Achieved':totalAch,'Total Capacity':totalCap,'Utilisation %':util+'%','Breakdowns':bds,'PM Status':w.maintenanceStatus||'Running'};
+      const helpers=days.reduce((s,d)=>s+(parseInt((DB.dailyManpower[d]||{})['hp_'+w.id])||0),0);
+      const bds=(DB.breakdownLog||[]).filter(b=>b.machineId===w.id&&days.includes(b.breakdownDate)).length;
+      return {'Machine':w.name,'Daily Capacity':w.cap,'Days in Period':days.length,'Total Achieved':totalAch,'Total Capacity':totalCap,'Pending':Math.max(0,totalCap-totalAch),'Utilisation %':util+'%','Helper-Days':helpers,'Breakdowns':bds,'PM Status':w.maintenanceStatus||'Running'};
     });
     const avgUtil=_reportData.length?Math.round(_reportData.reduce((s,r)=>s+parseInt(r['Utilisation %']),0)/_reportData.length):0;
-    const topMach=_reportData.sort((a,b)=>parseInt(b['Utilisation %'])-parseInt(a['Utilisation %']))[0]?.Machine||'—';
+    const sorted=[..._reportData].sort((a,b)=>parseInt(b['Utilisation %'])-parseInt(a['Utilisation %']));
+    const topMach=sorted[0]?.Machine||'—';
+    const bottleneck=sorted.filter(r=>parseInt(r['Utilisation %'])>=90);
+    const idle=sorted.filter(r=>parseInt(r['Utilisation %'])<40);
     kpiEl.innerHTML=kpiCards([
-      {l:'Machines Tracked',v:M.workstations.length,c:'blue'},{l:'Avg Utilisation',v:avgUtil+'%',c:avgUtil>=70?'green':'yellow'},
-      {l:'Top Machine',v:topMach,c:'teal'},{l:'Breakdowns This Month',v:DB.breakdownLog.filter(b=>b.breakdownDate.startsWith(today2)).length,c:'red'}
+      {l:'Machines in View',v:machines.length,c:'blue'},{l:'Avg Utilisation',v:avgUtil+'%',c:avgUtil>=70?'green':'yellow'},
+      {l:'Bottleneck Machines (≥90%)',v:bottleneck.length,c:'red'},{l:'Idle Machines (<40%)',v:idle.length,c:'yellow'}
     ]);
-    tableEl.innerHTML=rptTable(_reportData,['Machine','Daily Capacity','Days Tracked','Total Achieved','Total Capacity','Utilisation %','Breakdowns','PM Status']);
-    countEl.textContent=M.workstations.length+' machines in preview';
+
+    const dayTrend=days.map(d=>machines.reduce((s,w)=>s+wsAchievedOn(w.id,d),0));
+    const dayCapTotal=machines.reduce((s,w)=>s+w.cap,0);
+    const helperTrend=days.map(d=>machines.reduce((s,w)=>s+(parseInt((DB.dailyManpower[d]||{})['hp_'+w.id])||0),0));
+
+    rptChartsGrid('reportPreviewCharts',[
+      {id:'capMachChart', title:'🏭 Machine-wise Achieved vs Capacity — '+label, config: rptBarConfig(_reportData.map(r=>r.Machine),[
+        {label:'Achieved',data:_reportData.map(r=>r['Total Achieved'])},
+        {label:'Capacity',data:_reportData.map(r=>r['Total Capacity']),backgroundColor:'#e2e8f0'}
+      ])},
+      {id:'capTrendChart', title:'📈 Daily Achieved vs Capacity — '+label, config: rptLineConfig(days.map(d=>d.slice(5)), [
+        {label:'Achieved',data:dayTrend,fill:true},
+        {label:'Capacity (all machines)',data:days.map(()=>dayCapTotal*(machines.length/M.workstations.length||1)),borderColor:'#94a3b8',borderDash:[5,5],pointRadius:0}
+      ])},
+      {id:'capHelperChart', title:'👷 Helper-Days Trend — '+label, config: rptLineConfig(days.map(d=>d.slice(5)), [{label:'Helpers',data:helperTrend}])},
+    ]);
+
+    let breakdownHtml='';
+    if(bottleneck.length) breakdownHtml+=rptBreakdownTable('🔴 Bottleneck Machines (≥90% Utilisation)',['Machine','Utilisation %','Total Achieved','Total Capacity'],bottleneck.map(r=>({Machine:r.Machine,'Utilisation %':r['Utilisation %'],'Total Achieved':r['Total Achieved'],'Total Capacity':r['Total Capacity']})));
+    if(idle.length) breakdownHtml+=rptBreakdownTable('🟡 Idle / Underutilised Machines (<40% Utilisation)',['Machine','Utilisation %','Total Achieved','Total Capacity'],idle.map(r=>({Machine:r.Machine,'Utilisation %':r['Utilisation %'],'Total Achieved':r['Total Achieved'],'Total Capacity':r['Total Capacity']})));
+    if(breakdownHtml) chartsEl.insertAdjacentHTML('beforeend', breakdownHtml);
+
+    tableEl.innerHTML=rptTable(_reportData,['Machine','Daily Capacity','Days in Period','Total Achieved','Total Capacity','Pending','Utilisation %','Helper-Days','Breakdowns','PM Status']);
+    countEl.textContent=machines.length+' machine(s) — '+label;
     dlEl.innerHTML=dlBtns('Capacity_Utilization',['csv','pdf']);
   }
 
   else if(type==='master'){
-    filterBar.innerHTML=rptFilter('rptFY','Financial Year','',true)+rptFilter('rptType','Project Type',['All Types',...M.productTypes])+rptFilter('rptStatus','Status',['All Status','Complete','In Progress']);
-    const src=fyProjects().filter(p=>inDateRange('reports',p.recWood||p.recExt));
+    const custList=[...new Set(fyProjects().map(p=>p.customer).filter(Boolean))].sort();
+    const engList=[...new Set(fyProjects().map(p=>p.eng).filter(Boolean))].sort();
+    filterBar.innerHTML=rptFilter('rptFY','Financial Year','',true)
+      +rptFilter('rptType','Project Type',['All Types',...M.productTypes])
+      +rptFilter('rptStatus','Status',['All Status','Complete','In Progress'])
+      +rptFilter('rptCustomer','Customer',['All Customers',...custList])
+      +rptFilter('rptEng','Engineer',['All Engineers',...engList]);
+    const fType=document.getElementById('rptType')?.value||'All Types';
+    const fStatus=document.getElementById('rptStatus')?.value||'All Status';
+    const fCust=document.getElementById('rptCustomer')?.value||'All Customers';
+    const fEng=document.getElementById('rptEng')?.value||'All Engineers';
+    let src=fyProjects().filter(p=>inDateRange('reports',p.recWood||p.recExt));
+    if(fType!=='All Types') src=src.filter(p=>p.type===fType);
+    if(fStatus!=='All Status') src=src.filter(p=>(p.progress===100?'Complete':'In Progress')===fStatus);
+    if(fCust!=='All Customers') src=src.filter(p=>p.customer===fCust);
+    if(fEng!=='All Engineers') src=src.filter(p=>p.eng===fEng);
     _reportData=src.map(p=>{
       (p.bom||[]).forEach(ensureBomLineStructure);
       const colors=[...new Set((p.bom||[]).map(b=>b.colorFinish).filter(Boolean))];
       const chars=[...new Set((p.bom||[]).flatMap(b=>b.specialChars||[]))];
+      const pendingLines=(p.bom||[]).filter(b=>{ const last=b.route[b.route.length-1]; return last ? (b.stageData[last].qcApproved||0)<b.qty : true; }).length;
       return {
         'Project ID':p.id,'SAP No':p.sap,'Type':p.type,'Category':p.cat,'Customer':p.customer,
         'Project Manager':p.pm,'Engineer':p.eng,'PO':p.po||'—',
@@ -12910,6 +13115,7 @@ function buildReportPreview(type){
         'Progress %':p.progress||0,'Status':p.progress===100?'Complete':'In Progress',
         'Wood Status':p.woodSt||'—','Ext Status':p.extSt||'N/A',
         'Has Wood':p.hasWood?'Yes':'No','Has Ext':p.hasExt?'Yes':'No',
+        'Pending BOM Lines':pendingLines,
         'Colors/Finishes Used':colors.length?colors.join(', '):'—',
         'Special Characteristics Used':chars.length?chars.join(', '):'—',
         'Certifications Required':(p.certifications&&p.certifications.length)?p.certifications.join(', '):'—'
@@ -12919,14 +13125,38 @@ function buildReportPreview(type){
       {l:'Total Projects',v:src.length,c:'blue'},{l:'Completed',v:src.filter(p=>p.progress===100).length,c:'green'},
       {l:'In Progress',v:src.filter(p=>p.progress>0&&p.progress<100).length,c:'teal'},{l:'Not Started',v:src.filter(p=>p.progress===0).length,c:'yellow'}
     ]);
-    tableEl.innerHTML=rptTable(_reportData,['Project ID','SAP No','Type','Category','Customer','Project Manager','Engineer','Progress %','Status','Wood Received','Wood Planned','Wood Actual','Wood Delay','Ext Received','Ext Planned','Ext Actual','Ext Delay','Colors/Finishes Used','Special Characteristics Used','Certifications Required']);
-    countEl.textContent=src.length+' projects in preview';
+
+    const engWorkload=rptSortedEntries(rptGroupSum(src, p=>p.eng||'Unspecified'),10);
+    const custProjects=rptSortedEntries(rptGroupSum(src, p=>p.customer||'Unspecified'),10);
+    const statusDist=[src.filter(p=>p.progress===100).length, src.filter(p=>p.progress>0&&p.progress<100).length, src.filter(p=>p.progress===0).length];
+    const avgProgress = src.length ? Math.round(src.reduce((s,p)=>s+(p.progress||0),0)/src.length) : 0;
+
+    rptChartsGrid('reportPreviewCharts',[
+      {id:'masterEngChart', title:'👷 Engineer-wise Workload', config: rptBarConfig(engWorkload.map(e=>e[0]),[{label:'Projects',data:engWorkload.map(e=>e[1])}],{horizontal:true})},
+      {id:'masterCustChart', title:'🏢 Customer-wise Projects', config: rptBarConfig(custProjects.map(e=>e[0]),[{label:'Projects',data:custProjects.map(e=>e[1])}],{horizontal:true})},
+      {id:'masterStatusChart', title:'📊 Status Distribution', config: rptPieConfig(['Complete','In Progress','Not Started'], statusDist)},
+    ]);
+    kpiEl.insertAdjacentHTML('beforeend', kpiCards([{l:'Avg Progress',v:avgProgress+'%',c:avgProgress>=70?'green':'yellow'}]));
+
+    tableEl.innerHTML=rptTable(_reportData,['Project ID','SAP No','Type','Category','Customer','Project Manager','Engineer','Progress %','Status','Pending BOM Lines','Wood Received','Wood Planned','Wood Actual','Wood Delay','Ext Received','Ext Planned','Ext Actual','Ext Delay','Colors/Finishes Used','Special Characteristics Used','Certifications Required']);
+    countEl.textContent=src.length+' projects in preview'+((fType!=='All Types'||fStatus!=='All Status'||fCust!=='All Customers'||fEng!=='All Engineers')?' (filtered)':'');
     dlEl.innerHTML=dlBtns('Master_Project_Export',['csv']);
   }
 
   else if(type==='quality'){
-    filterBar.innerHTML=rptFilter('rptFY','Financial Year','',true)+rptFilter('rptQCStatus','Disposition',['All','Rework','Scrap']);
-    const src=(DB.rejectLog||[]).filter(r=>inDateRange('reports',r.date));
+    const stageList=[...new Set((DB.rejectLog||[]).map(r=>r.stage).filter(Boolean))].sort();
+    const catList=[...new Set((DB.rejectLog||[]).map(r=>r.category).filter(Boolean))].sort();
+    filterBar.innerHTML=rptFilter('rptFY','Financial Year','',true)
+      +rptFilter('rptQCStatus','Disposition',['All','rework','scrap'])
+      +rptFilter('rptQCStage','Stage / Process',['All Stages',...stageList])
+      +rptFilter('rptQCCat','Rejection Category',['All Categories',...catList]);
+    const fDisp=document.getElementById('rptQCStatus')?.value||'All';
+    const fStage=document.getElementById('rptQCStage')?.value||'All Stages';
+    const fCat=document.getElementById('rptQCCat')?.value||'All Categories';
+    let src=(DB.rejectLog||[]).filter(r=>inDateRange('reports',r.date));
+    if(fDisp!=='All') src=src.filter(r=>r.disposition===fDisp);
+    if(fStage!=='All Stages') src=src.filter(r=>r.stage===fStage);
+    if(fCat!=='All Categories') src=src.filter(r=>r.category===fCat);
     _reportData=src.map(r=>{
       const rp=DB.projects.find(x=>x.id===r.projId);
       const rb=r.sourceLineId ? rp?.bom?.find(b=>b.lineId===r.sourceLineId) : rp?.bom?.find(b=>b.item===r.item);
@@ -12941,20 +13171,76 @@ function buildReportPreview(type){
       };
     });
     const totalQty=src.reduce((s,r)=>s+(r.qty||0),0);
-    const catCounts={};src.forEach(r=>{const c=r.category||'Other';catCounts[c]=(catCounts[c]||0)+(r.qty||0);});
-    const topCat=Object.entries(catCounts).sort((a,b)=>b[1]-a[1])[0]||['None',0];
+    const catCounts=rptGroupSum(src, r=>r.category||'Other', r=>r.qty);
+    const topCat=rptSortedEntries(catCounts,1)[0]||['None',0];
     kpiEl.innerHTML=kpiCards([
       {l:'Total Records',v:src.length,c:'red'},{l:'Total Qty Rejected',v:totalQty,c:'orange'},
-      {l:'Top Category',v:topCat[0],c:'yellow'},{l:'Open/Rework',v:src.filter(r=>r.status!=='Closed').length,c:'purple'}
+      {l:'Top Category',v:topCat[0],c:'yellow'},{l:'Rework Records',v:src.filter(r=>r.disposition==='rework').length,c:'purple'}
     ]);
+
+    // FY-scoped projects for PPM/FPY (lifetime QC counts on FY-filtered projects — not day-precise, see note)
+    let totalApproved=0, totalRejectedAgg=0;
+    const stageStats={};
+    fyProjects().forEach(p=>(p.bom||[]).forEach(b=>{
+      ensureBomLineStructure(b);
+      b.route.forEach(st=>{
+        const sd=b.stageData[st]; if(!sd) return;
+        totalApproved+=sd.qcApproved||0; totalRejectedAgg+=sd.qcRejected||0;
+        if(!stageStats[st]) stageStats[st]={approved:0,rejected:0};
+        stageStats[st].approved+=sd.qcApproved||0; stageStats[st].rejected+=sd.qcRejected||0;
+      });
+    }));
+    const ppm = (totalApproved+totalRejectedAgg)>0 ? Math.round(totalRejectedAgg/(totalApproved+totalRejectedAgg)*1000000) : 0;
+    const fpy = (totalApproved+totalRejectedAgg)>0 ? Math.round(totalApproved/(totalApproved+totalRejectedAgg)*10000)/100 : 100;
+    kpiEl.insertAdjacentHTML('beforeend', kpiCards([{l:'PPM (FY, Lifetime QC)',v:ppm,c:ppm<5000?'green':'red'},{l:'First Pass Yield',v:fpy+'%',c:fpy>=95?'green':'yellow'}]));
+
+    const catEntries=rptSortedEntries(catCounts,10);
+    const stageRejMap=rptGroupSum(src, r=>r.stage||r.workstation||'Unspecified', r=>r.qty);
+    const stageEntries=rptSortedEntries(stageRejMap,10);
+    const compRejMap=rptGroupSum(src, r=>r.item||'Unspecified', r=>r.qty);
+    const compEntries=rptSortedEntries(compRejMap,10);
+    const dayMap=rptGroupSum(src, r=>r.date, r=>r.qty);
+    const days2=Object.keys(dayMap).sort();
+    const rootCauseMap=rptGroupSum(src.filter(r=>r.rootCause), r=>r.rootCause);
+    const rootCauseEntries=rptSortedEntries(rootCauseMap,8);
+
+    rptChartsGrid('reportPreviewCharts',[
+      {id:'qcParetoChart', title:'📊 Pareto Analysis — Rejection by Category', config: rptParetoConfig(catEntries.map(e=>e[0]), catEntries.map(e=>e[1]))},
+      {id:'qcStageChart', title:'🏭 Rejection by Process / Stage', config: rptBarConfig(stageEntries.map(e=>e[0]), [{label:'Qty Rejected',data:stageEntries.map(e=>e[1])}], {horizontal:true})},
+      {id:'qcCompChart', title:'📦 Rejection by Product / Component', config: rptBarConfig(compEntries.map(e=>e[0]), [{label:'Qty Rejected',data:compEntries.map(e=>e[1])}], {horizontal:true})},
+      {id:'qcTrendChart', title:'📈 Rejection Trend Over Time', config: rptLineConfig(days2, [{label:'Qty Rejected',data:days2.map(d=>dayMap[d]),fill:true}])},
+    ]);
+
+    let breakdownHtml='';
+    const fpyByStage=Object.entries(stageStats).map(([st,s])=>({Stage:st,'Approved':s.approved,'Rejected':s.rejected,'FPY %':(s.approved+s.rejected)>0?Math.round(s.approved/(s.approved+s.rejected)*10000)/100+'%':'—'}));
+    breakdownHtml+=rptBreakdownTable('✅ First Pass Yield by Stage (FY, Lifetime QC)',['Stage','Approved','Rejected','FPY %'],fpyByStage);
+    const reworkLines=[]; fyProjects().forEach(p=>(p.bom||[]).forEach(b=>{ if(b.isRework) reworkLines.push({Project:p.sap,Component:b.item,Qty:b.qty,'Reworked From Stage':b.reworkSourceStage||'—','Rework Date':b.reworkDate||'—','Reason':b.reworkReason||'—'}); }));
+    breakdownHtml+=rptBreakdownTable('🔁 Rework Analysis — Auto-Created Rework BOM Lines',['Project','Component','Qty','Reworked From Stage','Rework Date','Reason'],reworkLines,reworkLines.length+' rework line(s)');
+    if(rootCauseEntries.length) breakdownHtml+=rptBreakdownTable('🔍 Root Cause Analysis — Most Frequent Root Causes',['Root Cause','Occurrences'],rootCauseEntries.map(e=>({'Root Cause':e[0],'Occurrences':e[1]})),'Grouped from QC-entered root cause remarks');
+    chartsEl.insertAdjacentHTML('beforeend', breakdownHtml);
+
     tableEl.innerHTML=rptTable(_reportData,['Date','Project','Component','Color / Finish','Special Characteristics','Stage','Qty Rejected','Category','Disposition','QC Person','Root Cause','Status','Rework BOM Line']);
-    countEl.textContent=src.length+' rejection records';
+    countEl.textContent=src.length+' rejection records'+((fDisp!=='All'||fStage!=='All Stages'||fCat!=='All Categories')?' (filtered)':'');
     dlEl.innerHTML=dlBtns('Quality_Rejection_Report',['csv','pdf']);
   }
 
   else if(type==='maintenance'){
-    filterBar.innerHTML=rptFilter('rptMaintSeg','Segment',['All Segments','🏭 Production','⚡ Utility','🔨 Hand Machine'])+rptFilter('rptMaintPeriod','Period',['Last 30 Days','Last 90 Days','All Time']);
-    const bds=(DB.breakdownLog||[]).filter(b=>inDateRange('reports',b.breakdownDate));
+    if(typeof generatePMSchedule==='function') generatePMSchedule(); // ensure PM data exists even if the PM tab hasn't been opened this session
+    const allEquipNames=[...M.workstations.map(w=>w.name),...(M.utilityEquipment||[]).map(w=>w.name),...(M.handTools||[]).map(w=>w.name)];
+    filterBar.innerHTML=rptFilter('rptMaintSeg','Segment',['All Segments','production','utility','handmachine'])
+      +rptFilter('rptMaintPeriod','Period',['Last 30 Days','Last 90 Days','All Time'])
+      +rptFilter('rptMaintMachine','Machine / Equipment',['All Machines',...allEquipNames]);
+    const fSeg=document.getElementById('rptMaintSeg')?.value||'All Segments';
+    const fPeriod=document.getElementById('rptMaintPeriod')?.value||'Last 30 Days';
+    const fMachine=document.getElementById('rptMaintMachine')?.value||'All Machines';
+    let bds=(DB.breakdownLog||[]).filter(b=>inDateRange('reports',b.breakdownDate));
+    if(fSeg!=='All Segments') bds=bds.filter(b=>(b.segment||'production')===fSeg);
+    if(fMachine!=='All Machines') bds=bds.filter(b=>b.machineName===fMachine);
+    if(fPeriod!=='All Time'){
+      const cutoffDays = fPeriod==='Last 30 Days' ? 30 : 90;
+      const cutoff = new Date(Date.now()-cutoffDays*86400000).toISOString().split('T')[0];
+      bds=bds.filter(b=>b.breakdownDate>=cutoff);
+    }
     _reportData=bds.map(b=>({
       'Date':b.breakdownDate,'Segment':b.segment||'production','Equipment':b.machineName,
       'Category':b.category,'Priority':b.priority,'Technician':b.technicianName,
@@ -12963,20 +13249,65 @@ function buildReportPreview(type){
       'RCA Required':b.whyWhyId?'Yes':'No',
       'RCA Status':b.whyWhyId?(DB.whyWhyLog.find(w=>w.id===b.whyWhyId)?.status||'—'):'N/A'
     }));
-    const pmDone=(DB.pmSchedule||[]).filter(e=>e.actualDate).length;
-    const pmOnTime=(DB.pmSchedule||[]).filter(e=>e.status==='Completed').length;
+    const pmAll=(DB.pmSchedule||[]);
+    const pmInScope = fSeg!=='All Segments' ? pmAll.filter(e=>e.segment===fSeg) : pmAll;
+    const pmDone=pmInScope.filter(e=>e.actualDate).length;
+    const pmOnTime=pmInScope.filter(e=>e.status==='Completed').length;
+    const pmPending=pmInScope.filter(e=>e.status==='Pending').length;
     kpiEl.innerHTML=kpiCards([
       {l:'Total Breakdowns',v:bds.length,c:'red'},{l:'Total Downtime',v:bds.reduce((s,b)=>s+(b.downtimeHours||0),0).toFixed(1)+'h',c:'orange'},
-      {l:'PM Completed',v:pmDone,c:'teal'},{l:'PM Compliance',v:pmDone?Math.round(pmOnTime/pmDone*100)+'%':'—',c:pmDone&&(pmOnTime/pmDone)>=0.9?'green':'yellow'}
+      {l:'PM Compliance',v:pmDone?Math.round(pmOnTime/pmDone*100)+'%':'—',c:pmDone&&(pmOnTime/pmDone)>=0.9?'green':'yellow'},{l:'Pending PM Activities',v:pmPending,c:pmPending>0?'yellow':'green'}
     ]);
+
+    // MTBF / MTTR / downtime per machine
+    const byMachine={};
+    bds.forEach(b=>{
+      const m=b.machineName||'Unspecified';
+      if(!byMachine[m]) byMachine[m]={count:0,downtime:0,dates:[]};
+      byMachine[m].count++; byMachine[m].downtime+=b.downtimeHours||0; byMachine[m].dates.push(b.breakdownDate);
+    });
+    const machineStats=Object.entries(byMachine).map(([m,s])=>{
+      const sortedDates=s.dates.slice().sort();
+      let mtbfDays='—';
+      if(sortedDates.length>1){
+        const spanDays=(new Date(sortedDates[sortedDates.length-1])-new Date(sortedDates[0]))/86400000;
+        mtbfDays=Math.round(spanDays/(sortedDates.length-1));
+      }
+      return {Machine:m,'Breakdowns':s.count,'Total Downtime (h)':s.downtime.toFixed(1),'MTTR (h/breakdown)':(s.downtime/s.count).toFixed(1),'MTBF (days)':mtbfDays};
+    }).sort((a,b)=>b.Breakdowns-a.Breakdowns);
+
+    const monthMap=rptGroupSum(bds, b=>String(b.breakdownDate||'').slice(0,7));
+    delete monthMap[''];
+    const months=Object.keys(monthMap).sort();
+    const downtimeByMachine=rptSortedEntries(rptGroupSum(bds, b=>b.machineName||'Unspecified', b=>b.downtimeHours), 10);
+    const sparesMap=rptGroupSum(bds.filter(b=>b.sparePartsUsed), b=>b.sparePartsUsed.trim());
+    const sparesEntries=rptSortedEntries(sparesMap,8);
+
+    rptChartsGrid('reportPreviewCharts',[
+      {id:'maintTrendChart', title:'📈 Breakdown Trend (Monthly)', config: rptLineConfig(months.map(m=>m.slice(5)+'/'+m.slice(2,4)), [{label:'Breakdowns',data:months.map(m=>monthMap[m])}])},
+      {id:'maintDowntimeChart', title:'⏱ Machine-wise Downtime (Hours)', config: rptBarConfig(downtimeByMachine.map(e=>e[0]), [{label:'Downtime (h)',data:downtimeByMachine.map(e=>Math.round(e[1]*10)/10)}], {horizontal:true})},
+      {id:'maintSparesChart', title:'🔩 Most Frequently Used Spare Parts (by mention)', config: sparesEntries.length ? rptBarConfig(sparesEntries.map(e=>e[0]), [{label:'Times Used',data:sparesEntries.map(e=>e[1])}], {horizontal:true}) : rptBarConfig(['No data'],[{label:'Times Used',data:[0]}])},
+    ]);
+
+    let breakdownHtml='';
+    breakdownHtml+=rptBreakdownTable('⏱ MTBF / MTTR by Machine',['Machine','Breakdowns','Total Downtime (h)','MTTR (h/breakdown)','MTBF (days)'],machineStats);
+    const pendingPM=pmInScope.filter(e=>e.status==='Pending').map(e=>({Machine:e.machineName,Segment:e.segment,'Planned Date':e.plannedDate,Frequency:e.frequency,'Assigned Technician':e.technicianName||'Unassigned'}));
+    breakdownHtml+=rptBreakdownTable('🛡 Pending Preventive Maintenance Activities',['Machine','Segment','Planned Date','Frequency','Assigned Technician'],pendingPM,pendingPM.length+' pending');
+    const rcaRows=(DB.whyWhyLog||[]).filter(w=>inDateRange('reports',w.breakdownDate)).map(w=>({Machine:w.machineName,Date:w.breakdownDate,'Root Cause':w.rootCause||'—','Corrective Action':w.immediateAction||'—','Preventive Action':w.preventiveAction||'—',Responsible:w.responsiblePerson||'—','Target Date':w.targetDate||'—',Status:w.status}));
+    breakdownHtml+=rptBreakdownTable('🔍 RCA & Corrective/Preventive Actions (Why-Why Log)',['Machine','Date','Root Cause','Corrective Action','Preventive Action','Responsible','Target Date','Status'],rcaRows,'Note: no cost or spare-parts inventory data is tracked in this system yet — spare parts above reflect free-text mentions on breakdown records, not stock levels');
+    chartsEl.insertAdjacentHTML('beforeend', breakdownHtml);
+
     tableEl.innerHTML=rptTable(_reportData,['Date','Segment','Equipment','Category','Priority','Technician','Downtime (h)','Problem','Status After','RCA Required','RCA Status']);
-    countEl.textContent=bds.length+' breakdown records';
+    countEl.textContent=bds.length+' breakdown records'+((fSeg!=='All Segments'||fPeriod!=='Last 30 Days'||fMachine!=='All Machines')?' (filtered)':'');
     dlEl.innerHTML=dlBtns('Maintenance_Report',['csv','pdf']);
   }
 
   else if(type==='iso'){
-    filterBar.innerHTML=rptFilter('rptISOModule','Module',['All','Project','Maintenance','DMS','CycleTime','Quality','Capacity']);
-    const log=(DB.auditLog||[]).filter(a=>inDateRange('reports',a.ts));
+    const modList=['All','Project','Maintenance','DMS','CycleTime','Quality','Capacity','Tracker','User Management'];
+    filterBar.innerHTML=rptFilter('rptISOModule','Module',modList);
+    const fMod=document.getElementById('rptISOModule')?.value||'All';
+    let log=(DB.auditLog||[]).filter(a=>inDateRange('reports',a.ts));
+    if(fMod!=='All') log=log.filter(a=>(a.module||'')===fMod);
     _reportData=log.slice(0,500).map(a=>({
       'Timestamp':a.ts,'User':a.user,'Action':a.action,'Module':a.module||'—',
       'Entity':a.entity||'—','Field':a.field||'—','Old Value':a.old||'—','New Value':a.nw||'—','IP':a.ip||'—'
@@ -12992,19 +13323,36 @@ function buildReportPreview(type){
       {l:'Audit Entries',v:log.length,c:'blue'},{l:'Controlled Docs',v:(DB.dmsDocuments||[]).length,c:'green'},
       {l:'Active Docs',v:(DB.dmsDocuments||[]).filter(d=>d.status==='Active').length,c:'teal'},{l:'Total Revisions',v:(DB.dmsDocuments||[]).reduce((s,d)=>s+(d.revisions?.length||0),0),c:'purple'}
     ]);
-    tableEl.innerHTML='<div style="padding:12px 14px;font-weight:700;font-size:12px;border-bottom:1px solid var(--border)">📋 Document Control Index (DCI)</div>'+rptTable(dci,['Doc No','Document Name','Department','Category','Level','Status','Current Rev','Rev Date','Approved By'])+'<div style="padding:12px 14px;font-weight:700;font-size:12px;border-bottom:1px solid var(--border);margin-top:16px">🔍 Audit Trail (Last 100)</div>'+rptTable(_reportData.slice(0,100),['Timestamp','User','Action','Module','Entity','Field','Old Value','New Value']);
-    countEl.textContent=log.length+' audit entries + '+(DB.dmsDocuments||[]).length+' DCI records';
+    const modEntries=rptSortedEntries(rptGroupSum(log, a=>a.module||'Unspecified'),8);
+    rptChartsGrid('reportPreviewCharts',[
+      {id:'isoModChart', title:'📁 Audit Entries by Module', config: rptPieConfig(modEntries.map(e=>e[0]), modEntries.map(e=>e[1]))},
+    ]);
+    tableEl.innerHTML='<div style="padding:12px 14px;font-weight:700;font-size:12px;border-bottom:1px solid var(--border)">📋 Document Control Index (DCI)</div>'+rptTable(dci,['Doc No','Document Name','Department','Category','Level','Status','Current Rev','Rev Date','Approved By'])+'<div style="padding:12px 14px;font-weight:700;font-size:12px;border-bottom:1px solid var(--border);margin-top:16px">🔍 Audit Trail (Last 100'+(fMod!=='All'?', '+fMod:'')+')</div>'+rptTable(_reportData.slice(0,100),['Timestamp','User','Action','Module','Entity','Field','Old Value','New Value']);
+    countEl.textContent=log.length+' audit entries + '+(DB.dmsDocuments||[]).length+' DCI records'+(fMod!=='All'?' (filtered)':'');
     dlEl.innerHTML=dlBtns('ISO_Audit_Pack',['csv']);
   }
 
   else if(type==='mis'){
     filterBar.innerHTML=rptFilter('rptFY','Financial Year','',true);
+    if(typeof generatePMSchedule==='function') generatePMSchedule();
     const src=fyProjects().filter(p=>inDateRange('reports',p.recWood||p.recExt));
     const comp=src.filter(p=>p.progress===100).length;
     const otd=src.filter(p=>p.progress===100&&!isProductionDelay(p,'wood')&&!isProductionDelay(p,'ext')).length;
     const dlyProj=src.filter(p=>isProductionDelay(p,'wood')||isProductionDelay(p,'ext')).length;
-    const totalRej=(DB.rejectLog||[]).filter(r=>inDateRange('reports',r.date)).reduce((s,r)=>s+(r.qty||0),0);
-    const bds=(DB.breakdownLog||[]).filter(b=>inDateRange('reports',b.breakdownDate)).length;
+    const rejLog=(DB.rejectLog||[]).filter(r=>inDateRange('reports',r.date));
+    const totalRej=rejLog.reduce((s,r)=>s+(r.qty||0),0);
+    const bdLog=(DB.breakdownLog||[]).filter(b=>inDateRange('reports',b.breakdownDate));
+    const bds=bdLog.length;
+    const pmDone=(DB.pmSchedule||[]).filter(e=>e.actualDate).length;
+    const pmOnTime=(DB.pmSchedule||[]).filter(e=>e.status==='Completed').length;
+    const totalDailyCap=M.workstations.reduce((a,w)=>a+w.cap,0);
+    const thisMonth=today.slice(0,7);
+    const monthDays=Object.keys(DB.dailyCap||{}).filter(d=>d.startsWith(thisMonth));
+    const monthAchieved=monthDays.reduce((s,d)=>s+M.workstations.reduce((s2,w)=>s2+(DB.dailyCap[d][w.id]||0),0),0);
+    const monthCap=totalDailyCap*monthDays.length;
+    const capUtil=monthCap>0?Math.round(monthAchieved/monthCap*100):0;
+    const totalHelperDays=monthDays.reduce((s,d)=>s+M.workstations.reduce((s2,w)=>s2+(parseInt((DB.dailyManpower[d]||{})['hp_'+w.id])||0),0),0);
+
     _reportData=[
       {Metric:'Total Projects (FY)',Value:src.length,Target:'—',Status:'—'},
       {Metric:'Completed Projects',Value:comp,Target:'—',Status:'—'},
@@ -13012,8 +13360,10 @@ function buildReportPreview(type){
       {Metric:'Approved TAT Overrides',Value:(DB.tatOverrideLog||[]).length,Target:'—',Status:'Excluded from OTD'},
       {Metric:'Production Delayed Projects',Value:dlyProj,Target:'0',Status:dlyProj===0?'✅':'❌'},
       {Metric:'Total Rejections (QC)',Value:totalRej,Target:'0',Status:totalRej===0?'✅':'⚠'},
-      {Metric:'Machine Breakdowns (All Time)',Value:bds,Target:'—',Status:'—'},
-      {Metric:'PM Compliance %',Value:(() => {const done=(DB.pmSchedule||[]).filter(e=>e.actualDate).length;const onTime=(DB.pmSchedule||[]).filter(e=>e.status==='Completed').length;return done?Math.round(onTime/done*100)+'%':'—';})(),Target:'90%',Status:'—'},
+      {Metric:'Machine Breakdowns (Range)',Value:bds,Target:'—',Status:'—'},
+      {Metric:'PM Compliance %',Value:pmDone?Math.round(pmOnTime/pmDone*100)+'%':'—',Target:'90%',Status:'—'},
+      {Metric:'Capacity Utilisation % (This Month)',Value:capUtil+'%',Target:'80%',Status:capUtil>=80?'✅':'⚠'},
+      {Metric:'Helper-Days (This Month)',Value:totalHelperDays,Target:'—',Status:'—'},
       {Metric:'Controlled Documents (DMS)',Value:(DB.dmsDocuments||[]).filter(d=>d.status==='Active').length,Target:'—',Status:'—'},
       ...['CD','CR','AD','R&D'].map(t=>({Metric:t+' Projects',Value:src.filter(p=>p.type===t).length,Target:'—',Status:'—'})),
     ];
@@ -13021,6 +13371,26 @@ function buildReportPreview(type){
       {l:'OTD %',v:comp?Math.round(otd/comp*100)+'%':'—',c:comp&&(otd/comp)>=0.95?'green':'red'},
       {l:'Total Projects',v:src.length,c:'blue'},{l:'Completed',v:comp,c:'green'},{l:'Rejections',v:totalRej,c:totalRej===0?'teal':'red'}
     ]);
+    kpiEl.insertAdjacentHTML('beforeend', kpiCards([
+      {l:'Capacity Utilisation',v:capUtil+'%',c:capUtil>=80?'green':'yellow'},{l:'PM Compliance',v:pmDone?Math.round(pmOnTime/pmDone*100)+'%':'—',c:'teal'},
+      {l:'Breakdowns (Range)',v:bds,c:'orange'},{l:'Helper-Days (Month)',v:totalHelperDays,c:'purple'}
+    ]));
+
+    const typeDist=['CD','CR','AD','R&D'].map(t=>src.filter(p=>p.type===t).length);
+    const rejByCat=rptSortedEntries(rptGroupSum(rejLog, r=>r.category||'Other', r=>r.qty),6);
+    const machUtil=M.workstations.map(w=>{
+      const ach=monthDays.reduce((s,d)=>s+(DB.dailyCap[d][w.id]||0),0);
+      const cap=w.cap*monthDays.length;
+      return {name:w.name, util: cap>0?Math.round(ach/cap*100):0};
+    }).sort((a,b)=>b.util-a.util).slice(0,8);
+
+    rptChartsGrid('reportPreviewCharts',[
+      {id:'misStatusChart', title:'📊 Project Status', config: rptPieConfig(['Completed','In Progress','Not Started'], [comp, src.filter(p=>p.progress>0&&p.progress<100).length, src.filter(p=>p.progress===0).length])},
+      {id:'misTypeChart', title:'📁 Project Mix by Type', config: rptPieConfig(['CD','CR','AD','R&D'], typeDist)},
+      {id:'misRejChart', title:'⚠ Rejection by Category', config: rejByCat.length ? rptBarConfig(rejByCat.map(e=>e[0]),[{label:'Qty',data:rejByCat.map(e=>e[1])}]) : rptBarConfig(['No data'],[{label:'Qty',data:[0]}])},
+      {id:'misCapChart', title:'🏭 Top Machines by Utilisation (This Month)', config: rptBarConfig(machUtil.map(m=>m.name),[{label:'Utilisation %',data:machUtil.map(m=>m.util)}],{horizontal:true})},
+    ]);
+
     tableEl.innerHTML=rptTable(_reportData,['Metric','Value','Target','Status']);
     countEl.textContent='Executive summary — '+_reportData.length+' KPI rows';
     dlEl.innerHTML=dlBtns('Management_MIS',['csv','pdf']);
@@ -13039,11 +13409,24 @@ function rptFilter(id, label, options, isFY=false, type='select'){
     // Reuse the topbar FY selector value
     return `<div class="form-group"><label class="form-label" style="font-size:11px">${label}</label><span class="fw-600" style="font-size:13px">${getFYLabel()}</span></div>`;
   }
+  // IMPORTANT: buildReportPreview() rebuilds this entire filter bar's HTML every
+  // time ANY filter changes (before reading any filter's value) — so without
+  // this, every dropdown would silently reset to its default option the instant
+  // it fired its own onchange, making the selection a no-op. Capturing the
+  // element's CURRENT value here (while the old element still exists, just
+  // before it gets replaced) and re-applying it to the freshly-built element
+  // is what makes the selection actually stick.
+  const preserveVal = document.getElementById(id)?.value;
   if(type==='month'){
-    return `<div class="form-group"><label class="form-label" style="font-size:11px">${label}</label><input type="month" id="${id}" class="form-input" style="height:32px" value="${new Date().toISOString().slice(0,7)}" onchange="buildReportPreview(_currentReport)"></div>`;
+    const val = preserveVal || new Date().toISOString().slice(0,7);
+    return `<div class="form-group"><label class="form-label" style="font-size:11px">${label}</label><input type="month" id="${id}" class="form-input" style="height:32px" value="${val}" onchange="buildReportPreview(_currentReport)"></div>`;
+  }
+  if(type==='date'){
+    const val = preserveVal || new Date().toISOString().split('T')[0];
+    return `<div class="form-group"><label class="form-label" style="font-size:11px">${label}</label><input type="date" id="${id}" class="form-input" style="height:32px" value="${val}" onchange="buildReportPreview(_currentReport)"></div>`;
   }
   if(!options||!options.length) return '';
-  return `<div class="form-group"><label class="form-label" style="font-size:11px">${label}</label><select id="${id}" class="fsel" style="height:32px" onchange="buildReportPreview(_currentReport)">${options.map(o=>`<option>${o}</option>`).join('')}</select></div>`;
+  return `<div class="form-group"><label class="form-label" style="font-size:11px">${label}</label><select id="${id}" class="fsel" style="height:32px" onchange="buildReportPreview(_currentReport)">${options.map(o=>`<option${preserveVal===o?' selected':''}>${o}</option>`).join('')}</select></div>`;
 }
 
 // -- Helper: render a data table for preview --

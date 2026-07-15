@@ -214,8 +214,8 @@ body.app-locked #loginScreen{display:flex}
 body.app-locked .sidebar,body.app-locked .main{display:none}
 .login-card{background:var(--surface);border-radius:16px;padding:38px 40px 32px;width:380px;max-width:90vw;box-shadow:0 25px 70px rgba(0,0,0,.45);border:1px solid rgba(255,255,255,.06)}
 .login-logo{display:flex;align-items:center;gap:10px;margin-bottom:22px}
-.login-logo-icon{width:38px;height:38px;border-radius:9px;background:linear-gradient(135deg,var(--accent),#0e3fa8);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-family:'Space Grotesk',sans-serif;font-size:15px}
-.login-title{font-family:'Space Grotesk',sans-serif;font-size:15px;font-weight:700;color:var(--text-primary)}
+.login-logo-img{max-width:220px;width:100%;height:auto;display:block}
+.login-title{font-family:'Space Grotesk',sans-serif;font-size:14px;font-weight:700;color:var(--text-primary)}
 .login-subtitle{font-size:11px;color:var(--text-muted);letter-spacing:.3px}
 .login-field{margin-bottom:14px}
 .login-field label{display:block;font-size:11.5px;font-weight:600;color:var(--text-muted);margin-bottom:5px}
@@ -224,8 +224,6 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
 .login-error{display:none;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;font-size:12px;padding:8px 12px;border-radius:7px;margin-bottom:14px}
 .login-btn{width:100%;height:42px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:13.5px;font-weight:700;cursor:pointer;margin-top:4px}
 .login-btn:hover{background:var(--accent-dark)}
-.login-demo-box{margin-top:20px;padding:12px 14px;background:var(--surface2);border-radius:8px;font-size:10.5px;color:var(--text-muted);line-height:1.7}
-.login-demo-box b{color:var(--text-primary)}
 .tat-override-badge{display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:10px;font-size:10px;font-weight:700;background:#fef9c3;color:#854d0e;border:1px solid #fde047;white-space:nowrap}
 .tat-ext-badge{background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe}
 .override-timeline{border-left:3px solid var(--yellow);padding-left:12px;margin-left:4px}
@@ -374,12 +372,10 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
 <!-- LOGIN SCREEN -->
 <div id="loginScreen">
   <div class="login-card">
-    <div class="login-logo">
-      <div class="login-logo-icon">O</div>
-      <div>
-        <div class="login-title">ONE<span style="color:#dc2626">PWS</span> Production Portal</div>
-        <div class="login-subtitle">PRODUCTION CONTROL PORTAL</div>
-      </div>
+    <div class="login-logo" style="flex-direction:column;align-items:center;text-align:center;gap:4px;margin-left:auto;margin-right:auto">
+      <img src="data:image/png;base64,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" alt="Company Logo" class="login-logo-img">
+      <div class="login-title" style="margin-top:10px">ONEPWS Production Portal</div>
+      <div class="login-subtitle">PRODUCTION CONTROL PORTAL</div>
     </div>
     <div id="sessionCheckMsg" style="text-align:center;padding:26px 0;color:var(--text-muted);font-size:13px">
       Checking for a saved session…
@@ -388,16 +384,13 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
       <div class="login-error" id="loginError"></div>
       <div class="login-field">
         <label>Username</label>
-        <input type="text" id="login_username" placeholder="e.g. admin" autocomplete="username" onkeydown="if(event.key==='Enter')attemptLogin()">
+        <input type="text" id="login_username" placeholder="Enter your username" autocomplete="username" onkeydown="if(event.key==='Enter')attemptLogin()">
       </div>
       <div class="login-field">
         <label>Password</label>
         <input type="password" id="login_password" placeholder="Enter your password" autocomplete="current-password" onkeydown="if(event.key==='Enter')attemptLogin()">
       </div>
       <button class="login-btn" onclick="attemptLogin(this)">Sign In</button>
-      <div class="login-demo-box">
-        <b>Demo accounts</b> — Master Admin: <b>admin</b> / admin123 &nbsp;·&nbsp; Production Admin: <b>prod.admin</b> / prod123 &nbsp;·&nbsp; Quality Admin: <b>qc.admin</b> / qc123 &nbsp;·&nbsp; Maintenance Admin: <b>maint.admin</b> / maint123 &nbsp;·&nbsp; Viewer: <b>viewer</b> / view123
-      </div>
     </div>
   </div>
 </div>
@@ -1821,6 +1814,22 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
 
   <!-- PREVENTIVE MAINTENANCE TAB -->
   <div id="maint-pm" style="display:none">
+    <!-- Machine PM Configuration (Frequency + Initial PM Date — moved here from Machine Master) -->
+    <div class="card mb-4">
+      <div class="card-header">
+        <div>
+          <div class="card-title">⚙️ Machine PM Configuration</div>
+          <div class="text-xs text-muted" style="margin-top:2px">Set each production machine's PM Frequency here. <b>Initial PM Date</b> should be entered only once, when a machine is first configured for Preventive Maintenance — it locks after saving.</div>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Machine</th><th>PM Frequency</th><th>Custom Days</th><th>Initial PM Date</th><th>Actions</th></tr></thead>
+          <tbody id="pmConfigBody"></tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- PM KPI strip -->
     <div class="kpi-grid" id="pmKPIs" style="grid-template-columns:repeat(5,1fr);margin-bottom:16px"></div>
 
@@ -3071,6 +3080,57 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
   </div>
 </div>
 
+<!-- MACHINE MASTER DETAILS MODAL (identity fields — Master Admin only) -->
+<div class="modal-overlay" id="machineDetailsModal">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">🔧 Machine Identity Details</div>
+        <div class="text-xs text-muted" id="machineDetailsSub" style="margin-top:2px"></div>
+      </div>
+      <button class="modal-close" onclick="closeMod('machineDetailsModal')">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="alert alert-info" style="font-size:12px" id="machineDetailsPermNote"></div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Machine Make (Manufacturer)</label><input type="text" class="form-input" id="md_make" placeholder="e.g. BIESSE"></div>
+        <div class="form-group"><label class="form-label">Machine Model</label><input type="text" class="form-input" id="md_model" placeholder="e.g. ROVER C9"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Asset ID / Machine ID No.</label><input type="text" class="form-input" id="md_assetid" placeholder="e.g. PWSPL/I/01"></div>
+        <div class="form-group"><label class="form-label">Power Rating (kW/HP)</label><input type="text" class="form-input" id="md_power" placeholder="e.g. 22.8 KW"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Location / Department</label><input type="text" class="form-input" id="md_location" placeholder="e.g. Production"></div>
+        <div class="form-group"><label class="form-label">Date of Installation</label><input type="date" class="form-input" id="md_installdate"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeMod('machineDetailsModal')">Close</button>
+      <button class="btn btn-primary" id="machineDetailsSaveBtn" onclick="saveMachineDetails()">💾 Save Details</button>
+    </div>
+  </div>
+</div>
+
+<!-- MACHINE HISTORY CARD MODAL -->
+<div class="modal-overlay" id="machineHistoryModal">
+  <div class="modal" style="max-width:1100px">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title" id="mhTitle">🔧 Machine History Card</div>
+        <div class="text-xs text-muted" id="mhSub" style="margin-top:2px"></div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn btn-outline btn-sm" onclick="exportMachineHistoryPDF()">📄 Export PDF</button>
+        <button class="modal-close" onclick="closeMod('machineHistoryModal')">×</button>
+      </div>
+    </div>
+    <div class="modal-body" id="machineHistoryBody" style="max-height:78vh;overflow-y:auto">
+      <!-- Populated by openMachineHistoryCard() -->
+    </div>
+  </div>
+</div>
+
 <!-- BULK CSV IMPORT MODAL (shared by Tool Inventory, Projects, Breakdowns, Calibration, DMS) -->
 <div class="modal-overlay" id="bulkImportModal">
   <div class="modal" style="max-width:900px">
@@ -3181,7 +3241,7 @@ const M = {
     {id:'qc4', name:'Kavita Rao',   active:true},
   ],
   breakdownCategories:['Mechanical Failure','Electrical Failure','Hydraulic/Pneumatic Failure','Part Damage','Software/Control Fault','Operator Error','Wear & Tear','Other'],
-  pmFrequencyOptions:['Daily','Weekly','Monthly','Quarterly','Half-Yearly','Yearly'],
+  pmFrequencyOptions:['Daily','Weekly','Monthly','Quarterly','Half-Yearly','Yearly','Custom'],
   tatRules:{'Cat 0':{ext:7,wood:18},'Cat 1':{ext:7,wood:20},'Cat 2':{ext:7,wood:34},'Cat 3':{ext:7,wood:50},'R&D':{ext:14,wood:50}},
 
   // Maps production stage name → workstation id(s)
@@ -9690,7 +9750,7 @@ function showMaintTab(t,el){
   if(el)el.classList.add('active');else{const f=document.querySelector('#maintTabs .tab');if(f)f.classList.add('active');}
   if(t==='log') renderBreakdownLog();
   if(t==='whywhy') renderWhyWhyLog();
-  if(t==='pm'){ generatePMSchedule(); renderPMSchedule(); renderPMAnalytics(); }
+  if(t==='pm'){ generatePMSchedule(); renderPMConfigTable(); renderPMSchedule(); renderPMAnalytics(); }
   if(t==='mttr') renderMTTRDashboard();
   if(t==='toolinv') initToolInventory();
 }
@@ -9826,7 +9886,9 @@ function renderMaintMachineStatus(){
     const lastBd = DB.breakdownLog.find(b=>b.machineId===w.id && b.segment===seg);
     return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">'
       +'<span>'+dot+'</span>'
-      +'<div style="flex:1"><div class="fw-600 text-sm">'+w.name+'</div>'
+      +'<div style="flex:1">'+(seg==='production'
+          ? '<div class="fw-600 text-sm" style="cursor:pointer;color:var(--accent-dark)" onclick="openMachineHistoryCard(\''+w.id+'\')" title="View full Machine History Card">'+w.name+' 🔍</div>'
+          : '<div class="fw-600 text-sm">'+w.name+'</div>')
       +(lastBd?'<div class="text-xs text-muted">Last BD: '+lastBd.breakdownDate+' · '+lastBd.downtimeHours+'h</div>':'<div class="text-xs text-muted">No breakdown history</div>')
       +(w.category?'<div class="text-xs" style="color:var(--accent-dark)">'+(w.category||'')+'</div>':'')
       +'</div>'
@@ -9879,8 +9941,9 @@ function renderBreakdownLog(){
 
 const PM_GRACE_DAYS = 3;
 
-// Frequency → interval days
-function pmFreqDays(freq){
+// Frequency → interval days. For 'Custom', pass the machine's own customPmFreqDays.
+function pmFreqDays(freq, customDays){
+  if(freq==='Custom') return parseInt(customDays)>0 ? parseInt(customDays) : 30;
   const map={'Daily':1,'Weekly':7,'Monthly':30,'Quarterly':91,'Half-Yearly':183,'Yearly':365};
   return map[freq] || 30;
 }
@@ -9941,18 +10004,20 @@ function generatePMSchedule(){
   allEquipment.forEach(eq=>{
     // Find the latest existing schedule for this equipment
     const existing = DB.pmSchedule.filter(s=>s.machineId===eq.id).sort((a,b)=>b.plannedDate.localeCompare(a.plannedDate));
-    const freqDays = pmFreqDays(eq.pmFrequency||'Monthly');
+    const freqDays = pmFreqDays(eq.pmFrequency||'Monthly', eq.customPmFreqDays);
 
     if(!existing.length){
-      // No schedule yet → create first entry starting today
+      // No schedule yet → first entry starts from the machine's Initial PM Date
+      // if one has been set (Maintenance → Preventive Maintenance), otherwise today
+      const startDate = eq.initialPmDate || today;
       DB.pmSchedule.push({
         id:'PM-'+eq.id+'-'+Date.now(),
         machineId:eq.id, machineName:eq.name, segment:eq.segment,
         frequency:eq.pmFrequency||'Monthly', freqDays,
-        plannedDate:today, status:'Pending',
+        plannedDate:startDate, status:'Pending',
         technicianId:'', technicianName:'',
         actualDate:'', remarks:'', sparePartsUsed:'',
-        nextPlannedDate:addDays(today, freqDays),
+        nextPlannedDate:addDays(startDate, freqDays),
         createdAt:today
       });
     } else {
@@ -9985,6 +10050,386 @@ function generatePMSchedule(){
 }
 
 // -- Render PM Schedule Table --
+// -- Machine PM Configuration: Frequency + Initial PM Date (Maintenance module) --
+function renderPMConfigTable(){
+  const tbody = document.getElementById('pmConfigBody');
+  if(!tbody) return;
+  tbody.innerHTML = M.workstations.map((w,i)=>{
+    ensureMachineMasterDefaults(w);
+    const locked = !!w.initialPmDate;
+    return '<tr>'
+      +'<td class="fw-600 text-sm">'+w.name+'</td>'
+      +'<td><select class="form-input" style="height:28px;width:120px" id="pmcfg_freq_'+i+'" onchange="onPmConfigFreqChange('+i+')">'
+        + M.pmFrequencyOptions.map(f=>'<option '+(w.pmFrequency===f?'selected':'')+'>'+f+'</option>').join('')
+      +'</select></td>'
+      +'<td><input type="number" class="form-input" style="height:28px;width:80px" id="pmcfg_customdays_'+i+'" value="'+(w.customPmFreqDays||'')+'" min="1" placeholder="days" '+(w.pmFrequency==='Custom'?'':'disabled')+'></td>'
+      +'<td>'+(locked
+          ? '<span class="badge badge-complete" title="Initial PM Date can only be set once">🔒 '+w.initialPmDate+'</span>'
+          : '<input type="date" class="form-input" style="height:28px;width:140px" id="pmcfg_initdate_'+i+'">')
+        +'</td>'
+      +'<td><button class="btn btn-success btn-sm" onclick="savePmConfig('+i+')">💾 Save</button> <button class="btn btn-outline btn-sm" onclick="openMachineHistoryCard(\''+w.id+'\')">🔍 History</button></td>'
+      +'</tr>';
+  }).join('') || '<tr><td colspan="5" class="text-sm text-muted" style="padding:12px">No production machines configured yet — add one in Admin Panel &rarr; Machine Master.</td></tr>';
+}
+function onPmConfigFreqChange(i){
+  const freq = document.getElementById('pmcfg_freq_'+i)?.value;
+  const customInput = document.getElementById('pmcfg_customdays_'+i);
+  if(customInput) customInput.disabled = (freq!=='Custom');
+}
+function savePmConfig(i){
+  const w = M.workstations[i]; if(!w) return;
+  const freq = document.getElementById('pmcfg_freq_'+i)?.value || 'Monthly';
+  const customDays = document.getElementById('pmcfg_customdays_'+i)?.value;
+  if(freq==='Custom' && (!customDays || parseInt(customDays)<=0)){
+    toast('Enter a valid number of days for the Custom frequency.','⚠');
+    return;
+  }
+
+
+
+  w.pmFrequency = freq;
+  w.customPmFreqDays = freq==='Custom' ? parseInt(customDays) : '';
+
+  if(!w.initialPmDate){
+    const initDate = document.getElementById('pmcfg_initdate_'+i)?.value;
+    if(initDate){
+      w.initialPmDate = initDate;
+      // Maintenance auto-generates a placeholder schedule entry the first time
+      // this page loads, using today's date as a fallback start — if that
+      // happened before this machine's Initial PM Date was set, and nothing on
+      // it has actually been completed/delayed yet, align it to the real
+      // Initial PM Date now instead of leaving the placeholder's date behind.
+      const freqDaysNow = pmFreqDays(freq, w.customPmFreqDays);
+      const machineEntries = (DB.pmSchedule||[]).filter(s=>s.machineId===w.id);
+      const hasAnyActioned = machineEntries.some(s=>s.status==='Completed'||s.status==='Delayed');
+      if(!hasAnyActioned && machineEntries.length){
+        machineEntries.forEach(e=>{
+          e.plannedDate = initDate;
+          e.frequency = freq;
+          e.freqDays = freqDaysNow;
+          e.nextPlannedDate = addDays(initDate, freqDaysNow);
+        });
+      }
+    }
+  }
+
+  generatePMSchedule();
+  renderPMConfigTable();
+  renderPMSchedule();
+  if(typeof renderPMAnalytics==='function') renderPMAnalytics();
+  toast('PM configuration saved for "'+w.name+'".','✓');
+}
+
+// ============================================================================
+// ------ MACHINE HISTORY CARD ------
+// Complete machine-wise maintenance history, built entirely by reading the
+// existing DB.breakdownLog, DB.pmSchedule, and DB.whyWhyLog records — nothing
+// new is entered here, and none of the existing breakdown/PM/RCA logic is
+// touched. Scoped to the currently active Financial Year (top bar FY filter).
+// ============================================================================
+let _mhCurrentWsId = null;
+
+// Pulls together everything the card needs for one machine, for the active FY.
+function getMachineHistoryData(wsId){
+  const w = M.workstations.find(x=>x.id===wsId);
+  if(!w) return null;
+  ensureMachineMasterDefaults(w);
+  const fy = getActiveFY();
+  const {start,end} = getFYDateRange(fy);
+  const todayStr = new Date().toISOString().split('T')[0];
+  const inFY = d => !!d && d>=start && d<=end;
+
+  const allBds = (DB.breakdownLog||[]).filter(b=>b.machineId===wsId);
+  const fyBds = allBds.filter(b=>inFY(b.breakdownDate));
+  const allPm = (DB.pmSchedule||[]).filter(s=>s.machineId===wsId);
+  const fyPm = allPm.filter(s=>inFY(s.plannedDate)||inFY(s.actualDate));
+
+  const statusMap = {none:'Running', partial:'Partial Breakdown', breakdown:'Breakdown', pm:'Under PM'};
+  const machineStatus = statusMap[w.maintenanceStatus||'none'] || 'Running';
+
+  const pendingPm = allPm.filter(s=>s.status==='Pending').sort((a,b)=>a.plannedDate.localeCompare(b.plannedDate));
+  const nextPmDue = pendingPm.length ? pendingPm[0].plannedDate : '—';
+  const completedPm = allPm.filter(s=>s.status==='Completed'&&s.actualDate).sort((a,b)=>b.actualDate.localeCompare(a.actualDate));
+  const lastPmCompleted = completedPm.length ? completedPm[0].actualDate : '—';
+
+  // Yearly stats, scoped to FY-start .. today (or FY-end if the FY has fully passed)
+  const periodStart = start;
+  const periodEnd = end<todayStr ? end : todayStr;
+  const daysInPeriod = periodStart<=periodEnd ? _dateRange(periodStart,periodEnd) : [];
+
+  const breakdownCount = fyBds.length;
+  const breakdownHours = Math.round(fyBds.reduce((s,b)=>s+(b.downtimeHours||0),0)*10)/10;
+  const pmCompletedCount = fyPm.filter(s=>s.status==='Completed').length;
+  const pmPendingCount = fyPm.filter(s=>s.status==='Pending').length;
+
+  const scheduledHours = daysInPeriod.length*(w.hoursPerDay||8);
+  const availabilityPct = scheduledHours>0 ? Math.max(0,Math.round((1-breakdownHours/scheduledHours)*10000)/100) : 100;
+
+  const achieved = daysInPeriod.reduce((s,d)=>s+wsAchievedOn(w.id,d),0);
+  const capacityTotal = daysInPeriod.length*w.cap;
+  const utilizationPct = capacityTotal>0 ? Math.round(achieved/capacityTotal*10000)/100 : 0;
+
+  let mtbfDays = '—';
+  if(fyBds.length>1){
+    const sortedDates = fyBds.map(b=>b.breakdownDate).sort();
+    const spanDays = (new Date(sortedDates[sortedDates.length-1])-new Date(sortedDates[0]))/86400000;
+    mtbfDays = Math.round(spanDays/(fyBds.length-1));
+  }
+  const mttrHours = fyBds.length ? Math.round((breakdownHours/fyBds.length)*10)/10 : 0;
+  const productionLossUnits = (w.hoursPerDay>0) ? Math.round(breakdownHours*(w.cap/w.hoursPerDay)) : 0;
+
+  // Unified history: every breakdown + every PM record for this machine, this FY
+  const historyRows = [];
+  fyBds.forEach(b=>{
+    const rca = b.whyWhyId ? (DB.whyWhyLog||[]).find(x=>x.id===b.whyWhyId) : null;
+    historyRows.push({
+      date:b.breakdownDate, time:b.startTime||'—', no:b.id, machine:w.name,
+      problem:b.problem||'—', category:b.category||'—',
+      rootCause:rca?.rootCause||'—', correctiveAction:b.correctiveAction||'—',
+      preventiveAction:rca?.preventiveAction||'—',
+      technician:b.technicianName||'—', department:'Production',
+      startTime:b.repairStart||'—', endTime:b.repairEnd||'—',
+      downtime:b.downtimeHours||0, spareParts:b.sparePartsUsed||'—', cost:'—',
+      status:b.restorationConfirmed?'Completed':'Open', type:'Breakdown',
+      sortKey:b.breakdownDate+' '+(b.startTime||'00:00')
+    });
+  });
+  fyPm.forEach(s=>{
+    historyRows.push({
+      date:s.actualDate||s.plannedDate, time:'—', no:s.id, machine:w.name,
+      problem:'Preventive Maintenance ('+s.frequency+')', category:'Preventive Maintenance',
+      rootCause:'—', correctiveAction:s.remarks||'—', preventiveAction:'Scheduled PM',
+      technician:s.technicianName||'—', department:'Production',
+      startTime:'—', endTime:'—', downtime:0, spareParts:s.sparePartsUsed||'—', cost:'—',
+      status:s.status==='Completed'?'Completed':(s.status==='Delayed'?'Open (Delayed)':'Open'),
+      type:'PM', sortKey:(s.actualDate||s.plannedDate||'0000-00-00')+' 00:00'
+    });
+  });
+  historyRows.sort((a,b)=>b.sortKey.localeCompare(a.sortKey));
+
+  // Monthly trend series across the FY-to-date period
+  const monthsInFY = [];
+  if(periodStart<=periodEnd){
+    let cursor = periodStart.slice(0,7);
+    const endMonth = periodEnd.slice(0,7);
+    while(cursor<=endMonth){
+      monthsInFY.push(cursor);
+      const [y,m] = cursor.split('-').map(Number);
+      cursor = (m===12) ? (y+1)+'-01' : y+'-'+String(m+1).padStart(2,'0');
+    }
+  }
+  const monthlyBreakdownCount = monthsInFY.map(mk=>fyBds.filter(b=>b.breakdownDate.startsWith(mk)).length);
+  const monthlyDowntime = monthsInFY.map(mk=>Math.round(fyBds.filter(b=>b.breakdownDate.startsWith(mk)).reduce((s,b)=>s+(b.downtimeHours||0),0)*10)/10);
+  const monthlyPmDue = monthsInFY.map(mk=>fyPm.filter(s=>(s.plannedDate||'').startsWith(mk)).length);
+  const monthlyPmDone = monthsInFY.map(mk=>fyPm.filter(s=>(s.actualDate||'').startsWith(mk)&&s.status==='Completed').length);
+  const monthlyPmCompliance = monthsInFY.map((mk,idx)=>monthlyPmDue[idx]>0?Math.round(monthlyPmDone[idx]/monthlyPmDue[idx]*100):0);
+  const monthlyMttr = monthsInFY.map((mk,idx)=>monthlyBreakdownCount[idx]>0?Math.round((monthlyDowntime[idx]/monthlyBreakdownCount[idx])*10)/10:0);
+  const monthlyMtbf = monthsInFY.map((mk)=>{
+    const cnt = fyBds.filter(b=>b.breakdownDate.startsWith(mk)).length;
+    if(!cnt) return 0;
+    const daysInMonth = new Date(parseInt(mk.slice(0,4)),parseInt(mk.slice(5,7)),0).getDate();
+    return Math.round(daysInMonth/cnt);
+  });
+  const monthlyAvailability = monthsInFY.map((mk,idx)=>{
+    const daysInMonth = new Date(parseInt(mk.slice(0,4)),parseInt(mk.slice(5,7)),0).getDate();
+    const schedHrs = daysInMonth*(w.hoursPerDay||8);
+    return schedHrs>0?Math.max(0,Math.round((1-monthlyDowntime[idx]/schedHrs)*10000)/100):100;
+  });
+  const monthlySpareCount = monthsInFY.map(mk=>
+    fyBds.filter(b=>b.breakdownDate.startsWith(mk)&&b.sparePartsUsed).length
+    + fyPm.filter(s=>(s.actualDate||'').startsWith(mk)&&s.sparePartsUsed).length
+  );
+
+  return {
+    w, fy, fyLabel:getFYLabel(), machineStatus, nextPmDue, lastPmCompleted,
+    stats:{breakdownCount,breakdownHours,pmCompletedCount,pmPendingCount,availabilityPct,utilizationPct,mtbfDays,mttrHours,productionLossUnits},
+    historyRows,
+    trend:{months:monthsInFY,monthlyBreakdownCount,monthlyDowntime,monthlyPmCompliance,monthlyMttr,monthlyMtbf,monthlyAvailability,monthlySpareCount}
+  };
+}
+
+function openMachineHistoryCard(wsId){
+  const data = getMachineHistoryData(wsId);
+  if(!data){ toast('Machine not found.','⚠'); return; }
+  _mhCurrentWsId = wsId;
+  const {w,fyLabel,machineStatus,nextPmDue,lastPmCompleted,stats,historyRows,trend} = data;
+
+  document.getElementById('mhTitle').textContent = '🔧 Machine History Card — '+w.name;
+  document.getElementById('mhSub').textContent = fyLabel+' · Auto-compiled from Breakdown and PM records — nothing entered manually here';
+
+  const statusColor = machineStatus==='Running'?'var(--green)':machineStatus==='Under PM'?'var(--orange)':machineStatus==='Partial Breakdown'?'var(--yellow)':'var(--red)';
+
+  const infoFields = [
+    ['Machine Name', w.name], ['Machine Make', w.make||'—'], ['Machine Model', w.model||'—'],
+    ['Machine ID / Asset No.', w.assetId||'—'], ['Capacity (kW/HP)', w.powerRating||'—'], ['Location', w.location||'—'],
+    ['Date of Installation', w.installDate||'—'], ['PM Frequency', w.pmFrequency||'—'+(w.pmFrequency==='Custom'&&w.customPmFreqDays?' ('+w.customPmFreqDays+' days)':'')],
+    ['Initial PM Date', w.initialPmDate||'Not set'], ['Next PM Due Date', nextPmDue],
+    ['Last PM Completed', lastPmCompleted], ['Machine Status', machineStatus]
+  ];
+  const infoHtml = '<div class="card mb-3"><div class="card-header"><div class="card-title">📋 Machine Information</div></div>'
+    +'<div class="card-body"><div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px">'
+    + infoFields.map(([l,v],idx)=>'<div><div class="text-xs text-muted" style="text-transform:uppercase;letter-spacing:.3px">'+l+'</div>'
+      +'<div class="fw-600 text-sm" style="margin-top:2px'+(idx===11?';color:'+statusColor:'')+'">'+v+'</div></div>').join('')
+    +'</div></div></div>';
+
+  const kpis = [
+    {l:'Breakdown Count (FY)',v:stats.breakdownCount,c:stats.breakdownCount===0?'green':'red'},
+    {l:'Breakdown Hours',v:stats.breakdownHours+'h',c:'orange'},
+    {l:'PM Completed',v:stats.pmCompletedCount,c:'green'},
+    {l:'PM Pending',v:stats.pmPendingCount,c:stats.pmPendingCount>0?'yellow':'green'},
+    {l:'Availability',v:stats.availabilityPct+'%',c:stats.availabilityPct>=95?'green':stats.availabilityPct>=85?'yellow':'red'},
+    {l:'Utilisation',v:stats.utilizationPct+'%',c:stats.utilizationPct>=70?'green':'yellow'},
+    {l:'MTBF',v:stats.mtbfDays==='—'?'—':stats.mtbfDays+' days',c:'teal'},
+    {l:'MTTR',v:stats.mttrHours+'h',c:'purple'},
+    {l:'Spare Parts Cost',v:'Not tracked',c:'blue'},
+    {l:'Maintenance Cost',v:'Not tracked',c:'blue'},
+    {l:'Total Downtime',v:stats.breakdownHours+'h',c:'orange'},
+    {l:'Est. Production Loss',v:stats.productionLossUnits+' units',c:'red'},
+  ];
+  const kpiHtml = '<div class="card mb-3"><div class="card-header"><div class="card-title">📊 Yearly Performance & Maintenance Statistics — '+fyLabel+'</div></div>'
+    +'<div class="card-body"><div class="kpi-grid" style="grid-template-columns:repeat(4,1fr)">'
+    + kpis.map(k=>'<div class="kpi-card '+k.c+'"><div class="kpi-label">'+k.l+'</div><div class="kpi-value" style="font-size:18px">'+k.v+'</div></div>').join('')
+    +'</div><div class="text-xs text-muted mt-2">Spare Parts Cost and Maintenance Cost are not shown as real figures — this system does not currently capture cost data on Breakdown or PM entries, so nothing is estimated here.</div></div></div>';
+
+  const historyHtml = '<div class="card mb-3"><div class="card-header"><div class="card-title">📋 Machine History — '+fyLabel+'</div>'
+    +'<span class="text-xs text-muted">'+historyRows.length+' record(s)</span></div>'
+    +'<div class="table-wrap" style="max-height:340px;overflow:auto"><table><thead><tr>'
+    +'<th>Date</th><th>Time</th><th>BD/PM No.</th><th>Problem</th><th>Category</th><th>Root Cause</th><th>Corrective Action</th><th>Preventive Action</th><th>Technician</th><th>Start</th><th>End</th><th>Downtime</th><th>Spares</th><th>Cost</th><th>Status</th>'
+    +'</tr></thead><tbody>'
+    + (historyRows.length ? historyRows.map(r=>'<tr>'
+        +'<td class="text-sm">'+r.date+'</td><td class="text-sm">'+r.time+'</td><td class="font-mono text-xs">'+r.no+'</td>'
+        +'<td class="text-sm">'+r.problem+'</td><td class="text-xs">'+r.category+'</td><td class="text-xs">'+r.rootCause+'</td>'
+        +'<td class="text-xs">'+r.correctiveAction+'</td><td class="text-xs">'+r.preventiveAction+'</td><td class="text-sm">'+r.technician+'</td>'
+        +'<td class="text-xs">'+r.startTime+'</td><td class="text-xs">'+r.endTime+'</td><td class="text-sm">'+(r.downtime?r.downtime+'h':'—')+'</td>'
+        +'<td class="text-xs">'+r.spareParts+'</td><td class="text-xs">'+r.cost+'</td>'
+        +'<td><span class="badge '+(r.status==='Completed'?'badge-complete':'badge-delayed')+'">'+r.status+'</span></td>'
+        +'</tr>').join('') : '<tr><td colspan="15" class="text-sm text-muted" style="padding:12px">No breakdown or PM records for this machine in '+fyLabel+'.</td></tr>')
+    +'</tbody></table></div></div>';
+
+  const chartsHtml = '<div class="charts-grid charts-2">'
+    + ['mhBreakdownChart','mhDowntimeChart','mhPmComplianceChart','mhMtbfChart','mhMttrChart','mhCostChart','mhSpareChart','mhAvailChart']
+      .map((id,idx)=>{
+        const titles = ['📈 Monthly Breakdown Trend','⏱ Monthly Downtime Trend','🛡 PM Compliance Trend','📊 MTBF Trend','📊 MTTR Trend','💰 Maintenance Cost Trend','🔩 Spare Consumption Trend','✅ Machine Availability Trend'];
+        return '<div class="card mb-3"><div class="card-header"><div class="card-title" style="font-size:12.5px">'+titles[idx]+'</div></div>'
+          +'<div class="card-body"><div class="chart-wrap" style="height:220px"><canvas id="'+id+'"></canvas></div></div></div>';
+      }).join('')
+    +'</div>';
+
+  document.getElementById('machineHistoryBody').innerHTML = infoHtml+kpiHtml+historyHtml+
+    '<div class="fw-700 text-sm mb-2" style="margin-top:4px">📈 Monthly Trends — '+fyLabel+'</div>'+chartsHtml;
+
+  renderMachineHistoryCharts(trend);
+  document.getElementById('machineHistoryModal').classList.add('open');
+}
+
+function renderMachineHistoryCharts(trend){
+  const labels = trend.months.map(m=>m.slice(5)+'/'+m.slice(2,4));
+  const specs = [
+    {id:'mhBreakdownChart', cfg:rptBarConfig(labels,[{label:'Breakdowns',data:trend.monthlyBreakdownCount}])},
+    {id:'mhDowntimeChart', cfg:rptLineConfig(labels,[{label:'Downtime (h)',data:trend.monthlyDowntime,fill:true}])},
+    {id:'mhPmComplianceChart', cfg:rptLineConfig(labels,[{label:'PM Compliance %',data:trend.monthlyPmCompliance}])},
+    {id:'mhMtbfChart', cfg:rptBarConfig(labels,[{label:'MTBF (days)',data:trend.monthlyMtbf}])},
+    {id:'mhMttrChart', cfg:rptBarConfig(labels,[{label:'MTTR (h)',data:trend.monthlyMttr}])},
+    {id:'mhCostChart', cfg:rptLineConfig(labels,[{label:'Cost (not tracked)',data:trend.months.map(()=>0)}])},
+    {id:'mhSpareChart', cfg:rptBarConfig(labels,[{label:'Spare-Part Mentions',data:trend.monthlySpareCount}])},
+    {id:'mhAvailChart', cfg:rptLineConfig(labels,[{label:'Availability %',data:trend.monthlyAvailability}])},
+  ];
+  specs.forEach(s=>{
+    const ctx=document.getElementById(s.id);
+    if(!ctx || typeof Chart==='undefined') return;
+    if(charts[s.id]) charts[s.id].destroy();
+    charts[s.id]=new Chart(ctx, s.cfg);
+  });
+}
+
+function exportMachineHistoryPDF(){
+  if(!_mhCurrentWsId){ toast('Open a machine history card first.','⚠'); return; }
+  const data = getMachineHistoryData(_mhCurrentWsId);
+  if(!data) return;
+  const {w,fyLabel,machineStatus,nextPmDue,lastPmCompleted,stats,historyRows} = data;
+
+  // Capture the on-screen charts as images so the printed page matches what's shown
+  const chartIds = ['mhBreakdownChart','mhDowntimeChart','mhPmComplianceChart','mhMtbfChart','mhMttrChart','mhCostChart','mhSpareChart','mhAvailChart'];
+  const chartTitles = ['Monthly Breakdown Trend','Monthly Downtime Trend','PM Compliance Trend','MTBF Trend','MTTR Trend','Maintenance Cost Trend','Spare Consumption Trend','Machine Availability Trend'];
+  const chartImgs = chartIds.map(id=>{
+    const c = document.getElementById(id);
+    try{ return c ? c.toDataURL('image/png') : null; }catch(e){ return null; }
+  });
+
+  const infoFields = [
+    ['Machine Name', w.name], ['Machine Make', w.make||'—'], ['Machine Model', w.model||'—'],
+    ['Machine ID / Asset No.', w.assetId||'—'], ['Capacity (kW/HP)', w.powerRating||'—'], ['Location', w.location||'—'],
+    ['Date of Installation', w.installDate||'—'], ['PM Frequency', w.pmFrequency||'—'],
+    ['Initial PM Date', w.initialPmDate||'Not set'], ['Next PM Due Date', nextPmDue],
+    ['Last PM Completed', lastPmCompleted], ['Machine Status', machineStatus]
+  ];
+  const kpis = [
+    ['Breakdown Count (FY)',stats.breakdownCount],['Breakdown Hours',stats.breakdownHours+'h'],
+    ['PM Completed',stats.pmCompletedCount],['PM Pending',stats.pmPendingCount],
+    ['Availability',stats.availabilityPct+'%'],['Utilisation',stats.utilizationPct+'%'],
+    ['MTBF',stats.mtbfDays==='—'?'—':stats.mtbfDays+' days'],['MTTR',stats.mttrHours+'h'],
+    ['Spare Parts Cost','Not tracked'],['Maintenance Cost','Not tracked'],
+    ['Total Downtime',stats.breakdownHours+'h'],['Est. Production Loss',stats.productionLossUnits+' units'],
+  ];
+  const histCols = ['Date','Time','BD/PM No.','Problem','Category','Root Cause','Corrective Action','Preventive Action','Technician','Start','End','Downtime','Spares','Status'];
+  const histRowsHtml = historyRows.length ? historyRows.map(r=>'<tr>'
+    +'<td>'+r.date+'</td><td>'+r.time+'</td><td>'+r.no+'</td><td>'+r.problem+'</td><td>'+r.category+'</td>'
+    +'<td>'+r.rootCause+'</td><td>'+r.correctiveAction+'</td><td>'+r.preventiveAction+'</td><td>'+r.technician+'</td>'
+    +'<td>'+r.startTime+'</td><td>'+r.endTime+'</td><td>'+(r.downtime?r.downtime+'h':'—')+'</td><td>'+r.spareParts+'</td><td>'+r.status+'</td></tr>').join('')
+    : '<tr><td colspan="14">No records in '+fyLabel+'</td></tr>';
+
+  const html = `<!DOCTYPE html><html><head><title>Machine History - ${w.name}</title><style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:Arial,sans-serif;font-size:10.5px;color:#0f1b2d;padding:20px}
+    .header{background:#c2410c;color:#fff;padding:14px 18px;border-radius:6px;margin-bottom:16px}
+    .header h1{font-size:17px;font-weight:700;margin-bottom:3px}
+    .header p{font-size:11px;opacity:.9}
+    .section-title{font-size:13px;font-weight:700;margin:16px 0 8px;border-bottom:2px solid #c2410c;padding-bottom:4px}
+    .infogrid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:6px}
+    .infoitem{background:#f8f9fc;border:1px solid #e2e6ed;border-radius:6px;padding:8px}
+    .infoitem .l{font-size:8.5px;color:#8492a6;text-transform:uppercase}
+    .infoitem .v{font-size:11.5px;font-weight:700;margin-top:2px}
+    .kpigrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:6px}
+    .kpi{background:#f8f9fc;border:1px solid #e2e6ed;border-radius:6px;padding:10px;text-align:center}
+    .kpi .l{font-size:8.5px;color:#8492a6;text-transform:uppercase}
+    .kpi .v{font-size:16px;font-weight:700}
+    table{width:100%;border-collapse:collapse;font-size:9px;margin-bottom:10px}
+    th{background:#f0f2f5;font-size:8px;font-weight:700;color:#8492a6;text-transform:uppercase;padding:5px 6px;border:1px solid #e2e6ed;text-align:left}
+    td{padding:5px 6px;border:1px solid #e2e6ed;vertical-align:top}
+    tr:nth-child(even){background:#f8f9fc}
+    .chartsgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .chartbox{border:1px solid #e2e6ed;border-radius:6px;padding:8px;text-align:center}
+    .chartbox .t{font-size:10px;font-weight:700;margin-bottom:4px;text-align:left}
+    .chartbox img{width:100%;height:auto}
+    .footer{margin-top:16px;font-size:9px;color:#8492a6;border-top:1px solid #e2e6ed;padding-top:8px}
+    .note{font-size:9px;color:#8492a6;font-style:italic;margin-bottom:10px}
+    @media print{body{padding:10px}.header{border-radius:0}}
+  </style></head><body>
+    <div class="header"><h1>🔧 Machine History Card — ${w.name}</h1><p>${fyLabel} · Generated: ${new Date().toLocaleString()} · ONEPWS Production Control Portal</p></div>
+
+    <div class="section-title">Machine Information</div>
+    <div class="infogrid">${infoFields.map(([l,v])=>`<div class="infoitem"><div class="l">${l}</div><div class="v">${v}</div></div>`).join('')}</div>
+
+    <div class="section-title">Yearly Performance & Maintenance Statistics — ${fyLabel}</div>
+    <div class="kpigrid">${kpis.map(([l,v])=>`<div class="kpi"><div class="l">${l}</div><div class="v">${v}</div></div>`).join('')}</div>
+    <div class="note">Spare Parts Cost and Maintenance Cost are not shown as real figures — cost data is not currently captured on Breakdown or PM entries.</div>
+
+    <div class="section-title">Machine History — ${fyLabel} (${historyRows.length} record${historyRows.length===1?'':'s'})</div>
+    <table><thead><tr>${histCols.map(c=>`<th>${c}</th>`).join('')}</tr></thead><tbody>${histRowsHtml}</tbody></table>
+
+    <div class="section-title">Monthly Trends</div>
+    <div class="chartsgrid">${chartTitles.map((t,i)=>`<div class="chartbox"><div class="t">${t}</div>${chartImgs[i]?`<img src="${chartImgs[i]}">`:'<div style="font-size:9px;color:#8492a6;padding:20px">No data</div>'}</div>`).join('')}</div>
+
+    <div class="footer">ONEPWS Production Control Portal · Machine History Card · ${w.name} · ${fyLabel} · Auto-compiled from Breakdown and Preventive Maintenance records</div>
+  </body></html>`;
+  const pw = window.open('','_blank');
+  if(!pw){ toast('Pop-up blocked. Allow pop-ups to download PDF.','⚠'); return; }
+  pw.document.write(html); pw.document.close();
+  setTimeout(()=>{ pw.focus(); pw.print(); },400);
+  toast('Machine History PDF opened in new window — use Print → Save as PDF','📄');
+}
+
+
 function renderPMSchedule(){
   const tbody=document.getElementById('pmScheduleBody'); if(!tbody) return;
   const segFilter=document.getElementById('pmSegFilter')?.value||'all';
@@ -11993,17 +12438,16 @@ function getAdminHTML(sec){
         <button class="btn btn-primary btn-sm" onclick="addWorkstation()">+ Add Workstation</button>
       </div>
       <div class="card-body">
-        <div class="alert alert-info mb-3" style="font-size:12px">Manage all production workstations, daily capacity, PM frequency, and maintenance status. Changes reflect immediately in Capacity Planning and the Maintenance Module.</div>
+        <div class="alert alert-info mb-3" style="font-size:12px">Manage all production workstations, daily capacity, and maintenance status. Changes reflect immediately in Capacity Planning and the Maintenance Module. PM Frequency and Initial PM Date are now configured from Maintenance &rarr; Preventive Maintenance. Machine identity details (Make, Model, Asset ID, Power Rating, Location, Install Date) are edited via "🔧 Details" and are restricted to Master Admin.</div>
         <table>
-          <thead><tr><th>#</th><th>Workstation Name</th><th>Capacity/Day</th><th>Unit</th><th>Hours/Day</th><th>PM Frequency</th><th>Maintenance Status</th><th>Status</th><th>Actions</th></tr></thead>
-          <tbody>${M.workstations.map((w,i)=>`
+          <thead><tr><th>#</th><th>Workstation Name</th><th>Capacity/Day</th><th>Unit</th><th>Hours/Day</th><th>Maintenance Status</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody>${M.workstations.map((w,i)=>{ensureMachineMasterDefaults(w);return `
             <tr id="ws_row_${i}">
               <td class="text-muted text-sm">${i+1}</td>
               <td><input type="text" class="form-input" style="height:28px;min-width:180px" value="${w.name}" id="ws_name_${i}"></td>
               <td><input type="number" class="form-input" style="height:28px;width:70px;font-family:monospace" value="${w.cap}" id="ws_cap_${i}" min="1"></td>
-              <td><input type="text" class="form-input" style="height:28px;width:130px" value="${w.unit}" id="ws_unit_${i}"></td>
+              <td><input type="text" class="form-input" style="height:28px;width:130px" value="${w.unit||w.capUnit||''}" id="ws_unit_${i}"></td>
               <td><input type="number" class="form-input" style="height:28px;width:70px;font-family:monospace" value="${w.hoursPerDay||8}" id="ws_hrs_${i}" min="1" max="24" step="0.5"></td>
-              <td><select class="form-input" style="height:28px;width:110px" id="ws_pmfreq_${i}">${M.pmFrequencyOptions.map(f=>`<option ${w.pmFrequency===f?'selected':''}>${f}</option>`).join('')}</select></td>
               <td><select class="form-input" style="height:28px;width:130px;font-weight:600;color:${w.maintenanceStatus==='breakdown'?'var(--red)':w.maintenanceStatus==='pm'?'var(--orange)':w.maintenanceStatus==='partial'?'var(--yellow)':'var(--green)'}" id="ws_mstatus_${i}">
                 <option value="none" ${(!w.maintenanceStatus||w.maintenanceStatus==='none')?'selected':''}>✅ Running</option>
                 <option value="partial" ${w.maintenanceStatus==='partial'?'selected':''}>🟡 Partial Breakdown</option>
@@ -12011,11 +12455,12 @@ function getAdminHTML(sec){
                 <option value="pm" ${w.maintenanceStatus==='pm'?'selected':''}>🟠 Under PM</option>
               </select></td>
               <td><select class="form-input" style="height:28px;width:90px" id="ws_status_${i}"><option ${w.active!==false?'selected':''}>Active</option><option ${w.active===false?'selected':''}>Inactive</option></select></td>
-              <td style="display:flex;gap:4px">
+              <td style="display:flex;gap:4px;flex-wrap:wrap">
                 <button class="btn btn-success btn-sm" onclick="saveWorkstation(${i})">💾 Save</button>
+                <button class="btn btn-outline btn-sm" onclick="openMachineDetailsModal(${i})">🔧 Details</button>
                 <button class="btn btn-danger btn-sm" onclick="delWorkstation(${i})">🗑 Delete</button>
               </td>
-            </tr>`).join('')}
+            </tr>`;}).join('')}
           </tbody>
         </table>
       </div>
@@ -12732,11 +13177,26 @@ function saveTAT(cat){
 // correct implementations via addStageConfig/saveStageConfig/moveStageConfig/delStageConfig above.
 
 // -- Workstation CRUD --
+// Backward-compatible defaults for the new Machine Master identity fields —
+// existing workstations created before this feature just get sensible blanks.
+function ensureMachineMasterDefaults(w){
+  if(w.make===undefined) w.make='';
+  if(w.model===undefined) w.model='';
+  if(w.assetId===undefined) w.assetId='';
+  if(w.powerRating===undefined) w.powerRating='';
+  if(w.location===undefined) w.location='';
+  if(w.installDate===undefined) w.installDate='';
+  if(w.initialPmDate===undefined) w.initialPmDate='';
+  if(w.customPmFreqDays===undefined) w.customPmFreqDays='';
+  return w;
+}
+
 function addWorkstation(){
   const name=prompt('Workstation name:');
   if(!name||!name.trim())return;
   const cap=parseInt(prompt('Daily capacity (qty/day):','30'))||30;
-  M.workstations.push({id:'ws_'+Date.now(),name:name.trim(),cap,unit:'Components/Day',hoursPerDay:8,pmFrequency:'Monthly',maintenanceStatus:'none',active:true});
+  M.workstations.push({id:'ws_'+Date.now(),name:name.trim(),cap,unit:'Components/Day',hoursPerDay:8,pmFrequency:'Monthly',maintenanceStatus:'none',active:true,
+    make:'',model:'',assetId:'',powerRating:'',location:'',installDate:'',initialPmDate:'',customPmFreqDays:''});
   renderAdmin('machines',null);toast('Workstation "'+name.trim()+'" added.','✓');
 }
 function saveWorkstation(i){
@@ -12744,13 +13204,12 @@ function saveWorkstation(i){
   const cap=parseInt(document.getElementById('ws_cap_'+i)?.value)||1;
   const unit=document.getElementById('ws_unit_'+i)?.value.trim()||'Components/Day';
   const hrs=parseFloat(document.getElementById('ws_hrs_'+i)?.value)||8;
-  const pmFreq=document.getElementById('ws_pmfreq_'+i)?.value||'Monthly';
   const mStatus=document.getElementById('ws_mstatus_'+i)?.value||'none';
   const status=document.getElementById('ws_status_'+i)?.value;
   if(!name){toast('Workstation name cannot be empty.','⚠');return;}
   const prevStatus=M.workstations[i].maintenanceStatus;
   M.workstations[i].name=name;M.workstations[i].cap=cap;M.workstations[i].unit=unit;M.workstations[i].hoursPerDay=hrs;
-  M.workstations[i].pmFrequency=pmFreq;M.workstations[i].maintenanceStatus=mStatus;M.workstations[i].active=(status==='Active');
+  M.workstations[i].maintenanceStatus=mStatus;M.workstations[i].active=(status==='Active');
   renderAdmin('machines',null);
   toast('Workstation "'+name+'" saved. Capacity: '+cap+'/day, '+hrs+'h/day'+(mStatus!==prevStatus?' — Maintenance status changed to "'+mStatus+'"':''),'✓');
   // Maintenance status directly affects scheduling — refresh Machine Blocking if open
@@ -12760,6 +13219,54 @@ function delWorkstation(i){
   if(confirm('Delete workstation "'+M.workstations[i].name+'"?\nThis will remove it from Capacity Planning.')){
     M.workstations.splice(i,1);renderAdmin('machines',null);toast('Workstation deleted.','✓');
   }
+}
+
+// ------ MACHINE MASTER DETAILS (identity fields — Master Admin only) ------
+let _machineDetailsIdx = null;
+
+function openMachineDetailsModal(i){
+  const w = M.workstations[i]; if(!w) return;
+  ensureMachineMasterDefaults(w);
+  _machineDetailsIdx = i;
+  document.getElementById('machineDetailsSub').textContent = w.name+' ('+w.id+')';
+  document.getElementById('md_make').value = w.make;
+  document.getElementById('md_model').value = w.model;
+  document.getElementById('md_assetid').value = w.assetId;
+  document.getElementById('md_power').value = w.powerRating;
+  document.getElementById('md_location').value = w.location;
+  document.getElementById('md_installdate').value = w.installDate;
+
+  const isSuperadmin = CURRENT_USER && CURRENT_USER.role==='superadmin';
+  ['md_make','md_model','md_assetid','md_power','md_location','md_installdate'].forEach(id=>{
+    const el=document.getElementById(id); if(el) el.disabled = !isSuperadmin;
+  });
+  const saveBtn=document.getElementById('machineDetailsSaveBtn');
+  if(saveBtn) saveBtn.style.display = isSuperadmin ? 'inline-flex' : 'none';
+  const noteEl=document.getElementById('machineDetailsPermNote');
+  if(noteEl) noteEl.textContent = isSuperadmin
+    ? 'Machine identity details — visible to other admins as read-only; only Master Admin can edit them.'
+    : 'These identity fields are Master-Admin-only. You can view them here, but only Master Admin can edit or save changes.';
+
+  document.getElementById('machineDetailsModal').classList.add('open');
+}
+
+function saveMachineDetails(){
+  if(!CURRENT_USER || CURRENT_USER.role!=='superadmin'){
+    toast('Only Master Admin can edit machine identity details.','⚠');
+    return;
+  }
+  const i = _machineDetailsIdx;
+  const w = M.workstations[i]; if(!w) return;
+  w.make = document.getElementById('md_make').value.trim();
+  w.model = document.getElementById('md_model').value.trim();
+  w.assetId = document.getElementById('md_assetid').value.trim();
+  w.powerRating = document.getElementById('md_power').value.trim();
+  w.location = document.getElementById('md_location').value.trim();
+  w.installDate = document.getElementById('md_installdate').value;
+  const ts=new Date().toISOString().replace('T',' ').slice(0,16);
+  DB.auditLog.unshift({ts,user:CURRENT_USER.fullName,action:'Update',module:'Machine Master',entity:w.name,field:'Identity Details',old:'--',nw:'Make: '+(w.make||'—')+', Model: '+(w.model||'—')+', Asset ID: '+(w.assetId||'—'),ip:'192.168.1.1'});
+  closeMod('machineDetailsModal');
+  toast('Machine details saved for "'+w.name+'".','✓');
 }
 
 // -- User CRUD --

@@ -3892,7 +3892,7 @@ BULK_IMPORT_CONFIGS.breakdowns = {
     if(!category) errors.push('Breakdown Category is required');
     else if(!M.breakdownCategories.includes(category)) errors.push('Breakdown Category "'+category+'" is not recognized');
     if(!date) errors.push('Breakdown Date is required');
-    else if(isNaN(Date.parse(date))) errors.push('Breakdown Date "'+date+'" is not a valid date');
+    else if(!isValidISODate(date)) errors.push('Breakdown Date "'+date+'" must be in YYYY-MM-DD format');
     if(!startTime) errors.push('Breakdown Start Time is required');
     if(!problem) errors.push('Problem Description is required');
     let techId = '';
@@ -3981,7 +3981,7 @@ BULK_IMPORT_CONFIGS.calibration = {
     else if(!M.calibrationDepartments.includes(dept)) errors.push('Department "'+dept+'" is not recognized');
     if(!owner) errors.push('Owner is required');
     if(!lastCal) errors.push('Last Calibration Date is required');
-    else if(isNaN(Date.parse(lastCal))) errors.push('Last Calibration Date "'+lastCal+'" is not a valid date');
+    else if(!isValidISODate(lastCal)) errors.push('Last Calibration Date "'+lastCal+'" must be in YYYY-MM-DD format (e.g. 2026-05-10) — other formats like "23-Jul-25" pass a loose check but break the due-date calculation');
 
     if(errors.length) return {valid:false, errors};
     return {valid:true, record:{tagNo,name,make,range,leastCount,dept,owner,freq,lastCal,agency,certNo,status}};
@@ -4054,7 +4054,7 @@ BULK_IMPORT_CONFIGS.dms = {
     if(!level) errors.push('Document Level must be L1, L2, L3, or L4');
     if(!revNo) errors.push('Revision Number is required');
     if(!revDate) errors.push('Revision Date is required');
-    else if(isNaN(Date.parse(revDate))) errors.push('Revision Date "'+revDate+'" is not a valid date');
+    else if(!isValidISODate(revDate)) errors.push('Revision Date "'+revDate+'" must be in YYYY-MM-DD format');
     if(!prepBy) errors.push('Prepared By is required');
     if(!approvedBy) errors.push('Approved By is required');
 
@@ -4098,6 +4098,19 @@ BULK_IMPORT_CONFIGS.dms = {
 // bulk-imported data is validated and stored identically to a manual entry.
 
 // ---- CSV parsing (handles quoted fields, embedded commas/quotes/newlines) ----
+// Strict YYYY-MM-DD check for bulk-import date columns. Date.parse() alone is
+// too lenient — it accepts formats like "23-Jul-25" that pass validation but
+// then break downstream code (e.g. Calibration's due-date math) which assumes
+// a real ISO date string. Every date field the rest of the app treats as
+// YYYY-MM-DD must be validated with this, not with isNaN(Date.parse(...)).
+function isValidISODate(str){
+  if(typeof str!=='string' || !/^\d{4}-\d{2}-\d{2}$/.test(str)) return false;
+  const d = new Date(str+'T00:00:00');
+  if(isNaN(d.getTime())) return false;
+  // Reject overflowed dates like 2026-02-30, which JS Date would silently roll into March
+  return d.toISOString().slice(0,10)===str;
+}
+
 function parseCSVText(text){
   const rows = [];
   let row = [], field = '', inQuotes = false;
@@ -11416,6 +11429,7 @@ function ensureCalibDefaults(inst){
 
 // Adds N months to a YYYY-MM-DD date string, returning YYYY-MM-DD.
 function calibAddMonths(dateStr, months){
+  if(!isValidISODate(dateStr)) throw new Error('calibAddMonths: "'+dateStr+'" is not a valid YYYY-MM-DD date');
   const d=new Date(dateStr+'T00:00:00');
   d.setMonth(d.getMonth()+Number(months));
   return d.toISOString().split('T')[0];

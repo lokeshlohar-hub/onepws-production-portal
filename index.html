@@ -3543,8 +3543,19 @@ async function apiRequest(path, opts) {
     const res = await fetch(API_BASE + path, Object.assign({}, opts, { headers: headers, signal: controller.signal }));
     clearTimeout(timeoutId);
     let data = {};
-    try { data = await res.json(); } catch (e) { /* empty/non-JSON body */ }
-    if (!res.ok) throw new Error(data.error || ('Request failed (HTTP ' + res.status + ')'));
+    let bodyText = '';
+    try { bodyText = await res.text(); data = JSON.parse(bodyText); } catch (e) { /* empty/non-JSON body */ }
+    if (!res.ok) {
+      if (res.status === 404 && !data.error) {
+        // An HTML/empty 404 with no JSON error field means Express never
+        // matched this route at all — not "record not found" (that comes
+        // back as a real {error:"..."} JSON body from the route's own code).
+        // The near-certain cause is that the backend running on the server
+        // is an older build that doesn't have this endpoint yet.
+        throw new Error('This feature isn\'t available on the currently deployed backend (HTTP 404 with no route match). The backend most likely needs to be redeployed with the latest update before this will work.');
+      }
+      throw new Error(data.error || ('Request failed (HTTP ' + res.status + ')'));
+    }
     return data;
   } catch (err) {
     clearTimeout(timeoutId);

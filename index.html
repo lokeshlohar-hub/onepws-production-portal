@@ -3962,11 +3962,11 @@ BULK_IMPORT_CONFIGS.breakdowns = {
 BULK_IMPORT_CONFIGS.calibration = {
   title: '📤 Bulk Import Calibration Instruments (CSV)',
   templateFilename: 'calibration_import_template.csv',
-  instructions: 'Upload multiple calibration instruments at once. <b>Tag Number, Instrument Name, Department, Owner,</b> and <b>Last Calibration Date</b> are mandatory. Department must match: '+M.calibrationDepartments.join(', ')+'. Next Due Date is calculated automatically from Last Calibration Date + Calibration Frequency — any value you put in that column is for your reference only and will be recalculated by the system.',
-  headers: ['Tag Number','Instrument Name','Make','Range','Least Count','Department','Owner','Calibration Frequency (Months)','Last Calibration Date (YYYY-MM-DD)','Calibration Agency','Certificate Number','Status (Active/Retired)'],
+  instructions: 'Upload multiple calibration instruments at once. <b>Tag Number, Instrument Name, Department, Owner,</b> and <b>Last Calibration Date</b> are mandatory. Department must match: '+M.calibrationDepartments.join(', ')+'. Last Calibration Date accepts <b>DD-MM-YYYY</b> (e.g. <b>14-04-2026</b>, the standard Excel date format), DD/MM/YYYY, DD-Mon-YYYY, or YYYY-MM-DD — Excel date-formatted cells are read correctly however they display. Next Due Date is calculated automatically from Last Calibration Date + Calibration Frequency — any value you put in that column is for your reference only and will be recalculated by the system.',
+  headers: ['Tag Number','Instrument Name','Make','Range','Least Count','Department','Owner','Calibration Frequency (Months)','Last Calibration Date (DD-MM-YYYY)','Calibration Agency','Certificate Number','Status (Active/Retired)'],
   sampleRows: [
-    ['QC/PHM-02','pH Meter (Backup)','Hanna Instruments','0-14 pH','0.01 pH','Quality','Priya Sharma','6','2026-05-10','WIKA Instruments','CC-5521','Active'],
-    ['MNT/MM-02','Digital Multimeter (Spare)','Fluke','600V AC/DC','0.1','Maintenance','Vikram Singh','12','2026-02-20','AVI Calibration','CC-5488','Active'],
+    ['QC/PHM-02','pH Meter (Backup)','Hanna Instruments','0-14 pH','0.01 pH','Quality','Priya Sharma','6','10-05-2026','WIKA Instruments','CC-5521','Active'],
+    ['MNT/MM-02','Digital Multimeter (Spare)','Fluke','600V AC/DC','0.1','Maintenance','Vikram Singh','12','20-02-2026','AVI Calibration','CC-5488','Active'],
   ],
   validateGroup(rows){
     const raw = rows[0];
@@ -3979,7 +3979,8 @@ BULK_IMPORT_CONFIGS.calibration = {
     const dept = (raw['Department']||'').trim();
     const owner = (raw['Owner']||'').trim();
     const freq = parseInt(raw['Calibration Frequency (Months)']||raw['Calibration Frequency']) || 12;
-    const lastCal = (raw['Last Calibration Date (YYYY-MM-DD)']||raw['Last Calibration Date']||'').trim();
+    const lastCalRaw = (raw['Last Calibration Date (DD-MM-YYYY)']||raw['Last Calibration Date (YYYY-MM-DD)']||raw['Last Calibration Date']||'').trim();
+    const lastCal = normalizeToISODate(lastCalRaw);
     const agency = (raw['Calibration Agency']||'').trim();
     const certNo = (raw['Certificate Number']||'').trim();
     const statusRaw = (raw['Status (Active/Retired)']||raw['Status']||'Active').trim();
@@ -3991,8 +3992,8 @@ BULK_IMPORT_CONFIGS.calibration = {
     if(!dept) errors.push('Department is required');
     else if(!M.calibrationDepartments.includes(dept)) errors.push('Department "'+dept+'" is not recognized');
     if(!owner) errors.push('Owner is required');
-    if(!lastCal) errors.push('Last Calibration Date is required');
-    else if(!isValidISODate(lastCal)) errors.push('Last Calibration Date "'+lastCal+'" must be in YYYY-MM-DD format (e.g. 2026-05-10) — other formats like "23-Jul-25" pass a loose check but break the due-date calculation');
+    if(!lastCalRaw) errors.push('Last Calibration Date is required');
+    else if(!lastCal) errors.push('Last Calibration Date "'+lastCalRaw+'" was not recognized — use DD-MM-YYYY (e.g. 14-04-2026), DD/MM/YYYY, DD-Mon-YYYY, or YYYY-MM-DD');
 
     if(errors.length) return {valid:false, errors};
     return {valid:true, record:{tagNo,name,make,range,leastCount,dept,owner,freq,lastCal,agency,certNo,status}};
@@ -4114,12 +4115,69 @@ BULK_IMPORT_CONFIGS.dms = {
 // then break downstream code (e.g. Calibration's due-date math) which assumes
 // a real ISO date string. Every date field the rest of the app treats as
 // YYYY-MM-DD must be validated with this, not with isNaN(Date.parse(...)).
+//
+// IMPORTANT: this is pure calendar arithmetic, deliberately with NO Date
+// object round-trip. An earlier version built the check as
+// `new Date(str+'T00:00:00').toISOString().slice(0,10)===str` — that parses
+// as LOCAL time but reads back in UTC, which silently shifts the date by a
+// day for anyone in a timezone ahead of UTC (IST and most of Asia), causing
+// every valid "YYYY-MM-DD" to fail validation. Never reintroduce that pattern
+// here — validate by parsing the numbers directly instead.
 function isValidISODate(str){
-  if(typeof str!=='string' || !/^\d{4}-\d{2}-\d{2}$/.test(str)) return false;
-  const d = new Date(str+'T00:00:00');
-  if(isNaN(d.getTime())) return false;
-  // Reject overflowed dates like 2026-02-30, which JS Date would silently roll into March
-  return d.toISOString().slice(0,10)===str;
+  const m = typeof str==='string' && /^(\d{4})-(\d{2})-(\d{2})$/.exec(str);
+  if(!m) return false;
+  const y=+m[1], mo=+m[2], d=+m[3];
+  if(mo<1||mo>12) return false;
+  const leap = (y%4===0 && (y%100!==0 || y%400===0));
+  const daysInMonth = [31, leap?29:28, 31,30,31,30,31,31,30,31,30,31];
+  return d>=1 && d<=daysInMonth[mo-1];
+}
+
+const MONTH_ABBR = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
+
+// Accepts the common formats Excel actually produces when a date-formatted
+// cell is exported to CSV, and normalizes to the YYYY-MM-DD the rest of the
+// app expects. Returns null if nothing recognizable matched. Never uses
+// Date.parse() or a Date-object round-trip — see isValidISODate() above for
+// why that silently breaks depending on the user's timezone.
+function normalizeToISODate(raw){
+  if(raw===null || raw===undefined) return null;
+  const str = String(raw).trim();
+  if(!str) return null;
+
+  // Already correct
+  if(isValidISODate(str)) return str;
+
+  // DD-MM-YYYY or DD/MM/YYYY (the standard Excel/India format this feature adds)
+  let m = /^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/.exec(str);
+  if(m){
+    const candidate = m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0');
+    if(isValidISODate(candidate)) return candidate;
+  }
+
+  // DD-Mon-YYYY or DD-Mon-YY, e.g. "14-Apr-2026" or "14-Apr-26"
+  m = /^(\d{1,2})[-\s]([A-Za-z]{3,9})[-\s](\d{2,4})$/.exec(str);
+  if(m){
+    const mon = MONTH_ABBR[m[2].slice(0,3).toLowerCase()];
+    if(mon){
+      const yyyy = m[3].length===2 ? ('20'+m[3]) : m[3];
+      const candidate = yyyy+'-'+String(mon).padStart(2,'0')+'-'+m[1].padStart(2,'0');
+      if(isValidISODate(candidate)) return candidate;
+    }
+  }
+
+  // Excel's own internal date serial number (days since 1899-12-30), in case
+  // a date cell gets pasted/exported as its raw numeric value
+  if(/^\d{4,6}$/.test(str)){
+    const serial = parseInt(str,10);
+    if(serial>0 && serial<100000){
+      const d = new Date(Date.UTC(1899,11,30) + serial*86400000);
+      const candidate = d.getUTCFullYear()+'-'+String(d.getUTCMonth()+1).padStart(2,'0')+'-'+String(d.getUTCDate()).padStart(2,'0');
+      if(isValidISODate(candidate)) return candidate;
+    }
+  }
+
+  return null;
 }
 
 function parseCSVText(text){
@@ -11439,11 +11497,17 @@ function ensureCalibDefaults(inst){
 }
 
 // Adds N months to a YYYY-MM-DD date string, returning YYYY-MM-DD.
+// Uses Date.UTC throughout deliberately — constructing via local time (the
+// previous `new Date(dateStr+'T00:00:00')` pattern) and reading back with
+// toISOString() silently shifts the result by a day for anyone in a timezone
+// ahead of UTC, which would quietly compute the wrong Next Due Date for every
+// instrument for users in IST and most of Asia. Do not reintroduce that.
 function calibAddMonths(dateStr, months){
   if(!isValidISODate(dateStr)) throw new Error('calibAddMonths: "'+dateStr+'" is not a valid YYYY-MM-DD date');
-  const d=new Date(dateStr+'T00:00:00');
-  d.setMonth(d.getMonth()+Number(months));
-  return d.toISOString().split('T')[0];
+  const [y,mo,d] = dateStr.split('-').map(Number);
+  const t = Date.UTC(y, mo-1+Number(months), d);
+  const result = new Date(t);
+  return result.getUTCFullYear()+'-'+String(result.getUTCMonth()+1).padStart(2,'0')+'-'+String(result.getUTCDate()).padStart(2,'0');
 }
 function calibNextDueDate(lastCalDate, freqMonths){ return calibAddMonths(lastCalDate, freqMonths); }
 

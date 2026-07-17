@@ -1501,6 +1501,7 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
     <button class="tab" onclick="showQualityTab('pareto',this)">📊 Pareto Analysis</button>
     <button class="tab" onclick="showQualityTab('ppm',this)">🎯 PPM Trend</button>
     <button class="tab" onclick="showQualityTab('history',this)">📁 Full History</button>
+    <button class="tab" data-module="dimensional" onclick="showQualityTab('dimensional',this)">🔬 Dimensional Capability</button>
   </div>
 
   <!-- -- TAB: LIVE QC -- -->
@@ -1681,6 +1682,47 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
         <table>
           <thead><tr><th>Date</th><th>Project</th><th>Component</th><th>Machine/Stage</th><th>Qty Rejected</th><th>Category</th><th>QC Person</th><th>QC Instrument</th><th>Root Cause</th><th>Status</th></tr></thead>
           <tbody id="qualityLogBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- -- TAB: MACHINE DIMENSIONAL CAPABILITY STUDY -- -->
+  <div id="qtab-dimensional" style="display:none">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+      <div class="text-sm text-muted">Half-yearly dimensional capability studies (Cp/Cpk) for Admin-selected machines only — permanently retained, never overwritten.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-outline btn-sm" id="dimAdminSettingsBtn" onclick="openDimAdminSettings()" style="display:none">⚙️ Enabled Machines &amp; Thresholds</button>
+        <button class="btn btn-primary btn-sm" id="dimNewStudyBtn" onclick="openNewDimStudyModal()" style="display:none">+ New Dimensional Study</button>
+      </div>
+    </div>
+
+    <div class="kpi-grid" id="dimKPIs" style="grid-template-columns:repeat(5,1fr);margin-bottom:16px"></div>
+
+    <div class="card mb-3">
+      <div class="card-body" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;padding:14px">
+        <div class="form-group" style="margin:0;min-width:160px"><label class="form-label" style="font-size:11px">Machine</label>
+          <select class="fsel" id="dimFilterMachine" onchange="renderDimStudyList()" style="height:32px"><option value="">All Machines</option></select></div>
+        <div class="form-group" style="margin:0;min-width:150px"><label class="form-label" style="font-size:11px">Machine ID No.</label>
+          <input type="text" class="form-input" id="dimFilterAssetId" oninput="renderDimStudyList()" style="height:32px" placeholder="e.g. PWSPL/1/04"></div>
+        <div class="form-group" style="margin:0;min-width:140px"><label class="form-label" style="font-size:11px">Test Date From</label>
+          <input type="date" class="form-input" id="dimFilterDateFrom" onchange="renderDimStudyList()" style="height:32px"></div>
+        <div class="form-group" style="margin:0;min-width:140px"><label class="form-label" style="font-size:11px">Test Date To</label>
+          <input type="date" class="form-input" id="dimFilterDateTo" onchange="renderDimStudyList()" style="height:32px"></div>
+        <div class="form-group" style="margin:0;min-width:140px"><label class="form-label" style="font-size:11px">Study Status</label>
+          <select class="fsel" id="dimFilterStudyStatus" onchange="renderDimStudyList()" style="height:32px"><option value="">All</option><option value="Due">Due (within 30d)</option><option value="Overdue">Overdue</option><option value="Current">Current</option></select></div>
+        <div class="form-group" style="margin:0;min-width:140px"><label class="form-label" style="font-size:11px">Capability Status</label>
+          <select class="fsel" id="dimFilterCapability" onchange="renderDimStudyList()" style="height:32px"><option value="">All</option><option>Capable</option><option>Borderline</option><option>Not Capable</option></select></div>
+        <button class="btn btn-outline btn-sm" onclick="clearDimFilters()" style="height:32px">Clear</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><div class="card-title">📋 Dimensional Capability Studies</div><span class="text-xs text-muted" id="dimStudyCount"></span></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Machine</th><th>Machine ID</th><th>Test Date</th><th>Operator</th><th>Cp</th><th>Cpk</th><th>Capability</th><th>Next Due</th><th>Study Status</th><th>Actions</th></tr></thead>
+          <tbody id="dimStudyBody"></tbody>
         </table>
       </div>
     </div>
@@ -3224,6 +3266,71 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
   </div>
 </div>
 
+<!-- DIMENSIONAL STUDY: ADMIN SETTINGS (enabled machines + thresholds) -->
+<div class="modal-overlay" id="dimAdminModal">
+  <div class="modal" style="max-width:620px">
+    <div class="modal-header">
+      <div class="modal-title">⚙️ Dimensional Capability — Enabled Machines &amp; Thresholds</div>
+      <button class="modal-close" onclick="closeMod('dimAdminModal')">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="alert alert-info" style="font-size:12px">Only machines checked below can have a Dimensional Capability Study created. This is separate from Machine Master — enabling here does not change anything in Machine Master.</div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Cp Target (minimum)</label><input type="number" class="form-input" id="dimCpThreshold" step="0.01" min="0.5"></div>
+        <div class="form-group"><label class="form-label">Cpk Target (minimum)</label><input type="number" class="form-input" id="dimCpkThreshold" step="0.01" min="0.5"></div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Enabled Machines</label>
+        <div id="dimMachineEnableList" style="max-height:280px;overflow-y:auto;border:1px solid var(--border2);border-radius:8px;padding:10px"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeMod('dimAdminModal')">Close</button>
+      <button class="btn btn-primary" onclick="saveDimAdminSettings()">💾 Save Settings</button>
+    </div>
+  </div>
+</div>
+
+<!-- DIMENSIONAL STUDY: NEW STUDY ENTRY -->
+<div class="modal-overlay" id="newDimStudyModal">
+  <div class="modal" style="max-width:1150px">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">🔬 New Machine Dimensional Capability Study</div>
+        <div class="text-xs text-muted">50 pieces × 3 measurement locations = 150 measurements, grouped into 5 lots of 10</div>
+      </div>
+      <button class="modal-close" onclick="closeMod('newDimStudyModal')">×</button>
+    </div>
+    <div class="modal-body" style="max-height:78vh;overflow-y:auto" id="newDimStudyBody">
+      <!-- Populated by openNewDimStudyModal() -->
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeMod('newDimStudyModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="calculateAndSaveDimStudy()">📊 Calculate Results &amp; Save Study</button>
+    </div>
+  </div>
+</div>
+
+<!-- DIMENSIONAL STUDY: REPORT VIEW -->
+<div class="modal-overlay" id="dimReportModal">
+  <div class="modal" style="max-width:1200px">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title" id="dimReportTitle">🔬 Machine Dimensional Capability Report</div>
+        <div class="text-xs text-muted" id="dimReportSub"></div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn btn-outline btn-sm" onclick="exportDimStudyPDF()">📄 Export PDF</button>
+        <button class="btn btn-outline btn-sm" onclick="exportDimStudyExcel()">📊 Export Excel</button>
+        <button class="modal-close" onclick="closeMod('dimReportModal')">×</button>
+      </div>
+    </div>
+    <div class="modal-body" id="dimReportBody" style="max-height:80vh;overflow-y:auto">
+      <!-- Populated by openDimStudyReport() -->
+    </div>
+  </div>
+</div>
+
 <!-- BULK CSV IMPORT MODAL (shared by Tool Inventory, Projects, Breakdowns, Calibration, DMS) -->
 <div class="modal-overlay" id="bulkImportModal">
   <div class="modal" style="max-width:900px">
@@ -3335,6 +3442,13 @@ const M = {
   ],
   breakdownCategories:['Mechanical Failure','Electrical Failure','Hydraulic/Pneumatic Failure','Part Damage','Software/Control Fault','Operator Error','Wear & Tear','Other'],
   pmFrequencyOptions:['Daily','Weekly','Monthly','Quarterly','Half-Yearly','Yearly','Custom'],
+  // Machine Dimensional Capability Study — only machines explicitly enabled
+  // here (by Admin) are eligible for a study; this is deliberately NOT tied
+  // to Machine Master's active/inactive flag, per the requirement that this
+  // feature must not auto-enable for every machine.
+  dimensionalStudyEnabledMachines:[],
+  dimensionalCapabilityThresholds:{cpMin:1.33, cpkMin:1.33},
+  dimensionalMeasurementLocations:['Top/Upper','Middle','Bottom'],
   tatRules:{'Cat 0':{ext:7,wood:18},'Cat 1':{ext:7,wood:20},'Cat 2':{ext:7,wood:34},'Cat 3':{ext:7,wood:50},'R&D':{ext:14,wood:50}},
 
   // Maps production stage name → workstation id(s)
@@ -3577,6 +3691,9 @@ const DB = {
   //  checklist, workPerformed, technicianId, observations, sparePartsUsed:[], lubrication,
   //  calibration, remarks}
   pmSchedule:[],
+  // Machine Dimensional Capability Studies — every completed study is
+  // permanently retained here; never overwritten or deleted by a new study.
+  dimensionalStudies:[],
 
   // ------ CALIBRATION MANAGEMENT ------
   // One record per instrument/gauge under calibration control, for exactly three
@@ -4455,6 +4572,7 @@ const PERMISSION_MODULES = [
     {key:'toolcons', label:'Tool Consumption Tracking', actions:['view','edit']}
   ]},
   {key:'quality',      label:'Quality Control',                actions:['view','create','approve','export']},
+  {key:'dimensional',  label:'Machine Dimensional Capability',  actions:['view','create','export']},
   {key:'maintenance',  label:'Maintenance',                    actions:['view'], subs:[
     {key:'breakdown', label:'Breakdown Entry',            actions:['view','create']},
     {key:'log',       label:'Breakdown Log',               actions:['view']},
@@ -4485,7 +4603,7 @@ function noPerm(){ return {}; }
 // sensible starting point so a newly created Admin account isn't empty.
 const DEPARTMENT_DEFAULT_MODULES = {
   'Production':  {tracker:{view:true,create:true,edit:true,export:true,print:true}, newproject:'full', stageupdate:'full', capacity:{daily:'full',machine:'full',oee:'full',blocking:'full',planning:'full',summary:'full',toolcons:'view'}, dashboard:'view', analytics:'view'},
-  'Quality':     {quality:'full', calibration:{schedule:'view', entry:'full', history:'view', analytics:'view'}, stageupdate:'full', dashboard:'view', analytics:'view', tracker:'view'},
+  'Quality':     {quality:'full', dimensional:'full', calibration:{schedule:'view', entry:'full', history:'view', analytics:'view'}, stageupdate:'full', dashboard:'view', analytics:'view', tracker:'view'},
   'Maintenance': {maintenance:'full', calibration:{schedule:'view', entry:'full', history:'view', analytics:'view'}, capacity:{toolcons:'full'}, dashboard:'view', analytics:'view'},
   'Planning':    {capacity:'full', tracker:{view:true,create:true,edit:true,export:true,print:true}, reports:{view:true,export:true}, dashboard:'view', analytics:'view'},
   'Store':       {dms:'full', maintenance:{toolinv:'view'}, reports:{view:true,export:true}, dashboard:'view'},
@@ -11947,6 +12065,606 @@ function confirmDeleteCalibInstrument(){
   toast('Instrument '+inst.tagNo+' has been permanently deleted.','🗑');
 }
 
+
+// ============================================================================
+// ------ MACHINE DIMENSIONAL CAPABILITY STUDY (Cp/Cpk) ------
+// Replicates the exact statistical methodology of the company's existing
+// Excel-based Dimensional Report (Doc No. IMS-07-03-L4-26):
+//   Per lot-of-10 subgroup: Avg=AVERAGE, Range=MAX-MIN, StdDev=STDEV (sample,
+//     n-1), Cp=(USL-LSL)/(6*StdDev), Cpk=MIN(USL-Avg,Avg-LSL)/(3*StdDev)
+//   Overall (across all 15 lot×location subgroups): plain AVERAGE of each
+//     subgroup's Avg/Range/StdDev/Cp/Cpk — matches the reference workbook's
+//     "Lot Average" row exactly, verified against real data to 4+ decimal
+//     places before this was wired into any UI.
+// Reads Machine Master (M.workstations) and Calibration Master
+// (DB.calibrationInstruments) for selection/traceability only — does not
+// write to either.
+// ============================================================================
+
+function dimMean(arr){ return arr.reduce((a,b)=>a+b,0)/arr.length; }
+function dimSampleStdDev(arr){
+  const m=dimMean(arr);
+  const sumSq=arr.reduce((s,v)=>s+(v-m)*(v-m),0);
+  return Math.sqrt(sumSq/(arr.length-1));
+}
+function dimRangeOf(arr){ return Math.max(...arr)-Math.min(...arr); }
+function dimComputeSubgroupStats(samples, lsl, usl){
+  const avg=dimMean(samples), range=dimRangeOf(samples), std=dimSampleStdDev(samples);
+  const cp=(usl-lsl)/(6*std);
+  const uslMinusMu=usl-avg, muMinusLsl=avg-lsl;
+  const cpk=Math.min(uslMinusMu,muMinusLsl)/(3*std);
+  return {avg,range,std,cp,uslMinusMu,muMinusLsl,cpk};
+}
+function dimComputeOverallStats(list){
+  return {
+    avg:dimMean(list.map(s=>s.avg)), range:dimMean(list.map(s=>s.range)),
+    std:dimMean(list.map(s=>s.std)), cp:dimMean(list.map(s=>s.cp)), cpk:dimMean(list.map(s=>s.cpk))
+  };
+}
+function dimCapabilityStatus(cpk){
+  const t=(M.dimensionalCapabilityThresholds||{cpkMin:1.33}).cpkMin||1.33;
+  if(cpk>=t) return 'Capable';
+  if(cpk>=1.00) return 'Borderline';
+  return 'Not Capable';
+}
+function dimCapabilityColor(status){
+  return status==='Capable'?'var(--green)':status==='Borderline'?'var(--yellow)':'var(--red)';
+}
+function dimNextDueDate(testDate){ return calibAddMonths(testDate, 6); } // reuses the timezone-safe date engine already used by Calibration
+function dimStudyStatus(nextDue){
+  const days=calibDaysUntil(nextDue);
+  if(days<0) return 'Overdue';
+  if(days<=30) return 'Due';
+  return 'Current';
+}
+
+// ------ ADMIN SETTINGS: enabled machines + Cp/Cpk thresholds ------
+function openDimAdminSettings(){
+  if(!CURRENT_USER || CURRENT_USER.role!=='superadmin'){
+    toast('Only Master Admin can manage enabled machines and thresholds.','⚠');
+    return;
+  }
+  document.getElementById('dimCpThreshold').value=(M.dimensionalCapabilityThresholds||{}).cpMin||1.33;
+  document.getElementById('dimCpkThreshold').value=(M.dimensionalCapabilityThresholds||{}).cpkMin||1.33;
+  const list=document.getElementById('dimMachineEnableList');
+  list.innerHTML=M.workstations.map(w=>{
+    const checked=(M.dimensionalStudyEnabledMachines||[]).includes(w.id)?'checked':'';
+    return '<label style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:12.5px;cursor:pointer">'
+      +'<input type="checkbox" value="'+w.id+'" class="dim-machine-check" '+checked+' style="width:16px;height:16px">'
+      +'<span>'+w.name+(w.assetId?' <span class="text-xs text-muted">('+w.assetId+')</span>':'')+'</span>'
+      +'</label>';
+  }).join('') || '<div class="text-sm text-muted">No machines in Machine Master yet.</div>';
+  document.getElementById('dimAdminModal').classList.add('open');
+}
+function saveDimAdminSettings(){
+  if(!CURRENT_USER || CURRENT_USER.role!=='superadmin'){
+    toast('Only Master Admin can save these settings.','⚠');
+    return;
+  }
+  const cpMin=parseFloat(document.getElementById('dimCpThreshold').value)||1.33;
+  const cpkMin=parseFloat(document.getElementById('dimCpkThreshold').value)||1.33;
+  M.dimensionalCapabilityThresholds={cpMin,cpkMin};
+  const checked=Array.from(document.querySelectorAll('.dim-machine-check:checked')).map(el=>el.value);
+  M.dimensionalStudyEnabledMachines=checked;
+  const ts=new Date().toISOString().replace('T',' ').slice(0,16);
+  DB.auditLog.unshift({ts,user:CURRENT_USER.fullName,action:'Update',module:'Dimensional Capability',
+    entity:'Settings',field:'Enabled Machines / Thresholds',old:'--',
+    nw:checked.length+' machine(s) enabled, Cp target '+cpMin+', Cpk target '+cpkMin,ip:'192.168.1.1'});
+  closeMod('dimAdminModal');
+  initDimStudyTab();
+  toast('Dimensional Capability settings saved.','✓');
+}
+
+// ------ TAB INIT / LIST / FILTERS / KPIs ------
+function initDimStudyTab(){
+  const canCreate=hasPermission('dimensional',null,'create');
+  document.getElementById('dimNewStudyBtn').style.display=canCreate?'inline-flex':'none';
+  document.getElementById('dimAdminSettingsBtn').style.display=(CURRENT_USER&&CURRENT_USER.role==='superadmin')?'inline-flex':'none';
+
+  const machSel=document.getElementById('dimFilterMachine');
+  const cur=machSel.value;
+  machSel.innerHTML='<option value="">All Machines</option>'+M.workstations.map(w=>'<option value="'+w.id+'">'+w.name+'</option>').join('');
+  if(cur) machSel.value=cur;
+
+  renderDimKPIs();
+  renderDimStudyList();
+}
+function clearDimFilters(){
+  ['dimFilterMachine','dimFilterAssetId','dimFilterDateFrom','dimFilterDateTo','dimFilterStudyStatus','dimFilterCapability'].forEach(id=>{
+    const el=document.getElementById(id); if(el) el.value='';
+  });
+  renderDimStudyList();
+}
+function dimFilteredStudies(){
+  const fy=getActiveFY();
+  const {start,end}=getFYDateRange(fy);
+  let studies=(DB.dimensionalStudies||[]).filter(s=>s.testDate>=start && s.testDate<=end);
+  const machId=document.getElementById('dimFilterMachine')?.value;
+  const assetId=(document.getElementById('dimFilterAssetId')?.value||'').toLowerCase().trim();
+  const dateFrom=document.getElementById('dimFilterDateFrom')?.value;
+  const dateTo=document.getElementById('dimFilterDateTo')?.value;
+  const studyStatus=document.getElementById('dimFilterStudyStatus')?.value;
+  const capStatus=document.getElementById('dimFilterCapability')?.value;
+  if(machId) studies=studies.filter(s=>s.machineId===machId);
+  if(assetId) studies=studies.filter(s=>(s.machineSnapshot.assetId||'').toLowerCase().includes(assetId));
+  if(dateFrom) studies=studies.filter(s=>s.testDate>=dateFrom);
+  if(dateTo) studies=studies.filter(s=>s.testDate<=dateTo);
+  if(studyStatus) studies=studies.filter(s=>dimStudyStatus(s.nextDueDate)===studyStatus);
+  if(capStatus) studies=studies.filter(s=>s.capabilityStatus===capStatus);
+  return studies.sort((a,b)=>b.testDate.localeCompare(a.testDate));
+}
+function renderDimKPIs(){
+  const fy=getActiveFY();
+  const {start,end}=getFYDateRange(fy);
+  const allInFY=(DB.dimensionalStudies||[]).filter(s=>s.testDate>=start && s.testDate<=end);
+  const enabledCount=(M.dimensionalStudyEnabledMachines||[]).length;
+  const overdueCount=enabledCount ? M.workstations.filter(w=>(M.dimensionalStudyEnabledMachines||[]).includes(w.id)).filter(w=>{
+    const latest=(DB.dimensionalStudies||[]).filter(s=>s.machineId===w.id).sort((a,b)=>b.testDate.localeCompare(a.testDate))[0];
+    return !latest || dimStudyStatus(latest.nextDueDate)==='Overdue';
+  }).length : 0;
+  const capable=allInFY.filter(s=>s.capabilityStatus==='Capable').length;
+  document.getElementById('dimKPIs').innerHTML=[
+    {l:'Enabled Machines',v:enabledCount,c:'blue'},
+    {l:'Studies (FY)',v:allInFY.length,c:'teal'},
+    {l:'Capable',v:capable,c:'green'},
+    {l:'Borderline/Not Capable',v:allInFY.length-capable,c:allInFY.length-capable>0?'yellow':'green'},
+    {l:'Overdue Studies',v:overdueCount,c:overdueCount>0?'red':'green'},
+  ].map(k=>'<div class="kpi-card '+k.c+'"><div class="kpi-label">'+k.l+'</div><div class="kpi-value">'+k.v+'</div></div>').join('');
+}
+function renderDimStudyList(){
+  const studies=dimFilteredStudies();
+  document.getElementById('dimStudyCount').textContent=studies.length+' stud'+(studies.length===1?'y':'ies');
+  const canExport=hasPermission('dimensional',null,'export');
+  document.getElementById('dimStudyBody').innerHTML = studies.length ? studies.map(s=>{
+    const status=dimStudyStatus(s.nextDueDate);
+    const statusColor=status==='Overdue'?'var(--red)':status==='Due'?'var(--yellow)':'var(--green)';
+    return '<tr>'
+      +'<td class="fw-600 text-sm">'+s.machineSnapshot.name+'</td>'
+      +'<td class="text-xs font-mono">'+(s.machineSnapshot.assetId||'—')+'</td>'
+      +'<td class="font-mono text-xs">'+s.testDate+'</td>'
+      +'<td class="text-xs">'+s.operatorName+'</td>'
+      +'<td class="font-mono text-sm">'+s.overallStats.cp.toFixed(3)+'</td>'
+      +'<td class="font-mono fw-600">'+s.overallStats.cpk.toFixed(3)+'</td>'
+      +'<td><span class="badge" style="background:'+dimCapabilityColor(s.capabilityStatus)+'22;color:'+dimCapabilityColor(s.capabilityStatus)+'">'+s.capabilityStatus+'</span></td>'
+      +'<td class="font-mono text-xs">'+s.nextDueDate+'</td>'
+      +'<td><span class="badge" style="background:'+statusColor+'22;color:'+statusColor+'">'+status+'</span></td>'
+      +'<td style="display:flex;gap:4px;flex-wrap:wrap">'
+        +'<button class="btn btn-outline btn-sm" onclick="openDimStudyReport(\''+s.id+'\')">View Report</button>'
+      +'</td>'
+      +'</tr>';
+  }).join('') : '<tr><td colspan="10" class="text-sm text-muted" style="padding:16px;text-align:center">No dimensional studies match the current filters.</td></tr>';
+}
+
+// ------ NEW STUDY: machine/instrument selection + 150-point measurement grid ------
+function openNewDimStudyModal(){
+  if(!hasPermission('dimensional',null,'create')){
+    toast('You do not have permission to create a dimensional study.','⚠');
+    return;
+  }
+  const enabledIds=M.dimensionalStudyEnabledMachines||[];
+  if(!enabledIds.length){
+    toast('No machines are enabled for Dimensional Capability Study yet. Ask Master Admin to enable machines first.','⚠');
+    return;
+  }
+  const enabledMachines=M.workstations.filter(w=>enabledIds.includes(w.id));
+  const validInstruments=(DB.calibrationInstruments||[]).map(ensureCalibDefaults).filter(i=>i.status!=='Retired' && calibDaysUntil(i.nextDueDate)>=0);
+
+  const html = `
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Machine <span class="req">*</span></label>
+        <select class="form-select" id="ds_machine" onchange="onDimMachineChange()">
+          <option value="">— Select Machine —</option>
+          ${enabledMachines.map(w=>'<option value="'+w.id+'">'+w.name+'</option>').join('')}
+        </select>
+      </div>
+      <div class="form-group"><label class="form-label">Test Date <span class="req">*</span></label><input type="date" class="form-input" id="ds_testdate" value="${new Date().toISOString().split('T')[0]}"></div>
+    </div>
+    <div class="card mb-3" id="ds_machineInfo" style="display:none">
+      <div class="card-body" style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;padding:12px 14px" id="ds_machineInfoGrid"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Dimensional Characteristic <span class="req">*</span></label><input type="text" class="form-input" id="ds_characteristic" placeholder="e.g. Length, Width, Cut Dimension"></div>
+      <div class="form-group"><label class="form-label">Specified Dimension (mm) <span class="req">*</span></label><input type="number" class="form-input" id="ds_specified" step="any" oninput="onDimSpecChange()"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Tolerance (± mm) <span class="req">*</span></label><input type="number" class="form-input" id="ds_tolerance" step="any" oninput="onDimSpecChange()"></div>
+      <div class="form-group"><label class="form-label">LSL / USL (auto-calculated)</label><div id="ds_lslUsl" class="form-input" style="background:var(--surface2);display:flex;align-items:center">—</div></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Measuring Instrument <span class="req">*</span></label>
+        <select class="form-select" id="ds_instrument" onchange="onDimInstrumentChange()">
+          <option value="">— Select Instrument —</option>
+          ${validInstruments.map(i=>'<option value="'+i.id+'">'+i.tagNo+' — '+i.name+'</option>').join('')}
+        </select>
+        <div class="text-xs text-muted" style="margin-top:4px">Only Active, currently-valid (not overdue) instruments are shown</div>
+      </div>
+      <div class="form-group"><label class="form-label">Instrument Traceability</label><div id="ds_instrumentInfo" class="form-input" style="background:var(--surface2);height:auto;min-height:40px;display:flex;align-items:center;font-size:11.5px">Select an instrument</div></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Operator Name <span class="req">*</span></label><input type="text" class="form-input" id="ds_operator"></div>
+      <div class="form-group"><label class="form-label">Inspected By</label><input type="text" class="form-input" id="ds_inspectedby"></div>
+    </div>
+
+    <div class="fw-700 text-sm mb-2" style="margin-top:14px">📏 Measurements — 50 pieces × 3 locations (150 total)</div>
+    <div id="ds_measurementGrid"></div>
+  `;
+  document.getElementById('newDimStudyBody').innerHTML=html;
+  buildDimMeasurementGrid();
+  document.getElementById('newDimStudyModal').classList.add('open');
+}
+
+function buildDimMeasurementGrid(){
+  const locations=M.dimensionalMeasurementLocations||['Top/Upper','Middle','Bottom'];
+  let html='';
+  for(let lot=1; lot<=5; lot++){
+    const startSample=(lot-1)*10+1;
+    html += '<div class="card mb-3"><div class="card-header"><div class="card-title" style="font-size:12.5px">Lot '+lot+' — Pieces '+startSample+'–'+(startSample+9)+'</div></div>'
+      +'<div class="table-wrap"><table><thead><tr><th>Location</th>'
+      + Array.from({length:10},(_,i)=>'<th>Piece '+(startSample+i)+'</th>').join('')
+      +'</tr></thead><tbody>'
+      + locations.map(loc=>{
+          const locKey=loc.replace(/[^a-zA-Z0-9]/g,'');
+          return '<tr><td class="fw-600 text-xs">'+loc+'</td>'
+            + Array.from({length:10},(_,i)=>'<td><input type="number" step="any" class="form-input dim-measure-input" style="height:28px;width:80px;font-family:monospace" id="dm_L'+lot+'_'+locKey+'_'+i+'" data-lot="'+lot+'" data-loc="'+loc+'"></td>').join('')
+            +'</tr>';
+        }).join('')
+      +'</tbody></table></div></div>';
+  }
+  document.getElementById('ds_measurementGrid').innerHTML=html;
+}
+
+function onDimMachineChange(){
+  const wsId=document.getElementById('ds_machine')?.value;
+  const infoBox=document.getElementById('ds_machineInfo');
+  const grid=document.getElementById('ds_machineInfoGrid');
+  if(!wsId){ infoBox.style.display='none'; return; }
+  const w=M.workstations.find(x=>x.id===wsId);
+  if(!w) return;
+  ensureMachineMasterDefaults(w);
+  const fields=[['Name',w.name],['Make',w.make||'—'],['Model',w.model||'—'],['ID No.',w.assetId||'—'],['Capacity',w.powerRating||(w.cap+'/day')]];
+  grid.innerHTML=fields.map(([l,v])=>'<div><div class="text-xs text-muted" style="text-transform:uppercase">'+l+'</div><div class="fw-600 text-sm">'+v+'</div></div>').join('');
+  infoBox.style.display='block';
+}
+function onDimSpecChange(){
+  const spec=parseFloat(document.getElementById('ds_specified')?.value);
+  const tol=parseFloat(document.getElementById('ds_tolerance')?.value);
+  const el=document.getElementById('ds_lslUsl');
+  if(isNaN(spec)||isNaN(tol)){ el.textContent='—'; return; }
+  el.innerHTML='LSL: <b>'+(spec-tol).toFixed(3)+'</b> &nbsp;·&nbsp; USL: <b>'+(spec+tol).toFixed(3)+'</b>';
+}
+function onDimInstrumentChange(){
+  const instId=document.getElementById('ds_instrument')?.value;
+  const el=document.getElementById('ds_instrumentInfo');
+  if(!instId){ el.textContent='Select an instrument'; return; }
+  const inst=(DB.calibrationInstruments||[]).find(i=>i.id===instId);
+  if(!inst) return;
+  ensureCalibDefaults(inst);
+  el.innerHTML='<div><b>'+inst.tagNo+'</b> — '+inst.name+'<br>'+calibStatusBadgeHTML(inst)+' &nbsp;Due: <span class="font-mono">'+inst.nextDueDate+'</span></div>';
+}
+
+function calculateAndSaveDimStudy(){
+  if(!hasPermission('dimensional',null,'create')){
+    toast('You do not have permission to create a dimensional study.','⚠');
+    return;
+  }
+  const wsId=document.getElementById('ds_machine')?.value;
+  const testDate=document.getElementById('ds_testdate')?.value;
+  const characteristic=document.getElementById('ds_characteristic')?.value.trim();
+  const specified=parseFloat(document.getElementById('ds_specified')?.value);
+  const tolerance=parseFloat(document.getElementById('ds_tolerance')?.value);
+  const instId=document.getElementById('ds_instrument')?.value;
+  const operator=document.getElementById('ds_operator')?.value.trim();
+  const inspectedBy=document.getElementById('ds_inspectedby')?.value.trim();
+
+  if(!wsId){toast('Select a machine.','⚠');return;}
+  if(!testDate || !isValidISODate(testDate)){toast('Enter a valid Test Date.','⚠');return;}
+  if(!characteristic){toast('Enter the Dimensional Characteristic.','⚠');return;}
+  if(isNaN(specified)){toast('Enter the Specified Dimension.','⚠');return;}
+  if(isNaN(tolerance) || tolerance<=0){toast('Enter a valid Tolerance (> 0).','⚠');return;}
+  if(!instId){toast('Select the Measuring Instrument.','⚠');return;}
+  if(!operator){toast('Enter the Operator Name.','⚠');return;}
+
+  const lsl=specified-tolerance, usl=specified+tolerance;
+  const locations=M.dimensionalMeasurementLocations||['Top/Upper','Middle','Bottom'];
+
+  // Gather all 150 measurements, validating none are missing
+  const lots=[];
+  let missingCount=0;
+  for(let lot=1; lot<=5; lot++){
+    const lotData={lotNo:lot, measurements:{}, stats:{}};
+    locations.forEach(loc=>{
+      const locKey=loc.replace(/[^a-zA-Z0-9]/g,'');
+      const values=[];
+      for(let i=0;i<10;i++){
+        const val=parseFloat(document.getElementById('dm_L'+lot+'_'+locKey+'_'+i)?.value);
+        if(isNaN(val)) missingCount++;
+        else values.push(val);
+      }
+      lotData.measurements[loc]=values;
+    });
+    lots.push(lotData);
+  }
+  if(missingCount>0){
+    toast(missingCount+' measurement(s) are still empty. All 150 values are required before the study can be calculated.','⚠');
+    return;
+  }
+
+  // Compute per-lot-per-location subgroup stats, then overall
+  const subgroupStatsFlat=[];
+  lots.forEach(lotData=>{
+    locations.forEach(loc=>{
+      const stats=dimComputeSubgroupStats(lotData.measurements[loc], lsl, usl);
+      lotData.stats[loc]=stats;
+      subgroupStatsFlat.push(stats);
+    });
+  });
+  const overallStats=dimComputeOverallStats(subgroupStatsFlat);
+  const capabilityStatus=dimCapabilityStatus(overallStats.cpk);
+  const nextDueDate=dimNextDueDate(testDate);
+
+  const w=M.workstations.find(x=>x.id===wsId);
+  ensureMachineMasterDefaults(w);
+  const inst=(DB.calibrationInstruments||[]).find(i=>i.id===instId);
+  ensureCalibDefaults(inst);
+
+  const id='MDCS-'+String((DB.dimensionalStudies||[]).length+1).padStart(4,'0');
+  const ts=new Date().toISOString().replace('T',' ').slice(0,16);
+  const study={
+    id, machineId:wsId,
+    machineSnapshot:{name:w.name, make:w.make, model:w.model, assetId:w.assetId, powerRating:w.powerRating, location:w.location},
+    testDate, characteristic, specified, tolerance, lsl, usl,
+    instrumentId:instId,
+    instrumentSnapshot:{tagNo:inst.tagNo, name:inst.name, status:inst.status, calibDueDate:inst.nextDueDate},
+    operatorName:operator, inspectedBy, locations,
+    lots, overallStats, capabilityStatus, nextDueDate,
+    status:'Completed', createdBy:CURRENT_USER?CURRENT_USER.fullName:'Admin', createdAt:ts
+  };
+  DB.dimensionalStudies.push(study);
+  DB.auditLog.unshift({ts,user:study.createdBy,action:'Create',module:'Dimensional Capability',
+    entity:w.name,field:'study',old:'--',
+    nw:'New study '+id+' — Cp '+overallStats.cp.toFixed(3)+', Cpk '+overallStats.cpk.toFixed(3)+' ('+capabilityStatus+')',ip:'192.168.1.1'});
+
+  closeMod('newDimStudyModal');
+  initDimStudyTab();
+  toast('Study saved — Cpk '+overallStats.cpk.toFixed(3)+' ('+capabilityStatus+'). Next due: '+nextDueDate,'✓');
+  openDimStudyReport(id);
+}
+
+
+// ------ STUDY REPORT VIEW (with previous-study comparison + charts) ------
+let _dimReportCurrentId = null;
+
+function openDimStudyReport(studyId){
+  const study=(DB.dimensionalStudies||[]).find(s=>s.id===studyId);
+  if(!study){ toast('Study not found.','⚠'); return; }
+  _dimReportCurrentId=studyId;
+
+  // Find the previous study for this SAME machine (by test date, excluding this one)
+  const machineHistory=(DB.dimensionalStudies||[]).filter(s=>s.machineId===study.machineId).sort((a,b)=>a.testDate.localeCompare(b.testDate));
+  const idx=machineHistory.findIndex(s=>s.id===studyId);
+  const previous=idx>0 ? machineHistory[idx-1] : null;
+
+  document.getElementById('dimReportTitle').textContent='🔬 Dimensional Capability Report — '+study.machineSnapshot.name;
+  document.getElementById('dimReportSub').textContent=study.id+' · Test Date: '+study.testDate+' · '+study.characteristic;
+
+  const capColor=dimCapabilityColor(study.capabilityStatus);
+  const infoFields=[
+    ['Machine Name',study.machineSnapshot.name],['Make',study.machineSnapshot.make||'—'],['Model',study.machineSnapshot.model||'—'],
+    ['Identification No.',study.machineSnapshot.assetId||'—'],['Capacity',study.machineSnapshot.powerRating||'—'],['Location',study.machineSnapshot.location||'—'],
+    ['Characteristic',study.characteristic],['Specified',study.specified+' mm'],['LSL / USL',study.lsl.toFixed(3)+' / '+study.usl.toFixed(3)+' mm'],
+    ['Instrument',study.instrumentSnapshot.tagNo+' — '+study.instrumentSnapshot.name],['Instrument Cal. Due',study.instrumentSnapshot.calibDueDate],
+    ['Operator',study.operatorName],['Inspected By',study.inspectedBy||'—'],['Test Date',study.testDate],['Next Due Date',study.nextDueDate],
+  ];
+  const infoHtml='<div class="card mb-3"><div class="card-header"><div class="card-title">📋 Study Information</div></div>'
+    +'<div class="card-body"><div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">'
+    + infoFields.map(([l,v])=>'<div><div class="text-xs text-muted" style="text-transform:uppercase">'+l+'</div><div class="fw-600 text-sm" style="margin-top:2px">'+v+'</div></div>').join('')
+    +'</div></div></div>';
+
+  const s=study.overallStats;
+  const kpiHtml='<div class="card mb-3"><div class="card-header"><div class="card-title">📊 Overall Capability Summary</div></div>'
+    +'<div class="card-body"><div class="kpi-grid" style="grid-template-columns:repeat(6,1fr)">'
+    + [
+        {l:'Average',v:s.avg.toFixed(4),c:'blue'},{l:'Range (avg)',v:s.range.toFixed(4),c:'teal'},
+        {l:'Std Dev',v:s.std.toFixed(4),c:'purple'},{l:'Cp',v:s.cp.toFixed(3),c:s.cp>=(M.dimensionalCapabilityThresholds.cpMin||1.33)?'green':'yellow'},
+        {l:'Cpk',v:s.cpk.toFixed(3),c:study.capabilityStatus==='Capable'?'green':study.capabilityStatus==='Borderline'?'yellow':'red'},
+        {l:'Status',v:study.capabilityStatus,c:study.capabilityStatus==='Capable'?'green':study.capabilityStatus==='Borderline'?'yellow':'red'},
+      ].map(k=>'<div class="kpi-card '+k.c+'"><div class="kpi-label">'+k.l+'</div><div class="kpi-value" style="font-size:17px">'+k.v+'</div></div>').join('')
+    +'</div>'
+    +'<div class="text-xs mt-2" style="color:'+capColor+';font-weight:600">'
+      + (study.capabilityStatus==='Capable' ? '✅ Process is capable — Cp and Cpk meet the target (≥ '+(M.dimensionalCapabilityThresholds.cpkMin||1.33)+'). Machine is acceptable for mass production.'
+        : study.capabilityStatus==='Borderline' ? '⚠ Process is borderline — Cpk is below target but ≥ 1.00. Monitor closely and consider process improvement.'
+        : '❌ Process is NOT capable — Cpk is below 1.00. Investigate and correct before continued production.')
+    +'</div></div></div>';
+
+  let comparisonHtml='';
+  if(previous){
+    const cpkDelta=s.cpk-previous.overallStats.cpk;
+    comparisonHtml='<div class="card mb-3"><div class="card-header"><div class="card-title">📈 Comparison vs Previous Study</div></div>'
+      +'<div class="card-body"><div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">'
+      +'<div><div class="text-xs text-muted">Previous Test Date</div><div class="fw-600 text-sm">'+previous.testDate+'</div></div>'
+      +'<div><div class="text-xs text-muted">Previous Cpk</div><div class="fw-600 text-sm">'+previous.overallStats.cpk.toFixed(3)+' ('+previous.capabilityStatus+')</div></div>'
+      +'<div><div class="text-xs text-muted">Current Cpk</div><div class="fw-600 text-sm">'+s.cpk.toFixed(3)+' ('+study.capabilityStatus+')</div></div>'
+      +'<div><div class="text-xs text-muted">Change</div><div class="fw-600 text-sm" style="color:'+(cpkDelta>=0?'var(--green)':'var(--red)')+'">'+(cpkDelta>=0?'▲ +':'▼ ')+cpkDelta.toFixed(3)+'</div></div>'
+      +'</div></div></div>';
+  } else {
+    comparisonHtml='<div class="alert alert-info mb-3" style="font-size:12px">This is the first recorded study for this machine — no previous study to compare against yet.</div>';
+  }
+
+  // Lot-by-lot detail tables (matches the reference workbook layout)
+  let lotsHtml='';
+  study.lots.forEach(lot=>{
+    const startPiece=(lot.lotNo-1)*10+1;
+    lotsHtml+='<div class="card mb-3"><div class="card-header"><div class="card-title" style="font-size:12.5px">Lot '+lot.lotNo+' — Pieces '+startPiece+'–'+(startPiece+9)+'</div></div>'
+      +'<div class="table-wrap"><table><thead><tr><th>Location</th>'
+      + Array.from({length:10},(_,i)=>'<th>P'+(startPiece+i)+'</th>').join('')
+      +'<th>Avg</th><th>Range</th><th>StdDev</th><th>Cp</th><th>Cpk</th></tr></thead><tbody>'
+      + study.locations.map(loc=>{
+          const st=lot.stats[loc];
+          return '<tr><td class="fw-600 text-xs">'+loc+'</td>'
+            + lot.measurements[loc].map(v=>'<td class="font-mono text-xs">'+v.toFixed(3)+'</td>').join('')
+            +'<td class="font-mono text-xs fw-600">'+st.avg.toFixed(4)+'</td><td class="font-mono text-xs">'+st.range.toFixed(4)+'</td>'
+            +'<td class="font-mono text-xs">'+st.std.toFixed(4)+'</td><td class="font-mono text-xs">'+st.cp.toFixed(3)+'</td>'
+            +'<td class="font-mono text-xs fw-600">'+st.cpk.toFixed(3)+'</td></tr>';
+        }).join('')
+      +'</tbody></table></div></div>';
+  });
+
+  // Charts: Cpk trend (all studies for this machine) + X-bar per lot + histogram of all 150 points
+  const chartsHtml='<div class="charts-grid charts-2 mb-4">'
+    +'<div class="card"><div class="card-header"><div class="card-title" style="font-size:12.5px">📈 Cpk Trend — This Machine (All Studies)</div></div><div class="card-body"><div class="chart-wrap" style="height:230px"><canvas id="dimCpkTrendChart"></canvas></div></div></div>'
+    +'<div class="card"><div class="card-header"><div class="card-title" style="font-size:12.5px">📊 X-Bar Chart — Lot Averages by Location</div></div><div class="card-body"><div class="chart-wrap" style="height:230px"><canvas id="dimXBarChart"></canvas></div></div></div>'
+    +'<div class="card"><div class="card-header"><div class="card-title" style="font-size:12.5px">📊 R Chart — Lot Ranges by Location</div></div><div class="card-body"><div class="chart-wrap" style="height:230px"><canvas id="dimRChart"></canvas></div></div></div>'
+    +'<div class="card"><div class="card-header"><div class="card-title" style="font-size:12.5px">📊 Measurement Distribution (All 150 Points)</div></div><div class="card-body"><div class="chart-wrap" style="height:230px"><canvas id="dimHistogramChart"></canvas></div></div></div>'
+    +'</div>';
+
+  document.getElementById('dimReportBody').innerHTML=infoHtml+kpiHtml+comparisonHtml+chartsHtml
+    +'<div class="fw-700 text-sm mb-2">📋 Full Measurement Detail</div>'+lotsHtml;
+
+  renderDimReportCharts(study, machineHistory);
+  document.getElementById('dimReportModal').classList.add('open');
+}
+
+function renderDimReportCharts(study, machineHistory){
+  // Cpk trend across all studies for this machine
+  const trendLabels=machineHistory.map(s=>s.testDate);
+  const trendData=machineHistory.map(s=>s.overallStats.cpk);
+  const ctxTrend=document.getElementById('dimCpkTrendChart');
+  if(ctxTrend && typeof Chart!=='undefined'){
+    if(charts.dimCpkTrendChart) charts.dimCpkTrendChart.destroy();
+    charts.dimCpkTrendChart=new Chart(ctxTrend,{type:'line',data:{labels:trendLabels,datasets:[
+      {label:'Cpk',data:trendData,borderColor:'#1a56db',backgroundColor:'rgba(26,86,219,.12)',tension:.3,fill:true},
+      {label:'Target',data:trendLabels.map(()=>M.dimensionalCapabilityThresholds.cpkMin||1.33),borderColor:'#94a3b8',borderDash:[5,5],pointRadius:0}
+    ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom'}}}});
+  }
+  // X-bar: lot averages per location
+  const lotLabels=study.lots.map(l=>'Lot '+l.lotNo);
+  const ctxX=document.getElementById('dimXBarChart');
+  if(ctxX && typeof Chart!=='undefined'){
+    if(charts.dimXBarChart) charts.dimXBarChart.destroy();
+    charts.dimXBarChart=new Chart(ctxX,{type:'line',data:{labels:lotLabels,datasets:study.locations.map((loc,i)=>({
+      label:loc, data:study.lots.map(l=>l.stats[loc].avg), borderColor:RPT_PALETTE[i%RPT_PALETTE.length], tension:.3
+    }))},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom'}}}});
+  }
+  // R chart: lot ranges per location
+  const ctxR=document.getElementById('dimRChart');
+  if(ctxR && typeof Chart!=='undefined'){
+    if(charts.dimRChart) charts.dimRChart.destroy();
+    charts.dimRChart=new Chart(ctxR,{type:'bar',data:{labels:lotLabels,datasets:study.locations.map((loc,i)=>({
+      label:loc, data:study.lots.map(l=>l.stats[loc].range), backgroundColor:RPT_PALETTE[i%RPT_PALETTE.length]
+    }))},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom'}}}});
+  }
+  // Histogram of all 150 points
+  const allPoints=[];
+  study.lots.forEach(l=>study.locations.forEach(loc=>allPoints.push(...l.measurements[loc])));
+  const minV=Math.min(...allPoints), maxV=Math.max(...allPoints);
+  const binCount=10;
+  const binSize=(maxV-minV)/binCount || 1;
+  const bins=Array.from({length:binCount},(_,i)=>({label:(minV+i*binSize).toFixed(3), count:0}));
+  allPoints.forEach(v=>{
+    let idx=Math.floor((v-minV)/binSize);
+    if(idx>=binCount) idx=binCount-1;
+    if(idx<0) idx=0;
+    bins[idx].count++;
+  });
+  const ctxH=document.getElementById('dimHistogramChart');
+  if(ctxH && typeof Chart!=='undefined'){
+    if(charts.dimHistogramChart) charts.dimHistogramChart.destroy();
+    charts.dimHistogramChart=new Chart(ctxH,{type:'bar',data:{labels:bins.map(b=>b.label),datasets:[{label:'Frequency',data:bins.map(b=>b.count),backgroundColor:'#1a56db'}]},
+      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}}}});
+  }
+}
+
+// ------ EXPORTS ------
+function exportDimStudyExcel(){
+  if(!hasPermission('dimensional',null,'export')){ toast('You do not have permission to export.','⚠'); return; }
+  const study=(DB.dimensionalStudies||[]).find(s=>s.id===_dimReportCurrentId);
+  if(!study) return;
+  const rows=[['Machine Dimensional Capability Report'],[study.machineSnapshot.name+' — '+study.id],[],
+    ['Machine Name',study.machineSnapshot.name],['Make',study.machineSnapshot.make||''],['Model',study.machineSnapshot.model||''],
+    ['Identification No.',study.machineSnapshot.assetId||''],['Capacity',study.machineSnapshot.powerRating||''],
+    ['Characteristic',study.characteristic],['Specified',study.specified],['LSL',study.lsl],['USL',study.usl],
+    ['Instrument',study.instrumentSnapshot.tagNo+' — '+study.instrumentSnapshot.name],['Instrument Cal. Due',study.instrumentSnapshot.calibDueDate],
+    ['Operator',study.operatorName],['Test Date',study.testDate],['Next Due Date',study.nextDueDate],[],
+    ['Overall Average',study.overallStats.avg],['Overall Range',study.overallStats.range],['Overall Std Dev',study.overallStats.std],
+    ['Overall Cp',study.overallStats.cp],['Overall Cpk',study.overallStats.cpk],['Capability Status',study.capabilityStatus],[],
+    ['Lot','Location', ...Array.from({length:10},(_,i)=>'Piece '+(i+1)), 'Average','Range','StdDev','Cp','Cpk']
+  ];
+  study.lots.forEach(lot=>{
+    study.locations.forEach(loc=>{
+      const st=lot.stats[loc];
+      rows.push([lot.lotNo, loc, ...lot.measurements[loc], st.avg, st.range, st.std, st.cp, st.cpk]);
+    });
+  });
+  const csv=rows.map(r=>r.map(c=>'"'+String(c).replace(/"/g,'""')+'"').join(',')).join('\n');
+  const blob=new Blob([csv],{type:'text/csv'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='Dimensional_Study_'+study.machineSnapshot.name.replace(/\s+/g,'_')+'_'+study.testDate+'.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  toast('Study exported as CSV (Excel-compatible).','✓');
+}
+
+function exportDimStudyPDF(){
+  if(!hasPermission('dimensional',null,'export')){ toast('You do not have permission to export.','⚠'); return; }
+  const study=(DB.dimensionalStudies||[]).find(s=>s.id===_dimReportCurrentId);
+  if(!study) return;
+  const chartIds=['dimCpkTrendChart','dimXBarChart','dimRChart','dimHistogramChart'];
+  const chartTitles=['Cpk Trend','X-Bar Chart','R Chart','Measurement Distribution'];
+  const chartImgs=chartIds.map(id=>{ const c=document.getElementById(id); try{ return c?c.toDataURL('image/png'):null; }catch(e){ return null; } });
+
+  const infoRows=[
+    ['Machine Name',study.machineSnapshot.name],['Make',study.machineSnapshot.make||'—'],['Model',study.machineSnapshot.model||'—'],
+    ['Identification No.',study.machineSnapshot.assetId||'—'],['Characteristic',study.characteristic],['Specified / LSL / USL',study.specified+' / '+study.lsl.toFixed(3)+' / '+study.usl.toFixed(3)],
+    ['Instrument',study.instrumentSnapshot.tagNo+' — '+study.instrumentSnapshot.name],['Operator',study.operatorName],
+    ['Test Date',study.testDate],['Next Due Date',study.nextDueDate],
+  ];
+  const kpis=[['Average',study.overallStats.avg.toFixed(4)],['Std Dev',study.overallStats.std.toFixed(4)],
+    ['Cp',study.overallStats.cp.toFixed(3)],['Cpk',study.overallStats.cpk.toFixed(3)],['Status',study.capabilityStatus]];
+
+  let lotRowsHtml='';
+  study.lots.forEach(lot=>{
+    study.locations.forEach(loc=>{
+      const st=lot.stats[loc];
+      lotRowsHtml+='<tr><td>'+lot.lotNo+'</td><td>'+loc+'</td>'
+        +lot.measurements[loc].map(v=>'<td>'+v.toFixed(3)+'</td>').join('')
+        +'<td>'+st.avg.toFixed(4)+'</td><td>'+st.range.toFixed(4)+'</td><td>'+st.std.toFixed(4)+'</td><td>'+st.cp.toFixed(3)+'</td><td>'+st.cpk.toFixed(3)+'</td></tr>';
+    });
+  });
+
+  const html=`<!DOCTYPE html><html><head><title>Dimensional Report - ${study.machineSnapshot.name}</title><style>
+    *{box-sizing:border-box;margin:0;padding:0} body{font-family:Arial,sans-serif;font-size:9.5px;color:#0f1b2d;padding:16px}
+    .header{background:#1a56db;color:#fff;padding:12px 16px;border-radius:6px;margin-bottom:14px}
+    .header h1{font-size:15px} .header p{font-size:10px;opacity:.9}
+    .section{font-size:12px;font-weight:700;margin:14px 0 6px;border-bottom:2px solid #1a56db;padding-bottom:3px}
+    .infogrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+    .infoitem{background:#f8f9fc;border:1px solid #e2e6ed;border-radius:5px;padding:6px 8px}
+    .infoitem .l{font-size:8px;color:#8492a6;text-transform:uppercase} .infoitem .v{font-size:10.5px;font-weight:700}
+    .kpigrid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+    .kpi{background:#f8f9fc;border:1px solid #e2e6ed;border-radius:5px;padding:8px;text-align:center}
+    .kpi .l{font-size:8px;color:#8492a6;text-transform:uppercase} .kpi .v{font-size:14px;font-weight:700}
+    table{width:100%;border-collapse:collapse;font-size:7.5px;margin-bottom:8px}
+    th{background:#f0f2f5;font-size:7px;padding:3px 4px;border:1px solid #e2e6ed} td{padding:3px 4px;border:1px solid #e2e6ed}
+    .chartsgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px} .chartbox{border:1px solid #e2e6ed;border-radius:5px;padding:6px}
+    .chartbox .t{font-size:9px;font-weight:700;margin-bottom:3px} .chartbox img{width:100%}
+    @media print{body{padding:8px}}
+  </style></head><body>
+    <div class="header"><h1>🔬 Machine Dimensional Capability Report — ${study.machineSnapshot.name}</h1><p>${study.id} · Generated: ${new Date().toLocaleString()} · ONEPWS Production Control Portal</p></div>
+    <div class="section">Study Information</div>
+    <div class="infogrid">${infoRows.map(([l,v])=>`<div class="infoitem"><div class="l">${l}</div><div class="v">${v}</div></div>`).join('')}</div>
+    <div class="section">Overall Capability Summary</div>
+    <div class="kpigrid">${kpis.map(([l,v])=>`<div class="kpi"><div class="l">${l}</div><div class="v">${v}</div></div>`).join('')}</div>
+    <div class="section">Measurement Detail — All 150 Points</div>
+    <table><thead><tr><th>Lot</th><th>Location</th>${Array.from({length:10},(_,i)=>'<th>P'+(i+1)+'</th>').join('')}<th>Avg</th><th>Range</th><th>StdDev</th><th>Cp</th><th>Cpk</th></tr></thead><tbody>${lotRowsHtml}</tbody></table>
+    <div class="section">Charts</div>
+    <div class="chartsgrid">${chartTitles.map((t,i)=>`<div class="chartbox"><div class="t">${t}</div>${chartImgs[i]?`<img src="${chartImgs[i]}">`:'<div style="font-size:8px;color:#8492a6">No data</div>'}</div>`).join('')}</div>
+  </body></html>`;
+  const pw=window.open('','_blank');
+  if(!pw){ toast('Pop-up blocked. Allow pop-ups to download PDF.','⚠'); return; }
+  pw.document.write(html); pw.document.close();
+  setTimeout(()=>{ pw.focus(); pw.print(); },400);
+  toast('Dimensional Report PDF opened — use Print → Save as PDF','📄');
+}
+
 function onCalibCompleteInstChange(){
   const id=document.getElementById('cal_complete_inst')?.value;
   const panel=document.getElementById('calCompleteDetails');
@@ -14349,7 +15067,7 @@ function restoreDB(inp){
 
 // ------ QUALITY CONTROL ------
 function showQualityTab(t, el){
-  ['live','pareto','ppm','history'].forEach(x=>{
+  ['live','pareto','ppm','history','dimensional'].forEach(x=>{
     const e=document.getElementById('qtab-'+x); if(e) e.style.display=x===t?'block':'none';
   });
   document.querySelectorAll('#qualityTabs .tab').forEach(b=>b.classList.remove('active'));
@@ -14357,6 +15075,7 @@ function showQualityTab(t, el){
   if(t==='pareto') renderParetoAnalysis();
   if(t==='ppm') renderPPMTrend();
   if(t==='history') renderQualityLog();
+  if(t==='dimensional') initDimStudyTab();
 }
 
 function initQuality(){

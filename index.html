@@ -3112,6 +3112,99 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
   </div>
 </div>
 
+<!-- EDIT CALIBRATION INSTRUMENT MODAL -->
+<div class="modal-overlay" id="editCalibModal">
+  <div class="modal" style="max-width:640px">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">✏ Edit Calibration Instrument</div>
+        <div class="text-xs text-muted" id="editCalibSub" style="margin-top:2px"></div>
+      </div>
+      <button class="modal-close" onclick="closeMod('editCalibModal')">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Tag Number <span class="req">*</span></label><input type="text" class="form-input" id="ec_tag"></div>
+        <div class="form-group"><label class="form-label">Instrument Name <span class="req">*</span></label><input type="text" class="form-input" id="ec_name"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Make</label><input type="text" class="form-input" id="ec_make"></div>
+        <div class="form-group"><label class="form-label">Range</label><input type="text" class="form-input" id="ec_range"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Least Count</label><input type="text" class="form-input" id="ec_lc"></div>
+        <div class="form-group"><label class="form-label">Department <span class="req">*</span></label>
+          <select class="form-select" id="ec_dept"><option value="">— Select —</option></select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Owner <span class="req">*</span></label><input type="text" class="form-input" id="ec_owner"></div>
+        <div class="form-group"><label class="form-label">Calibration Frequency (Months) <span class="req">*</span></label>
+          <select class="form-select" id="ec_freq" onchange="updateEditCalibDuePreview()"><option value="1">Monthly (1)</option><option value="3">Quarterly (3)</option><option value="6">Half-Yearly (6)</option><option value="12">Yearly (12)</option><option value="24">Every 2 Years (24)</option></select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Last Calibration Date <span class="req">*</span></label><input type="date" class="form-input" id="ec_lastcal" onchange="updateEditCalibDuePreview()"></div>
+        <div class="form-group"><label class="form-label">Status</label>
+          <select class="form-select" id="ec_status"><option value="Active">Active</option><option value="Retired">Retired</option></select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Calibration Agency</label><input type="text" class="form-input" id="ec_agency"></div>
+        <div class="form-group"><label class="form-label">Certificate Number</label><input type="text" class="form-input" id="ec_certno"></div>
+      </div>
+      <div class="alert alert-info" style="font-size:12px" id="ec_duePreview"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeMod('editCalibModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveEditCalibInstrument()">💾 Save Changes</button>
+    </div>
+  </div>
+</div>
+
+<!-- DELETE CALIBRATION INSTRUMENT MODAL -->
+<div class="modal-overlay" id="deleteCalibModal">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title" style="color:var(--red)">🗑 Delete Calibration Instrument</div>
+        <div class="text-xs text-muted" id="deleteCalibSub" style="margin-top:2px"></div>
+      </div>
+      <button class="modal-close" onclick="closeMod('deleteCalibModal')">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="alert alert-danger" style="font-size:12.5px;font-weight:600">
+        ⚠ Are you sure you want to permanently delete this instrument? This action cannot be undone. Its full calibration history will be permanently removed.
+      </div>
+      <div class="form-group" style="margin-top:12px">
+        <label class="form-label">Reason for Deletion <span class="req">*</span></label>
+        <select class="form-select" id="deleteCalibReason">
+          <option value="">— Select Reason —</option>
+          <option>Instrument Decommissioned / Scrapped</option>
+          <option>Created in Error / Duplicate Entry</option>
+          <option>Instrument Transferred to Another Facility</option>
+          <option>Data Cleanup</option>
+          <option>Other</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Additional Remarks</label>
+        <textarea class="form-textarea" id="deleteCalibRemarks" style="height:60px" placeholder="Optional additional detail for the audit trail…"></textarea>
+      </div>
+      <div class="form-group" style="margin-bottom:0">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12.5px">
+          <input type="checkbox" id="deleteCalibConfirmCheck" style="width:16px;height:16px">
+          I understand this will permanently delete this instrument and cannot be undone.
+        </label>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeMod('deleteCalibModal')">Cancel</button>
+      <button class="btn btn-danger" onclick="confirmDeleteCalibInstrument()">🗑 Permanently Delete Instrument</button>
+    </div>
+  </div>
+</div>
+
 <!-- MACHINE HISTORY CARD MODAL -->
 <div class="modal-overlay" id="machineHistoryModal">
   <div class="modal" style="max-width:1100px">
@@ -4371,7 +4464,7 @@ const PERMISSION_MODULES = [
     {key:'toolinv',   label:'Tool Inventory',              actions:['view','create','edit']}
   ]},
   {key:'calibration',  label:'Calibration Management',         actions:['view'], subs:[
-    {key:'schedule',  label:'Calibration Schedule', actions:['view']},
+    {key:'schedule',  label:'Calibration Schedule', actions:['view','edit','delete']},
     {key:'entry',     label:'Entry / Completion',   actions:['view','create','edit']},
     {key:'history',   label:'History',              actions:['view']},
     {key:'analytics', label:'Analytics',            actions:['view']}
@@ -4392,8 +4485,8 @@ function noPerm(){ return {}; }
 // sensible starting point so a newly created Admin account isn't empty.
 const DEPARTMENT_DEFAULT_MODULES = {
   'Production':  {tracker:{view:true,create:true,edit:true,export:true,print:true}, newproject:'full', stageupdate:'full', capacity:{daily:'full',machine:'full',oee:'full',blocking:'full',planning:'full',summary:'full',toolcons:'view'}, dashboard:'view', analytics:'view'},
-  'Quality':     {quality:'full', calibration:'full', stageupdate:'full', dashboard:'view', analytics:'view', tracker:'view'},
-  'Maintenance': {maintenance:'full', calibration:'full', capacity:{toolcons:'full'}, dashboard:'view', analytics:'view'},
+  'Quality':     {quality:'full', calibration:{schedule:'view', entry:'full', history:'view', analytics:'view'}, stageupdate:'full', dashboard:'view', analytics:'view', tracker:'view'},
+  'Maintenance': {maintenance:'full', calibration:{schedule:'view', entry:'full', history:'view', analytics:'view'}, capacity:{toolcons:'full'}, dashboard:'view', analytics:'view'},
   'Planning':    {capacity:'full', tracker:{view:true,create:true,edit:true,export:true,print:true}, reports:{view:true,export:true}, dashboard:'view', analytics:'view'},
   'Store':       {dms:'full', maintenance:{toolinv:'view'}, reports:{view:true,export:true}, dashboard:'view'},
   'Purchase':    {maintenance:{toolinv:'full'}, reports:{view:true,export:true}, dashboard:'view'},
@@ -11654,7 +11747,11 @@ function renderCalibScheduleTable(){
       +'<td class="font-mono fw-600">'+i.nextDueDate+'</td>'
       +'<td class="text-xs '+(days<0?'text-danger fw-600':'')+'">'+daysLabel+'</td>'
       +'<td>'+calibStatusBadgeHTML(i)+'</td>'
-      +'<td><button class="btn btn-primary btn-sm" onclick="jumpToCalibCompletion(\''+i.id+'\')">Complete</button></td>'
+      +'<td style="display:flex;gap:3px;flex-wrap:wrap">'
+        +'<button class="btn btn-primary btn-sm" onclick="jumpToCalibCompletion(\''+i.id+'\')">Complete</button>'
+        +(hasPermission('calibration','schedule','edit')?'<button class="btn btn-outline btn-sm" onclick="openEditCalibInstrumentModal(\''+i.id+'\')">✏ Edit</button>':'')
+        +(hasPermission('calibration','schedule','delete')?'<button class="btn btn-sm" style="background:var(--red-light);color:var(--red);border:1px solid #fca5a5" onclick="openDeleteCalibInstrumentModal(\''+i.id+'\')">🗑 Delete</button>':'')
+      +'</td>'
       +'</tr>';
   }).join('');
 }
@@ -11707,6 +11804,147 @@ function resetCalibNewInstrumentForm(){
   const d=document.getElementById('cal_new_dept'); if(d) d.value='';
   const f=document.getElementById('cal_new_freq'); if(f) f.value='12';
   const lc=document.getElementById('cal_new_lastcal'); if(lc) lc.value='';
+}
+
+// ------ EDIT / DELETE CALIBRATION INSTRUMENT (Schedule tab) ------
+let _editCalibId = null;
+let _deleteCalibId = null;
+
+function fillEditCalibDeptSelect(){
+  const sel=document.getElementById('ec_dept'); if(!sel) return;
+  const cur=sel.value;
+  sel.innerHTML='<option value="">— Select —</option>'+M.calibrationDepartments.map(d=>'<option>'+d+'</option>').join('');
+  if(cur) sel.value=cur;
+}
+
+function openEditCalibInstrumentModal(instId){
+  if(!hasPermission('calibration','schedule','edit')){
+    toast('You do not have permission to edit calibration instruments.','⚠');
+    return;
+  }
+  const inst=(DB.calibrationInstruments||[]).find(i=>i.id===instId);
+  if(!inst){ toast('Instrument not found.','⚠'); return; }
+  ensureCalibDefaults(inst);
+  _editCalibId=instId;
+  fillEditCalibDeptSelect();
+  document.getElementById('editCalibSub').textContent=inst.tagNo+' — '+inst.name;
+  document.getElementById('ec_tag').value=inst.tagNo;
+  document.getElementById('ec_name').value=inst.name;
+  document.getElementById('ec_make').value=inst.make||'';
+  document.getElementById('ec_range').value=inst.range||'';
+  document.getElementById('ec_lc').value=inst.leastCount||'';
+  document.getElementById('ec_dept').value=inst.department;
+  document.getElementById('ec_owner').value=inst.owner;
+  document.getElementById('ec_freq').value=String(inst.frequencyMonths||12);
+  document.getElementById('ec_lastcal').value=inst.lastCalDate||'';
+  document.getElementById('ec_status').value=inst.status||'Active';
+  document.getElementById('ec_agency').value=inst.agency||'';
+  document.getElementById('ec_certno').value=inst.certNo||'';
+  updateEditCalibDuePreview();
+  document.getElementById('editCalibModal').classList.add('open');
+}
+
+function updateEditCalibDuePreview(){
+  const lastCal=document.getElementById('ec_lastcal')?.value;
+  const freq=parseInt(document.getElementById('ec_freq')?.value)||12;
+  const el=document.getElementById('ec_duePreview');
+  if(!el) return;
+  if(!lastCal || !isValidISODate(lastCal)){ el.textContent='Next Due Date will be calculated once a valid Last Calibration Date is entered.'; return; }
+  try{
+    const due=calibNextDueDate(lastCal, freq);
+    el.innerHTML='Next Due Date will be recalculated to <b>'+due+'</b> (Last Calibration Date + '+freq+' month(s)).';
+  }catch(e){ el.textContent='Could not compute the due date from the current values.'; }
+}
+
+function saveEditCalibInstrument(){
+  if(!hasPermission('calibration','schedule','edit')){
+    toast('You do not have permission to edit calibration instruments.','⚠');
+    return;
+  }
+  const inst=(DB.calibrationInstruments||[]).find(i=>i.id===_editCalibId);
+  if(!inst){ toast('Instrument not found.','⚠'); return; }
+
+  const tagNo=document.getElementById('ec_tag')?.value.trim();
+  const name=document.getElementById('ec_name')?.value.trim();
+  const make=document.getElementById('ec_make')?.value.trim();
+  const range=document.getElementById('ec_range')?.value.trim();
+  const leastCount=document.getElementById('ec_lc')?.value.trim();
+  const dept=document.getElementById('ec_dept')?.value;
+  const owner=document.getElementById('ec_owner')?.value.trim();
+  const freq=parseInt(document.getElementById('ec_freq')?.value)||12;
+  const lastCal=document.getElementById('ec_lastcal')?.value;
+  const status=document.getElementById('ec_status')?.value||'Active';
+  const agency=document.getElementById('ec_agency')?.value.trim();
+  const certNo=document.getElementById('ec_certno')?.value.trim();
+
+  if(!tagNo){toast('Tag Number is required.','⚠');return;}
+  if((DB.calibrationInstruments||[]).some(i=>i.id!==inst.id && i.tagNo.toLowerCase()===tagNo.toLowerCase())){toast('Another instrument already uses this Tag Number.','⚠');return;}
+  if(!name){toast('Instrument Name is required.','⚠');return;}
+  if(!dept){toast('Select a Department.','⚠');return;}
+  if(!owner){toast('Owner is required.','⚠');return;}
+  if(!lastCal || !isValidISODate(lastCal)){toast('A valid Last Calibration Date is required.','⚠');return;}
+
+  const oldSummary='Tag: '+inst.tagNo+', Dept: '+inst.department+', Freq: '+inst.frequencyMonths+'mo, Last Cal: '+inst.lastCalDate+', Due: '+inst.nextDueDate;
+  const newDueDate=calibNextDueDate(lastCal, freq);
+
+  inst.tagNo=tagNo; inst.name=name; inst.make=make; inst.range=range; inst.leastCount=leastCount;
+  inst.department=dept; inst.owner=owner; inst.frequencyMonths=freq; inst.lastCalDate=lastCal;
+  inst.status=status; inst.agency=agency; inst.certNo=certNo; inst.nextDueDate=newDueDate;
+
+  const ts=new Date().toISOString().replace('T',' ').slice(0,16);
+  const actorName=CURRENT_USER?CURRENT_USER.fullName:'Admin';
+  const newSummary='Tag: '+tagNo+', Dept: '+dept+', Freq: '+freq+'mo, Last Cal: '+lastCal+', Due: '+newDueDate;
+  DB.auditLog.unshift({ts,user:actorName,action:'Update',module:'Calibration',entity:tagNo,field:'instrument',old:oldSummary,nw:newSummary,ip:'192.168.1.1'});
+
+  closeMod('editCalibModal');
+  fillCalibSelects();
+  updateCalibBadge();
+  renderCalibSchedule();
+  toast('Instrument '+tagNo+' updated. Next due: '+newDueDate,'✓');
+}
+
+function openDeleteCalibInstrumentModal(instId){
+  if(!hasPermission('calibration','schedule','delete')){
+    toast('You do not have permission to delete calibration instruments.','⚠');
+    return;
+  }
+  const inst=(DB.calibrationInstruments||[]).find(i=>i.id===instId);
+  if(!inst){ toast('Instrument not found.','⚠'); return; }
+  _deleteCalibId=instId;
+  document.getElementById('deleteCalibSub').textContent=inst.tagNo+' — '+inst.name;
+  document.getElementById('deleteCalibReason').value='';
+  document.getElementById('deleteCalibRemarks').value='';
+  document.getElementById('deleteCalibConfirmCheck').checked=false;
+  document.getElementById('deleteCalibModal').classList.add('open');
+}
+
+function confirmDeleteCalibInstrument(){
+  if(!hasPermission('calibration','schedule','delete')){
+    toast('You do not have permission to delete calibration instruments.','⚠');
+    return;
+  }
+  const inst=(DB.calibrationInstruments||[]).find(i=>i.id===_deleteCalibId);
+  if(!inst){ toast('Instrument not found.','⚠'); return; }
+  const reason=document.getElementById('deleteCalibReason').value;
+  const remarks=document.getElementById('deleteCalibRemarks').value.trim();
+  const confirmed=document.getElementById('deleteCalibConfirmCheck').checked;
+  if(!reason){toast('Select a reason for deletion.','⚠');return;}
+  if(!confirmed){toast('Please confirm you understand this action is permanent.','⚠');return;}
+
+  DB.calibrationInstruments=DB.calibrationInstruments.filter(i=>i.id!==inst.id);
+
+  const ts=new Date().toISOString().replace('T',' ').slice(0,16);
+  const actorName=CURRENT_USER?CURRENT_USER.fullName:'Admin';
+  DB.auditLog.unshift({ts,user:actorName,action:'Delete',module:'Calibration',entity:inst.tagNo,
+    field:'instrument',old:'Existed — '+inst.name+', Dept: '+inst.department+', Due: '+inst.nextDueDate,
+    nw:'PERMANENTLY DELETED — '+reason+(remarks?' | '+remarks:''),ip:'192.168.1.1'});
+
+  closeMod('deleteCalibModal');
+  _deleteCalibId=null;
+  fillCalibSelects();
+  updateCalibBadge();
+  renderCalibSchedule();
+  toast('Instrument '+inst.tagNo+' has been permanently deleted.','🗑');
 }
 
 function onCalibCompleteInstChange(){

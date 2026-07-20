@@ -3798,6 +3798,21 @@ function apiSubmitStageEntry(lineId, payload) {
 function apiSubmitQcDecision(lineId, payload) {
   return apiRequest('/bom-lines/' + encodeURIComponent(lineId) + '/qc-decision', { method: 'POST', body: JSON.stringify(payload) });
 }
+function apiLoadCalibrationInstruments() {
+  return apiRequest('/calibration-instruments', { method: 'GET' });
+}
+function apiCreateCalibrationInstrument(payload) {
+  return apiRequest('/calibration-instruments', { method: 'POST', body: JSON.stringify(payload) });
+}
+function apiBulkCreateCalibrationInstruments(instruments) {
+  return apiRequest('/calibration-instruments/bulk', { method: 'POST', body: JSON.stringify({ instruments }) });
+}
+function apiUpdateCalibrationInstrument(id, payload) {
+  return apiRequest('/calibration-instruments/' + encodeURIComponent(id), { method: 'PUT', body: JSON.stringify(payload) });
+}
+function apiDeleteCalibrationInstrument(id) {
+  return apiRequest('/calibration-instruments/' + encodeURIComponent(id), { method: 'DELETE' });
+}
 
 // ------ Server (snake_case) -> Frontend (camelCase) shape conversion ------
 // Postgres NUMERIC columns come back from node-pg as strings (to avoid
@@ -3886,6 +3901,15 @@ async function loadProjectsFromServer() {
   } catch (err) {
     toast('Could not load saved projects from the server: ' + err.message, '⚠');
     DB.projects = []; // don't show stale demo data pretending to be real saved data
+  }
+}
+async function loadCalibrationInstrumentsFromServer() {
+  try {
+    const resp = await apiLoadCalibrationInstruments();
+    DB.calibrationInstruments = (resp.instruments || []).map(ensureCalibDefaults);
+  } catch (err) {
+    toast('Could not load saved calibration instruments from the server: ' + err.message, '⚠');
+    DB.calibrationInstruments = []; // don't show stale demo data pretending to be real saved data
   }
 }
 
@@ -4210,15 +4234,16 @@ BULK_IMPORT_CONFIGS.calibration = {
     return {valid:true, record:{tagNo,name,make,range,leastCount,dept,owner,freq,lastCal,agency,certNo,status}};
   },
   summaryOfRecord(rec){ return rec.tagNo+' — '+rec.name; },
-  importRecord(rec){
+  importRecord: async function(rec){
     const nextDueDate = calibNextDueDate(rec.lastCal, rec.freq);
-    const id='CAL-'+String((DB.calibrationInstruments||[]).length+1).padStart(4,'0');
     const ts=new Date().toISOString().replace('T',' ').slice(0,16);
-    const inst={id,tagNo:rec.tagNo,name:rec.name,make:rec.make,range:rec.range,leastCount:rec.leastCount,
+    const payload={tagNo:rec.tagNo,name:rec.name,make:rec.make,range:rec.range,leastCount:rec.leastCount,
       department:rec.dept,owner:rec.owner,frequencyMonths:rec.freq,lastCalDate:rec.lastCal,nextDueDate,
       agency:rec.agency,certNo:rec.certNo,status:rec.status,remarks:'',
       history:[{ts,calDate:rec.lastCal,dueDateAtEntry:rec.lastCal,certNo:rec.certNo,resultStatus:'Accepted',
         remarks:'Instrument added to calibration control (bulk import)',agency:rec.agency,nextDueDate,documents:[],enteredBy:'Admin User'}]};
+    const resp = await apiCreateCalibrationInstrument(payload);
+    const inst = ensureCalibDefaults(resp.instrument);
     DB.calibrationInstruments.push(inst);
     DB.auditLog.unshift({ts,user:'Admin',action:'Create',module:'Calibration',entity:rec.tagNo,field:'instrument',old:'--',nw:'Bulk imported — next due '+nextDueDate,ip:'192.168.1.1'});
   },
@@ -4714,6 +4739,7 @@ async function attemptLogin(btn){
 
     if(btn) btn.textContent='Loading your saved projects…';
     await loadProjectsFromServer();
+    await loadCalibrationInstrumentsFromServer();
 
     onLoginSuccess();
   } catch(err){
@@ -4751,6 +4777,7 @@ async function restoreSession(){
     ensureUserDefaults(user);
     CURRENT_USER=user;
     await loadProjectsFromServer();
+    await loadCalibrationInstrumentsFromServer();
     onLoginSuccess(true);
   } catch(err){
     try{ localStorage.removeItem('onepws_token'); }catch(e){}
@@ -11931,7 +11958,7 @@ function jumpToCalibCompletion(instId){
 }
 
 // ------ ENTRY / COMPLETION TAB ------
-function addCalibInstrument(){
+async function addCalibInstrument(){
   const tagNo=document.getElementById('cal_new_tag')?.value.trim();
   const name=document.getElementById('cal_new_name')?.value.trim();
   const dept=document.getElementById('cal_new_dept')?.value;
@@ -11952,11 +11979,21 @@ function addCalibInstrument(){
   if(!lastCal){toast('Last Calibration Date is required to compute the due date.','⚠');return;}
 
   const nextDueDate=calibNextDueDate(lastCal, freq);
-  const id='CAL-'+String((DB.calibrationInstruments||[]).length+1).padStart(4,'0');
   const ts=new Date().toISOString().replace('T',' ').slice(0,16);
-  const inst={id,tagNo,name,make,range,leastCount,department:dept,owner,frequencyMonths:freq,
+  const payload={tagNo,name,make,range,leastCount,department:dept,owner,frequencyMonths:freq,
     lastCalDate:lastCal,nextDueDate,agency,certNo,status:'Active',remarks:'',
     history:[{ts,calDate:lastCal,dueDateAtEntry:lastCal,certNo,resultStatus:'Accepted',remarks:'Instrument added to calibration control',agency,nextDueDate,documents:[],enteredBy:'Admin User'}]};
+
+  toast('Saving to server…','⏳');
+  let inst;
+  try{
+    const resp=await apiCreateCalibrationInstrument(payload);
+    inst=ensureCalibDefaults(resp.instrument);
+  }catch(err){
+    toast('Could not save this instrument to the server: '+err.message,'⚠');
+    return;
+  }
+
   DB.calibrationInstruments.push(inst);
   DB.auditLog.unshift({ts,user:'Admin',action:'Create',module:'Calibration',entity:tagNo,field:'instrument',old:'--',nw:'Added — next due '+nextDueDate,ip:'192.168.1.1'});
   toast('Instrument '+tagNo+' added. Next due: '+nextDueDate,'✓');
@@ -12022,7 +12059,7 @@ function updateEditCalibDuePreview(){
   }catch(e){ el.textContent='Could not compute the due date from the current values.'; }
 }
 
-function saveEditCalibInstrument(){
+async function saveEditCalibInstrument(){
   if(!hasPermission('calibration','schedule','edit')){
     toast('You do not have permission to edit calibration instruments.','⚠');
     return;
@@ -12052,6 +12089,16 @@ function saveEditCalibInstrument(){
 
   const oldSummary='Tag: '+inst.tagNo+', Dept: '+inst.department+', Freq: '+inst.frequencyMonths+'mo, Last Cal: '+inst.lastCalDate+', Due: '+inst.nextDueDate;
   const newDueDate=calibNextDueDate(lastCal, freq);
+  const payload={...inst, tagNo,name,make,range,leastCount,department:dept,owner,frequencyMonths:freq,
+    lastCalDate:lastCal,status,agency,certNo,nextDueDate:newDueDate};
+
+  toast('Saving to server…','⏳');
+  try{
+    await apiUpdateCalibrationInstrument(inst.id, payload);
+  }catch(err){
+    toast('Could not save these changes to the server: '+err.message,'⚠');
+    return;
+  }
 
   inst.tagNo=tagNo; inst.name=name; inst.make=make; inst.range=range; inst.leastCount=leastCount;
   inst.department=dept; inst.owner=owner; inst.frequencyMonths=freq; inst.lastCalDate=lastCal;
@@ -12084,7 +12131,7 @@ function openDeleteCalibInstrumentModal(instId){
   document.getElementById('deleteCalibModal').classList.add('open');
 }
 
-function confirmDeleteCalibInstrument(){
+async function confirmDeleteCalibInstrument(){
   if(!hasPermission('calibration','schedule','delete')){
     toast('You do not have permission to delete calibration instruments.','⚠');
     return;
@@ -12096,6 +12143,14 @@ function confirmDeleteCalibInstrument(){
   const confirmed=document.getElementById('deleteCalibConfirmCheck').checked;
   if(!reason){toast('Select a reason for deletion.','⚠');return;}
   if(!confirmed){toast('Please confirm you understand this action is permanent.','⚠');return;}
+
+  toast('Deleting from server…','⏳');
+  try{
+    await apiDeleteCalibrationInstrument(inst.id);
+  }catch(err){
+    toast('Could not delete this instrument from the server: '+err.message,'⚠');
+    return;
+  }
 
   DB.calibrationInstruments=DB.calibrationInstruments.filter(i=>i.id!==inst.id);
 
@@ -12747,7 +12802,7 @@ function handleCalibDocUpload(inp){
   });
 }
 
-function submitCalibCompletion(){
+async function submitCalibCompletion(){
   const id=document.getElementById('cal_complete_inst')?.value;
   if(!id){toast('Select an instrument to complete calibration for.','⚠');return;}
   const inst=DB.calibrationInstruments.find(i=>i.id===id); if(!inst) return;
@@ -12766,7 +12821,19 @@ function submitCalibCompletion(){
   const docList=document.getElementById('calCompleteDocList');
   const documents = docList ? Array.from(docList.querySelectorAll('div')).map(d=>d.textContent.replace(/[×✗]/g,'').replace('📎','').trim()).filter(Boolean) : [..._calibCompleteDocs];
 
-  inst.history.push({ts,calDate,dueDateAtEntry,certNo,resultStatus,remarks,agency,nextDueDate,documents,enteredBy:'Admin User'});
+  const newHistory=[...inst.history, {ts,calDate,dueDateAtEntry,certNo,resultStatus,remarks,agency,nextDueDate,documents,enteredBy:'Admin User'}];
+  const payload={...inst, history:newHistory, lastCalDate:calDate, nextDueDate,
+    certNo:certNo||inst.certNo, agency:agency||inst.agency};
+
+  toast('Saving to server…','⏳');
+  try{
+    await apiUpdateCalibrationInstrument(inst.id, payload);
+  }catch(err){
+    toast('Could not save this calibration record to the server: '+err.message,'⚠');
+    return;
+  }
+
+  inst.history=newHistory;
   inst.lastCalDate=calDate;
   inst.nextDueDate=nextDueDate;
   if(certNo) inst.certNo=certNo;

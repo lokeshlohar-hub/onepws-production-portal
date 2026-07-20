@@ -18,7 +18,7 @@ function viewOnly() {
 const USERS = [
   { username: 'admin', password: 'admin123', fullName: 'Admin User', role: 'superadmin', department: null, permissions: null },
   { username: 'prod.admin', password: 'prod123', fullName: 'Ramesh Kumar', role: 'admin', department: 'Production',
-    permissions: { tracker: {view:true,create:true,edit:true,export:true,print:true}, newproject: fullPerm(), stageupdate: fullPerm(), dashboard: viewOnly(), quality: {}, maintenance: {} } },
+    permissions: { tracker: fullPerm(), newproject: fullPerm(), stageupdate: fullPerm(), dashboard: viewOnly(), quality: {}, maintenance: {} } },
   { username: 'qc.admin', password: 'qc123', fullName: 'Priya Sharma', role: 'admin', department: 'Quality',
     permissions: { quality: fullPerm(), stageupdate: fullPerm(), dashboard: viewOnly(), tracker: viewOnly() } },
   { username: 'maint.admin', password: 'maint123', fullName: 'Vikram Singh', role: 'admin', department: 'Maintenance',

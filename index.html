@@ -2496,6 +2496,7 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
       <div class="card-header"><div class="card-title">⚙ Admin Sections</div></div>
       <div class="card-body" style="padding:6px 8px">
         <div class="nav-item active" data-superadmin-only="1" onclick="renderAdmin('users',this)">👤 User & Permission Management</div>
+        <div class="nav-item" data-superadmin-only="1" onclick="renderAdmin('backendstatus',this)">🔌 Backend Connection Status</div>
         <div class="nav-item" onclick="renderAdmin('stages',this)">🔧 Production Stages</div>
         <div class="nav-item" onclick="renderAdmin('tat',this)">⏱ TAT Rules</div>
         <div class="nav-item" onclick="renderAdmin('pm',this)">👔 Project Managers</div>
@@ -4852,6 +4853,53 @@ function guardedPrint(){
 // reset passwords, activate/deactivate, and configure the module + sub-module
 // permission matrix per Admin/Viewer account.
 // ============================================================================
+
+// ------ BACKEND CONNECTION STATUS (diagnostic — superadmin only) ------
+// Exists specifically because more than one reported "bug" turned out to be
+// the live Render backend running an older deployment than the frontend
+// expects. This gives a one-click way to check, instead of guessing.
+function getBackendStatusAdmin(){
+  return `<div class="card">
+    <div class="card-header"><div class="card-title">🔌 Backend Connection Status</div></div>
+    <div class="card-body">
+      <div class="alert alert-info" style="font-size:12px">If data you enter (project stage updates, deletions, etc.) isn't sticking after a refresh, the most common cause is that the backend server hasn't been redeployed with the latest update. Use this to check directly, rather than guessing.</div>
+      <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px">
+        <button class="btn btn-primary btn-sm" onclick="checkBackendStatus()">🔄 Check Connection Now</button>
+        <span class="text-xs text-muted">API endpoint: ${API_BASE}</span>
+      </div>
+      <div id="backendStatusResult"><div class="text-sm text-muted">Click "Check Connection Now" to test.</div></div>
+    </div>
+  </div>`;
+}
+async function checkBackendStatus(){
+  const el=document.getElementById('backendStatusResult');
+  if(!el) return;
+  el.innerHTML='<div class="text-sm text-muted">Checking…</div>';
+  const startTs=Date.now();
+  try{
+    const res=await fetch(API_BASE+'/health');
+    const elapsed=Date.now()-startTs;
+    if(!res.ok){
+      el.innerHTML='<div class="alert alert-danger" style="font-size:12.5px">⚠ Backend responded but with an error (HTTP '+res.status+'). The server may be starting up — try again in a moment.</div>';
+      return;
+    }
+    const data=await res.json();
+    const expectedRoutes=['DELETE /api/projects/:id','POST /api/bom-lines/:lineId/stage-entry','POST /api/bom-lines/:lineId/qc-decision'];
+    const missingRoutes=expectedRoutes.filter(r=>!(data.routes&&data.routes[r]));
+    el.innerHTML='<div class="alert '+(missingRoutes.length?'alert-danger':'alert-success')+'" style="font-size:12.5px">'
+      +(missingRoutes.length
+        ? '⚠ Connected, but this backend is missing expected features: '+missingRoutes.join(', ')+'. This backend needs to be redeployed with the latest code.'
+        : '✅ Connected — backend is responding with all expected features.')
+      +'</div>'
+      +'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:10px">'
+      +'<div><div class="text-xs text-muted">Response Time</div><div class="fw-600 text-sm">'+elapsed+' ms</div></div>'
+      +'<div><div class="text-xs text-muted">Reported Version</div><div class="fw-600 text-sm font-mono">'+(data.version||'unknown — old backend')+'</div></div>'
+      +'<div><div class="text-xs text-muted">Checked At</div><div class="fw-600 text-sm">'+new Date().toLocaleTimeString()+'</div></div>'
+      +'</div>';
+  }catch(err){
+    el.innerHTML='<div class="alert alert-danger" style="font-size:12.5px">❌ Could not reach the backend at all: '+err.message+'. If this is the first request in a while, the free-tier server may take up to 50 seconds to wake up — wait and try again. If it keeps failing, the backend service itself may be down or misconfigured.</div>';
+  }
+}
 
 function getUserPermissionAdmin(){
   return '<div class="card">'
@@ -13512,6 +13560,7 @@ function getAdminHTML(sec){
     </div>`;
 
   if(sec==='users') return getUserPermissionAdmin();
+  if(sec==='backendstatus') return getBackendStatusAdmin();
 
   return '<div class="card"><div class="card-body"><div class="text-muted text-sm">Section under construction.</div></div></div>';
 }

@@ -95,4 +95,16 @@ router.post('/', requireRole('admin', 'superadmin'), async (req, res) => {
   }
 });
 
+// DELETE /api/projects/:id — permanently deletes the project and everything
+// tied to it (BOM lines, reject log entries, stage log entries) via the
+// ON DELETE CASCADE foreign keys already in the schema. This does not touch
+// dailyCap/dailyManpower-equivalent capacity history, since that data is
+// shared across projects at the workstation level, not project-specific.
+router.delete('/:id', requireRole('admin', 'superadmin'), async (req, res) => {
+  const projRes = await pool.query('SELECT id, sap FROM projects WHERE id = $1', [req.params.id]);
+  if (!projRes.rows[0]) return res.status(404).json({ error: 'Project not found' });
+  await pool.query('DELETE FROM projects WHERE id = $1', [req.params.id]);
+  res.json({ ok: true, deletedProjectId: req.params.id, sap: projRes.rows[0].sap });
+});
+
 module.exports = router;

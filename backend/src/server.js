@@ -10,7 +10,22 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-app.get('/api/health', (req, res) => res.json({ ok: true, service: 'onepws-backend' }));
+// BACKEND_VERSION: bump this with every backend change so a simple visit to
+// /api/health tells you (and support) definitively whether the live server is
+// running the code you think it's running — this exists specifically because
+// "is the deployment actually up to date" has been the real cause behind more
+// than one reported bug that looked like an application issue.
+const BACKEND_VERSION = '2026-07-18.1-delete-project';
+app.get('/api/health', (req, res) => res.json({
+  ok: true,
+  service: 'onepws-backend',
+  version: BACKEND_VERSION,
+  routes: {
+    'DELETE /api/projects/:id': true,
+    'POST /api/bom-lines/:lineId/stage-entry': true,
+    'POST /api/bom-lines/:lineId/qc-decision': true,
+  }
+}));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/projects', projectRoutes);

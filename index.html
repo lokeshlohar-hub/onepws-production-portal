@@ -3765,7 +3765,8 @@ async function apiRequest(path, opts) {
         // is an older build that doesn't have this endpoint yet.
         throw new Error('This feature isn\'t available on the currently deployed backend (HTTP 404 with no route match). The backend most likely needs to be redeployed with the latest update before this will work.');
       }
-      throw new Error(data.error || ('Request failed (HTTP ' + res.status + ')'));
+      const baseMsg = data.error || ('Request failed (HTTP ' + res.status + ')');
+      throw new Error(data.detail ? (baseMsg + ' — ' + data.detail) : baseMsg);
     }
     return data;
   } catch (err) {

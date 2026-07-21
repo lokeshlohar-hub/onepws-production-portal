@@ -3853,6 +3853,25 @@ function apiBulkSaveDailyCapacity(date, entries) {
 function apiIncrementDailyCapacity(date, workstationId, addQty, sourceEntry) {
   return apiRequest('/daily-capacity/increment', { method: 'POST', body: JSON.stringify({ date, workstationId, addQty, sourceEntry }) });
 }
+function apiLoadAdminConfig() {
+  return apiRequest('/admin-config', { method: 'GET' });
+}
+function apiSaveAdminConfig(key, value) {
+  return apiRequest('/admin-config/' + encodeURIComponent(key), { method: 'PUT', body: JSON.stringify({ value }) });
+}
+// Generic "persist whatever M[key] currently holds" helper. Every admin
+// add/edit/delete function below keeps its exact existing logic — this is
+// just called once at the end of each, after the local M[key] mutation, so
+// the change survives a refresh. Failures show a toast but don't roll back
+// the already-applied local change or block the UI, matching how the rest
+// of the app treats this class of save.
+async function persistAdminConfig(key){
+  try{
+    await apiSaveAdminConfig(key, M[key]);
+  }catch(err){
+    toast('Saved locally, but could not save to the server — it will not survive a refresh yet: '+err.message,'⚠');
+  }
+}
 
 // ------ Server (snake_case) -> Frontend (camelCase) shape conversion ------
 // Postgres NUMERIC columns come back from node-pg as strings (to avoid
@@ -3993,6 +4012,19 @@ async function loadDailyCapacityFromServer() {
     DB.dailyCap = {};
     DB.dailyManpower = {};
     DB.dailyCapSource = {};
+  }
+}
+// Merges every server-saved admin config key into M. A key the server has
+// never seen yet (no admin has edited that list since this feature shipped)
+// is deliberately left alone, so M's built-in defaults keep working right
+// up until the first edit — nothing gets wiped to empty on a fresh deploy.
+async function loadAdminConfigFromServer() {
+  try {
+    const resp = await apiLoadAdminConfig();
+    const cfg = resp.config || {};
+    Object.keys(cfg).forEach(key => { M[key] = cfg[key]; });
+  } catch (err) {
+    toast('Could not load saved admin settings from the server: ' + err.message, '⚠');
   }
 }
 
@@ -4832,6 +4864,7 @@ async function attemptLogin(btn){
     await loadMaintenanceFromServer();
     await loadToolsFromServer();
     await loadDailyCapacityFromServer();
+    await loadAdminConfigFromServer();
 
     onLoginSuccess();
   } catch(err){
@@ -4873,6 +4906,7 @@ async function restoreSession(){
     await loadMaintenanceFromServer();
     await loadToolsFromServer();
     await loadDailyCapacityFromServer();
+    await loadAdminConfigFromServer();
     onLoginSuccess(true);
   } catch(err){
     try{ localStorage.removeItem('onepws_token'); }catch(e){}
@@ -10613,6 +10647,7 @@ function savePmConfig(i){
   renderPMSchedule();
   if(typeof renderPMAnalytics==='function') renderPMAnalytics();
   toast('PM configuration saved for "'+w.name+'".','✓');
+  persistAdminConfig('workstations');
 }
 
 // ============================================================================
@@ -12409,6 +12444,8 @@ function saveDimAdminSettings(){
   closeMod('dimAdminModal');
   initDimStudyTab();
   toast('Dimensional Capability settings saved.','✓');
+  persistAdminConfig('dimensionalCapabilityThresholds');
+  persistAdminConfig('dimensionalStudyEnabledMachines');
 }
 
 // ------ TAB INIT / LIST / FILTERS / KPIs ------
@@ -13336,6 +13373,7 @@ function saveCycleTimeMaster(i){
   toast('✓ Cycle time saved: '+r.comp+' @ '+r.step+' = '+val+' min/unit','✓');
   // Refresh Machine Blocking tab if currently visible
   if(document.getElementById('cap-blocking')?.style.display==='block') renderBlockingTab();
+  persistAdminConfig('componentCycleTime');
 }
 
 function clearCycleTimeMaster(i){
@@ -13348,6 +13386,7 @@ function clearCycleTimeMaster(i){
   if(el) el.value='';
   toast('Cycle time cleared for '+r.comp+' @ '+r.step,'✓');
   if(document.getElementById('cap-blocking')?.style.display==='block') renderBlockingTab();
+  persistAdminConfig('componentCycleTime');
 }
 
 // ------ MONTHLY PLANNING TAB — real BOM-derived plan vs actual, with optional manual override ------
@@ -13892,6 +13931,7 @@ function saveComponentRouting(comp, ci){
   DB.auditLog.unshift({ts,user:'Admin',action:'Update',module:'Routing',entity:comp,field:'routing',old:'—',nw:newRoutes.join(' → '),ip:'192.168.1.1'});
   renderAdmin('routing',null);
   toast('Routing for "'+comp+'" saved: '+newRoutes.length+' stations','✓');
+  persistAdminConfig('componentRouting');
 }
 
 
@@ -13953,6 +13993,7 @@ function addStageConfig(){
   syncAllProjectStages();
   renderAdmin('stages',null);
   toast('Stage "'+name.trim()+'" added — all projects re-synced','✓');
+  persistAdminConfig('stageConfig');
 }
 
 // ------ SYNC ALL PROJECTS WITH CURRENT M.stageConfig ------
@@ -14063,6 +14104,7 @@ function saveStageConfig(i){
   syncAllProjectStages();
   renderAdmin('stages',null);
   toast('Stage "'+name+'" saved — all projects re-synced','✓');
+  persistAdminConfig('stageConfig');
 }
 
 function moveStageConfig(i,dir){
@@ -14072,6 +14114,7 @@ function moveStageConfig(i,dir){
   // Update seq numbers
   M.stageConfig.forEach((s,idx)=>s.seq=idx+1);
   renderAdmin('stages',null);
+  persistAdminConfig('stageConfig');
 }
 
 function delStageConfig(i){
@@ -14082,6 +14125,7 @@ function delStageConfig(i){
     syncAllProjectStages();
     renderAdmin('stages',null);
     toast('Stage "'+nm+'" deleted — all projects re-synced','✓');
+    persistAdminConfig('stageConfig');
   }
 }
 
@@ -14144,6 +14188,7 @@ function addOperatorToWS(wsId){
   M.operators.push({name:name.trim(), workstation:wsId, seq});
   renderAdmin('operators',null);
   toast('Operator "'+name.trim()+'" assigned to workstation.','&#10003;');
+  persistAdminConfig('operators');
 }
 
 function addOperatorGlobal(){
@@ -14158,6 +14203,7 @@ function addOperatorGlobal(){
   M.operators.push({name:name.trim(), workstation:wsId.trim(), seq:existing.length+1});
   renderAdmin('operators',null);
   toast('Operator "'+name.trim()+'" added.','&#10003;');
+  persistAdminConfig('operators');
 }
 
 function saveOperator(i){
@@ -14166,6 +14212,7 @@ function saveOperator(i){
   M.operators[i].name=name;
   renderAdmin('operators',null);
   toast('Operator "'+name+'" saved.','&#10003;');
+  persistAdminConfig('operators');
 }
 
 function delOperator(i){
@@ -14177,6 +14224,7 @@ function delOperator(i){
     if(wsId) M.operators.filter(o=>o.workstation===wsId).forEach((o,si)=>o.seq=si+1);
     renderAdmin('operators',null);
     toast('Operator "'+nm+'" removed.','&#10003;');
+    persistAdminConfig('operators');
   }
 }
 
@@ -14209,6 +14257,7 @@ function addTechnician(){
   M.technicians.push({id:'t_'+Date.now(), name:name.trim(), active:true});
   renderAdmin('technicians',null);
   toast('Technician "'+name.trim()+'" added.','✓');
+  persistAdminConfig('technicians');
 }
 function saveTechnician(i){
   const name=document.getElementById('tech_nm_'+i)?.value.trim();
@@ -14217,6 +14266,7 @@ function saveTechnician(i){
   M.technicians[i].name=name; M.technicians[i].active=active;
   renderAdmin('technicians',null);
   toast('Technician "'+name+'" saved — '+(active?'Active':'Inactive'),'✓');
+  persistAdminConfig('technicians');
 }
 function delTechnician(i){
   if(confirm('Delete technician "'+M.technicians[i].name+'"? Historical breakdown/repair records referencing this technician will keep their name as text.')){
@@ -14224,6 +14274,7 @@ function delTechnician(i){
     M.technicians.splice(i,1);
     renderAdmin('technicians',null);
     toast('Technician "'+nm+'" removed.','✓');
+    persistAdminConfig('technicians');
   }
 }
 
@@ -14254,6 +14305,7 @@ function addQcInspector(){
   M.qcInspectors.push({id:'qc_'+Date.now(), name:name.trim(), active:true});
   renderAdmin('qcinspectors',null);
   toast('QC Inspector "'+name.trim()+'" added.','✓');
+  persistAdminConfig('qcInspectors');
 }
 function saveQcInspector(i){
   const name=document.getElementById('qcinsp_nm_'+i)?.value.trim();
@@ -14262,6 +14314,7 @@ function saveQcInspector(i){
   M.qcInspectors[i].name=name; M.qcInspectors[i].active=active;
   renderAdmin('qcinspectors',null);
   toast('QC Inspector "'+name+'" saved — '+(active?'Active':'Inactive'),'✓');
+  persistAdminConfig('qcInspectors');
 }
 function delQcInspector(i){
   if(confirm('Delete QC Inspector "'+M.qcInspectors[i].name+'"? Historical QC records referencing this inspector will keep their name as text.')){
@@ -14269,6 +14322,7 @@ function delQcInspector(i){
     M.qcInspectors.splice(i,1);
     renderAdmin('qcinspectors',null);
     toast('QC Inspector "'+nm+'" removed.','✓');
+    persistAdminConfig('qcInspectors');
   }
 }
 
@@ -14349,6 +14403,7 @@ function saveUtilityEquip(){
   }
   closeMod('utilityModal');
   renderAdmin('utility',null);
+  persistAdminConfig('utilityEquipment');
 }
 
 function deleteUtilityEquip(idx){
@@ -14357,6 +14412,7 @@ function deleteUtilityEquip(idx){
   M.utilityEquipment.splice(idx,1);
   renderAdmin('utility',null);
   toast('Utility equipment "'+eq.name+'" deleted.','✓');
+  persistAdminConfig('utilityEquipment');
 }
 
 // ======================================================================
@@ -14428,6 +14484,7 @@ function saveHandToolModal(){
   }
   closeMod('handToolModal');
   renderAdmin('handtools',null);
+  persistAdminConfig('handTools');
 }
 
 // Keep delHandTool (used from rendered HTML onclick)
@@ -14439,6 +14496,7 @@ function delHandTool(i){
     list.splice(i,1);
     renderAdmin('handtools',null);
     toast('Hand tool "'+nm+'" removed.','✓');
+    persistAdminConfig('handTools');
   }
 }
 
@@ -14455,18 +14513,20 @@ function adminSaveInline(key,i){
   const old=M[key][i];M[key][i]=v;fillMasterSelects();
   DB.auditLog.unshift({ts:new Date().toISOString().replace('T',' ').slice(0,16),user:'Admin',action:'Update',module:'Master',entity:key,field:'Value',old,nw:v,ip:'192.168.1.1'});
   toast('Saved: "'+v+'"','✓');
+  persistAdminConfig(key);
 }
 function adminAdd(key){
   const v=prompt('Enter new value:');
-  if(v&&v.trim()){M[key].push(v.trim());fillMasterSelects();renderAdmin(_adminSec,null);toast('Added: '+v.trim(),'✓');}
+  if(v&&v.trim()){M[key].push(v.trim());fillMasterSelects();renderAdmin(_adminSec,null);toast('Added: '+v.trim(),'✓');persistAdminConfig(key);}
 }
 function adminEdit(key,i){
   const v=prompt('Edit value:',M[key][i]);
-  if(v&&v.trim()){M[key][i]=v.trim();fillMasterSelects();renderAdmin(_adminSec,null);toast('Updated.','✓');}
+  if(v&&v.trim()){M[key][i]=v.trim();fillMasterSelects();renderAdmin(_adminSec,null);toast('Updated.','✓');persistAdminConfig(key);}
 }
 function adminDel(key,i){
   if(confirm('Delete "'+M[key][i]+'"?\nThis may affect existing projects using this value.')){
     M[key].splice(i,1);fillMasterSelects();renderAdmin(_adminSec,null);toast('Deleted.','✓');
+    persistAdminConfig(key);
   }
 }
 function exportAdminList(key,title){
@@ -14484,6 +14544,7 @@ function saveTAT(cat){
   const wv=parseInt(document.getElementById('tat_wood_'+ek)?.value)||M.tatRules[cat].wood;
   M.tatRules[cat].ext=ev; M.tatRules[cat].wood=wv;
   toast('TAT rule for '+cat+' saved. Ext:'+ev+'d, Wood:'+wv+'d','✓');
+  persistAdminConfig('tatRules');
 }
 
 // -- Production Stages CRUD --
@@ -14512,6 +14573,7 @@ function addWorkstation(){
   M.workstations.push({id:'ws_'+Date.now(),name:name.trim(),cap,unit:'Components/Day',hoursPerDay:8,pmFrequency:'Monthly',maintenanceStatus:'none',active:true,
     make:'',model:'',assetId:'',powerRating:'',location:'',installDate:'',initialPmDate:'',customPmFreqDays:''});
   renderAdmin('machines',null);toast('Workstation "'+name.trim()+'" added.','✓');
+  persistAdminConfig('workstations');
 }
 function saveWorkstation(i){
   const name=document.getElementById('ws_name_'+i)?.value.trim();
@@ -14528,10 +14590,12 @@ function saveWorkstation(i){
   toast('Workstation "'+name+'" saved. Capacity: '+cap+'/day, '+hrs+'h/day'+(mStatus!==prevStatus?' — Maintenance status changed to "'+mStatus+'"':''),'✓');
   // Maintenance status directly affects scheduling — refresh Machine Blocking if open
   if(document.getElementById('cap-blocking')?.style.display==='block') renderBlockingTab();
+  persistAdminConfig('workstations');
 }
 function delWorkstation(i){
   if(confirm('Delete workstation "'+M.workstations[i].name+'"?\nThis will remove it from Capacity Planning.')){
     M.workstations.splice(i,1);renderAdmin('machines',null);toast('Workstation deleted.','✓');
+    persistAdminConfig('workstations');
   }
 }
 
@@ -14581,6 +14645,7 @@ function saveMachineDetails(){
   DB.auditLog.unshift({ts,user:CURRENT_USER.fullName,action:'Update',module:'Machine Master',entity:w.name,field:'Identity Details',old:'--',nw:'Make: '+(w.make||'—')+', Model: '+(w.model||'—')+', Asset ID: '+(w.assetId||'—'),ip:'192.168.1.1'});
   closeMod('machineDetailsModal');
   toast('Machine details saved for "'+w.name+'".','✓');
+  persistAdminConfig('workstations');
 }
 
 // -- User CRUD --
@@ -16531,6 +16596,7 @@ function saveDmsDept(i){
   }
   renderAdmin('dmsdepts',null);
   toast('✓ Department "'+name+'" saved.'+(oldName!==name?' All documents reassigned.':''),'✓');
+  persistAdminConfig('dmsDepts');
 }
 
 function addDmsDept(){
@@ -16553,6 +16619,7 @@ function addDmsDept(){
   }
   renderAdmin('dmsdepts',null);
   toast('✓ Department "'+name+'" added to Document Library.','✓');
+  persistAdminConfig('dmsDepts');
 }
 
 function deleteDmsDept(i){
@@ -16571,6 +16638,7 @@ function deleteDmsDept(i){
   }
   renderAdmin('dmsdepts',null);
   toast('Department "'+d.name+'" deleted.','✓');
+  persistAdminConfig('dmsDepts');
 }
 
 // ------ DMS ORIGIN MASTER — Admin Panel ------
@@ -16605,6 +16673,7 @@ function addDmsOrigin(){
   if(document.getElementById('page-dms')?.classList.contains('active')) fillDmsOriginSelect();
   renderAdmin('dmsorigins',null);
   toast('Origin "'+name.trim()+'" added.','✓');
+  persistAdminConfig('dmsOrigins');
 }
 function saveDmsOrigin(i){
   const name=document.getElementById('dmso_nm_'+i)?.value.trim();
@@ -16616,6 +16685,7 @@ function saveDmsOrigin(i){
   if(document.getElementById('page-dms')?.classList.contains('active')){ fillDmsOriginSelect(); renderDmsList(); }
   renderAdmin('dmsorigins',null);
   toast('Origin "'+name+'" saved.'+(oldName!==name?' Existing documents updated.':''),'✓');
+  persistAdminConfig('dmsOrigins');
 }
 function deleteDmsOrigin(i){
   const name=M.dmsOrigins[i]; if(!name) return;
@@ -16626,6 +16696,7 @@ function deleteDmsOrigin(i){
   if(document.getElementById('page-dms')?.classList.contains('active')) fillDmsOriginSelect();
   renderAdmin('dmsorigins',null);
   toast('Origin "'+name+'" deleted.','✓');
+  persistAdminConfig('dmsOrigins');
 }
 
 function exportDCI(){

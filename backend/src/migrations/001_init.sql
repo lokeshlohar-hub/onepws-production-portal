@@ -107,3 +107,24 @@ CREATE TABLE IF NOT EXISTS stage_log (
   remark        TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_stage_log_project ON stage_log(project_id);
+-- Admin Panel master data — Phase 5. Generic key-value store: every
+-- admin-managed list (Production Stages, TAT Rules, PMs, Engineers, Product
+-- Types, Categories, BOM Components, BOM Routing, Cycle Time, Machine Master,
+-- Delay/Rejection Categories, Special Characteristics, Certifications,
+-- Operators, Technicians, QC Inspectors, Breakdown Categories, Utility
+-- Equipment, Hand Tools, Document Departments/Origins, and Dimensional
+-- Capability settings) is stored as one JSON value per key, since these are
+-- admin-configured master data rather than high-volume transactional
+-- records — a normalized table per list would be significant added
+-- complexity for no real benefit here.
+CREATE TABLE IF NOT EXISTS admin_config (
+  config_key    VARCHAR(100) PRIMARY KEY,
+  config_value  JSONB NOT NULL DEFAULT '[]',
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_by    VARCHAR(100)
+);
+
+
+
+
+

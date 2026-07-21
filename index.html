@@ -3814,6 +3814,45 @@ function apiUpdateCalibrationInstrument(id, payload) {
 function apiDeleteCalibrationInstrument(id) {
   return apiRequest('/calibration-instruments/' + encodeURIComponent(id), { method: 'DELETE' });
 }
+function apiLoadMaintenanceLog() {
+  return apiRequest('/breakdown-log', { method: 'GET' });
+}
+function apiCreateBreakdown(breakdown, whyWhy) {
+  return apiRequest('/breakdown-log', { method: 'POST', body: JSON.stringify({ breakdown, whyWhy }) });
+}
+function apiBulkCreateBreakdowns(breakdowns) {
+  return apiRequest('/breakdown-log/bulk', { method: 'POST', body: JSON.stringify({ breakdowns }) });
+}
+function apiUpdateWhyWhy(id, payload) {
+  return apiRequest('/breakdown-log/why-why/' + encodeURIComponent(id), { method: 'PUT', body: JSON.stringify(payload) });
+}
+function apiLoadTools() {
+  return apiRequest('/tool-inventory', { method: 'GET' });
+}
+function apiCreateTool(payload) {
+  return apiRequest('/tool-inventory', { method: 'POST', body: JSON.stringify(payload) });
+}
+function apiBulkCreateTools(tools) {
+  return apiRequest('/tool-inventory/bulk', { method: 'POST', body: JSON.stringify({ tools }) });
+}
+function apiUpdateTool(id, payload) {
+  return apiRequest('/tool-inventory/' + encodeURIComponent(id), { method: 'PUT', body: JSON.stringify(payload) });
+}
+function apiIssueTool(payload) {
+  return apiRequest('/tool-inventory/issue', { method: 'POST', body: JSON.stringify(payload) });
+}
+function apiUpdateToolIssue(id, payload) {
+  return apiRequest('/tool-inventory/issue/' + encodeURIComponent(id), { method: 'PUT', body: JSON.stringify(payload) });
+}
+function apiLoadDailyCapacity() {
+  return apiRequest('/daily-capacity', { method: 'GET' });
+}
+function apiBulkSaveDailyCapacity(date, entries) {
+  return apiRequest('/daily-capacity/bulk-save', { method: 'POST', body: JSON.stringify({ date, entries }) });
+}
+function apiIncrementDailyCapacity(date, workstationId, addQty, sourceEntry) {
+  return apiRequest('/daily-capacity/increment', { method: 'POST', body: JSON.stringify({ date, workstationId, addQty, sourceEntry }) });
+}
 
 // ------ Server (snake_case) -> Frontend (camelCase) shape conversion ------
 // Postgres NUMERIC columns come back from node-pg as strings (to avoid
@@ -3913,6 +3952,49 @@ async function loadCalibrationInstrumentsFromServer() {
     DB.calibrationInstruments = []; // don't show stale demo data pretending to be real saved data
   }
 }
+async function loadMaintenanceFromServer() {
+  try {
+    const resp = await apiLoadMaintenanceLog();
+    DB.breakdownLog = resp.breakdownLog || [];
+    DB.whyWhyLog = resp.whyWhyLog || [];
+  } catch (err) {
+    toast('Could not load saved maintenance records from the server: ' + err.message, '⚠');
+    DB.breakdownLog = [];
+    DB.whyWhyLog = [];
+  }
+}
+async function loadToolsFromServer() {
+  try {
+    const resp = await apiLoadTools();
+    DB.toolInventory = (resp.tools || []).map(ensureToolDefaults);
+    DB.toolIssueLog = resp.issueLog || [];
+  } catch (err) {
+    toast('Could not load saved tool inventory from the server: ' + err.message, '⚠');
+    DB.toolInventory = [];
+    DB.toolIssueLog = [];
+  }
+}
+async function loadDailyCapacityFromServer() {
+  try {
+    const resp = await apiLoadDailyCapacity();
+    DB.dailyCap = {};
+    DB.dailyManpower = {};
+    DB.dailyCapSource = {};
+    (resp.entries || []).forEach(e => {
+      if (!DB.dailyCap[e.date]) DB.dailyCap[e.date] = {};
+      if (!DB.dailyManpower[e.date]) DB.dailyManpower[e.date] = {};
+      if (!DB.dailyCapSource[e.date]) DB.dailyCapSource[e.date] = {};
+      DB.dailyCap[e.date][e.workstationId] = e.achievedQty;
+      DB.dailyManpower[e.date]['hp_' + e.workstationId] = e.helperCount;
+      DB.dailyCapSource[e.date][e.workstationId] = e.sourceLog || [];
+    });
+  } catch (err) {
+    toast('Could not load saved capacity records from the server: ' + err.message, '⚠');
+    DB.dailyCap = {};
+    DB.dailyManpower = {};
+    DB.dailyCapSource = {};
+  }
+}
 
 // ============================================================================
 // ------ BULK IMPORT MODULE CONFIGURATIONS ------
@@ -3963,11 +4045,12 @@ BULK_IMPORT_CONFIGS.toolInventory = {
     return {valid:true, record:{toolCode,name,category,machineId,spec,qty,minStock,supplier,purchaseDate,cost}};
   },
   summaryOfRecord(rec){ return rec.toolCode+' — '+rec.name+' ('+rec.qty+' available)'; },
-  importRecord(rec){
-    const id='TL-'+String((DB.toolInventory||[]).length+1).padStart(4,'0');
-    const tool={id,toolCode:rec.toolCode,name:rec.name,category:rec.category,compatibleMachine:rec.machineId,
+  importRecord: async function(rec){
+    const payload={toolCode:rec.toolCode,name:rec.name,category:rec.category,compatibleMachine:rec.machineId,
       specification:rec.spec,qtyAvailable:rec.qty,minStock:rec.minStock,supplier:rec.supplier,
       purchaseDate:rec.purchaseDate,cost:rec.cost,status:'Active',remarks:''};
+    const resp = await apiCreateTool(payload);
+    const tool = ensureToolDefaults(resp.tool);
     DB.toolInventory.push(tool);
     const ts=new Date().toISOString().replace('T',' ').slice(0,16);
     DB.auditLog.unshift({ts,user:'Admin',action:'Create',module:'Tool Inventory',entity:rec.toolCode,field:'tool',old:'--',nw:'Bulk imported — '+rec.qty+' pcs @ min '+rec.minStock,ip:'192.168.1.1'});
@@ -4154,7 +4237,7 @@ BULK_IMPORT_CONFIGS.breakdowns = {
     return {valid:true, record:{segment,machineId,machineName,category,date,startTime,problem,priority,techId,techName,repairStart,repairEnd,spares,action,statusAfter,restored}};
   },
   summaryOfRecord(rec){ return rec.machineName+' — '+rec.category+' ('+rec.date+')'; },
-  importRecord(rec){
+  importRecord: async function(rec){
     const cfg = BD_SEGMENTS[rec.segment];
     const equipment = cfg.getById(rec.machineId);
     const downtimeHours = computeBreakdownDowntime(rec.startTime, rec.repairEnd) || 0;
@@ -4169,22 +4252,27 @@ BULK_IMPORT_CONFIGS.breakdowns = {
       statusAfterRepair:rec.statusAfter, downtimeHours,
       whyWhyId:null, createdAt:ts, createdBy:'Admin User'
     };
-    DB.breakdownLog.unshift(record);
-    if(rec.segment==='production' && downtimeHours>0){
-      DB.downtimeLog.push({date:rec.date, wsId:rec.machineId, hours:downtimeHours, reason:'Breakdown — '+rec.category, remarks:rec.problem});
-    }
-    if(rec.segment==='production' && equipment) equipment.maintenanceStatus = rec.statusAfter;
+    let whyWhyPayload = null;
     if(downtimeHours > 2){
       const wwId = 'WW-'+Date.now()+'-'+Math.floor(Math.random()*1000);
-      DB.whyWhyLog.unshift({
+      whyWhyPayload = {
         id:wwId, breakdownId:id, segment:rec.segment,
         machineName:rec.machineName, breakdownDate:rec.date, downtimeHours,
         why1:'', why2:'', why3:'', why4:'', why5:'', rootCause:'',
         immediateAction:rec.action||'', preventiveAction:'', responsiblePerson:rec.techName||'',
         targetDate:'', closureRemarks:'', status:'Open', createdAt:ts
-      });
+      };
       record.whyWhyId = wwId;
     }
+
+    await apiCreateBreakdown(record, whyWhyPayload);
+
+    DB.breakdownLog.unshift(record);
+    if(rec.segment==='production' && downtimeHours>0){
+      DB.downtimeLog.push({date:rec.date, wsId:rec.machineId, hours:downtimeHours, reason:'Breakdown — '+rec.category, remarks:rec.problem});
+    }
+    if(rec.segment==='production' && equipment) equipment.maintenanceStatus = rec.statusAfter;
+    if(whyWhyPayload) DB.whyWhyLog.unshift(whyWhyPayload);
     DB.auditLog.unshift({ts,user:'Admin User',action:'Create',module:'Maintenance',
       entity:rec.machineName, field:'Breakdown ['+cfg.label+'] (bulk import)',
       old:'',nw:downtimeHours+'h — '+rec.category+' | Tech: '+rec.techName,ip:'192.168.1.1'});
@@ -4741,6 +4829,9 @@ async function attemptLogin(btn){
     if(btn) btn.textContent='Loading your saved projects…';
     await loadProjectsFromServer();
     await loadCalibrationInstrumentsFromServer();
+    await loadMaintenanceFromServer();
+    await loadToolsFromServer();
+    await loadDailyCapacityFromServer();
 
     onLoginSuccess();
   } catch(err){
@@ -4779,6 +4870,9 @@ async function restoreSession(){
     CURRENT_USER=user;
     await loadProjectsFromServer();
     await loadCalibrationInstrumentsFromServer();
+    await loadMaintenanceFromServer();
+    await loadToolsFromServer();
+    await loadDailyCapacityFromServer();
     onLoginSuccess(true);
   } catch(err){
     try{ localStorage.removeItem('onepws_token'); }catch(e){}
@@ -7243,7 +7337,7 @@ async function submitStageEntry(btn){
   DB.auditLog.unshift({ts,user:'Admin User',action:'Production Entry',module:'Stage',entity:p.id,
     field:b.item+' @ '+st,old:'',nw:'+'+qty+' ['+shiftLabel+'] → QC Queue | Op: '+operator,ip:'192.168.1.1'});
 
-  autoUpdateCapacityFromStage(p, st, date, qty, b.item);
+  await autoUpdateCapacityFromStage(p, st, date, qty, b.item);
 
   refreshProjectProgress(p);
   document.getElementById('ce_qty').value='';
@@ -8822,7 +8916,7 @@ function mpLive(key,val){
 }
 
 // ------ AUTO-CAPACITY UPDATE FROM STAGE COMPLETION ------
-function autoUpdateCapacityFromStage(proj, stageName, date, actualQty, componentName){
+async function autoUpdateCapacityFromStage(proj, stageName, date, actualQty, componentName){
   // Get workstation ids that handle this stage
   const wsIds = M.stageToWorkstation[stageName] || [];
   if(!wsIds.length) return;  // non-production stage, nothing to update
@@ -8850,24 +8944,33 @@ function autoUpdateCapacityFromStage(proj, stageName, date, actualQty, component
   if(!DB.dailyCapSource[date]) DB.dailyCapSource[date]={};
 
   const updatedWS = [];
-  wsIds.forEach(wsId=>{
-    const prev = DB.dailyCap[date][wsId] || 0;
-    DB.dailyCap[date][wsId] = prev + completedQty;
-    // Mark this entry as having auto-sourced component(s)
-    if(!DB.dailyCapSource[date][wsId]) DB.dailyCapSource[date][wsId]=[];
-    DB.dailyCapSource[date][wsId].push({
+  for(const wsId of wsIds){
+    const sourceEntry = {
       proj: proj.sap,
       stage: stageName,
       component: (componentName||stageName)+' x'+completedQty,
       qty: completedQty,
       ts: new Date().toISOString().replace('T',' ').slice(0,16)
-    });
+    };
+    try{
+      const resp = await apiIncrementDailyCapacity(date, wsId, completedQty, sourceEntry);
+      DB.dailyCap[date][wsId] = resp.entry.achievedQty;
+      DB.dailyCapSource[date][wsId] = resp.entry.sourceLog || [];
+    }catch(err){
+      toast('Stage entry saved, but the Capacity Planning figure for '+ (M.workstations.find(w=>w.id===wsId)?.name||wsId) +' could not be updated on the server: '+err.message,'⚠');
+      // Fall back to a local-only increment so the on-screen figure still moves for this
+      // session, even though it won't survive a refresh until the next successful save.
+      const prev = DB.dailyCap[date][wsId] || 0;
+      DB.dailyCap[date][wsId] = prev + completedQty;
+      if(!DB.dailyCapSource[date][wsId]) DB.dailyCapSource[date][wsId]=[];
+      DB.dailyCapSource[date][wsId].push(sourceEntry);
+    }
     const ws = M.workstations.find(w=>w.id===wsId);
     updatedWS.push((ws?.name||wsId)+' +'+completedQty);
     // Live-update the input field if capacity page is open
     const el=document.getElementById('ws_'+wsId);
     if(el) el.value = DB.dailyCap[date][wsId];
-  });
+  }
 
   if(updatedWS.length){
     // Refresh capacity UI if currently visible
@@ -8991,17 +9094,27 @@ function renderBottleneck(dd){
   document.getElementById('btPanel').innerHTML=h;
 }
 
-function saveDailyEntry(){
+async function saveDailyEntry(){
   const date=document.getElementById('dailyDate').value;
+  const entries = M.workstations.map(w=>{
+    const e=document.getElementById('ws_'+w.id);
+    const hp=document.getElementById('hp_'+w.id);
+    return { workstationId:w.id, achievedQty:e?(parseInt(e.value)||0):0, helperCount:hp?(parseInt(hp.value)||0):0 };
+  });
+
+  toast('Saving to server…','⏳');
+  try{
+    await apiBulkSaveDailyCapacity(date, entries);
+  }catch(err){
+    toast('Could not save daily capacity to the server: '+err.message,'⚠');
+    return;
+  }
+
   if(!DB.dailyCap[date])DB.dailyCap[date]={};
   if(!DB.dailyManpower[date])DB.dailyManpower[date]={};
-  M.workstations.forEach(w=>{
-    // Save achieved qty
-    const e=document.getElementById('ws_'+w.id);
-    if(e) DB.dailyCap[date][w.id]=parseInt(e.value)||0;
-    // Save helper headcount (no named-operator data here — that is captured in Stage Update)
-    const hp=document.getElementById('hp_'+w.id);
-    if(hp) DB.dailyManpower[date]['hp_'+w.id]=parseInt(hp.value)||0;
+  entries.forEach(e=>{
+    DB.dailyCap[date][e.workstationId]=e.achievedQty;
+    DB.dailyManpower[date]['hp_'+e.workstationId]=e.helperCount;
   });
   const ts=new Date().toISOString().replace('T',' ').slice(0,16);
   DB.auditLog.unshift({ts,user:'Admin',action:'Update',module:'Capacity',entity:date,
@@ -10148,7 +10261,7 @@ function previewBreakdownDowntime(){
   el.innerHTML = 'Calculated downtime: <strong>'+hrs+' hours</strong>.'+rcaNote;
 }
 
-function saveBreakdownEntry(){
+async function saveBreakdownEntry(){
   const machineId=document.getElementById('bd_machine').value;
   const category=document.getElementById('bd_category').value;
   const date=document.getElementById('bd_date').value;
@@ -10192,6 +10305,29 @@ function saveBreakdownEntry(){
     whyWhyId:null, createdAt:ts, createdBy:'Admin User'
   };
 
+  // 5-Why trigger: only for Production machines >2h (per your existing policy)
+  // For Utility/Hand machines, flag as "Advisory RCA" only
+  let whyWhyPayload = null;
+  if(downtimeHours > 2){
+    const wwId = 'WW-'+Date.now();
+    whyWhyPayload = {
+      id:wwId, breakdownId:id, segment,
+      machineName:equipmentName, breakdownDate:date, downtimeHours,
+      why1:'', why2:'', why3:'', why4:'', why5:'', rootCause:'',
+      immediateAction:action||'', preventiveAction:'', responsiblePerson:technician?.name||'',
+      targetDate:'', closureRemarks:'', status:'Open', createdAt:ts
+    };
+    record.whyWhyId = wwId;
+  }
+
+  toast('Saving to server…','⏳');
+  try{
+    await apiCreateBreakdown(record, whyWhyPayload);
+  }catch(err){
+    toast('Could not save this breakdown entry to the server: '+err.message,'⚠');
+    return;
+  }
+
   // Route to correct log — all segments share DB.breakdownLog for unified MTTR/MTBF
   // segment field enables filtering per category
   DB.breakdownLog.unshift(record);
@@ -10204,19 +10340,9 @@ function saveBreakdownEntry(){
   // Update machine maintenanceStatus (Production machines only — affects capacity/blocking)
   if(segment==='production' && equipment) equipment.maintenanceStatus = statusAfter;
 
-  // 5-Why trigger: only for Production machines >2h (per your existing policy)
-  // For Utility/Hand machines, flag as "Advisory RCA" only
   let whyWhyCreated = false;
-  if(downtimeHours > 2){
-    const wwId = 'WW-'+Date.now();
-    DB.whyWhyLog.unshift({
-      id:wwId, breakdownId:id, segment,
-      machineName:equipmentName, breakdownDate:date, downtimeHours,
-      why1:'', why2:'', why3:'', why4:'', why5:'', rootCause:'',
-      immediateAction:action||'', preventiveAction:'', responsiblePerson:technician?.name||'',
-      targetDate:'', closureRemarks:'', status:'Open', createdAt:ts
-    });
-    record.whyWhyId = wwId;
+  if(whyWhyPayload){
+    DB.whyWhyLog.unshift(whyWhyPayload);
     whyWhyCreated = true;
   }
 
@@ -11178,7 +11304,7 @@ function openWhyWhyForm(idx){
   document.getElementById('whyWhyModal').classList.add('open');
 }
 
-function saveWhyWhy(closeIt){
+async function saveWhyWhy(closeIt){
   const idx=_wwIdx; if(idx===null) return;
   const w=DB.whyWhyLog[idx]; if(!w) return;
   const why1 = document.getElementById('ww_why1').value.trim();
@@ -11198,13 +11324,21 @@ function saveWhyWhy(closeIt){
     document.getElementById('wwClosureGroup').style.display='block';
     toast('Please enter Closure Remarks before closing.','⚠'); return;
   }
-  Object.assign(w,{why1,why2,why3,why4,why5,rootCause,immediateAction,preventiveAction,responsiblePerson,targetDate,closureRemarks});
-  if(closeIt){
-    w.status='Closed';
-    w.closedAt=new Date().toISOString().replace('T',' ').slice(0,16);
-  } else {
-    if(w.status!=='Deferred') w.status='Open'; // keep Deferred if already deferred
+  const newStatus = closeIt ? 'Closed' : (w.status!=='Deferred' ? 'Open' : 'Deferred');
+  const closedAt = closeIt ? new Date().toISOString().replace('T',' ').slice(0,16) : (w.closedAt||null);
+  const payload={why1,why2,why3,why4,why5,rootCause,immediateAction,preventiveAction,responsiblePerson,targetDate,closureRemarks,status:newStatus,closedAt};
+
+  toast('Saving to server…','⏳');
+  try{
+    await apiUpdateWhyWhy(w.id, payload);
+  }catch(err){
+    toast('Could not save this RCA to the server: '+err.message,'⚠');
+    return;
   }
+
+  Object.assign(w,{why1,why2,why3,why4,why5,rootCause,immediateAction,preventiveAction,responsiblePerson,targetDate,closureRemarks});
+  w.status=newStatus;
+  if(closeIt) w.closedAt=closedAt;
   const ts=new Date().toISOString().replace('T',' ').slice(0,16);
   DB.auditLog.unshift({ts,user:'Admin User',action:closeIt?'Close RCA':'Update RCA',module:'Maintenance',
     entity:w.machineName,field:'Why-Why',old:'',nw:rootCause||'(partial)',ip:'192.168.1.1'});
@@ -11387,7 +11521,7 @@ function renderToolMasterTable(){
   ).join('');
 }
 
-function addNewTool(){
+async function addNewTool(){
   const toolCode=document.getElementById('tool_new_code')?.value.trim();
   const name=document.getElementById('tool_new_name')?.value.trim();
   const category=document.getElementById('tool_new_cat')?.value;
@@ -11405,9 +11539,19 @@ function addNewTool(){
   if(!category){toast('Select a Tool Category.','⚠');return;}
   if(!machine){toast('Select a Compatible Machine.','⚠');return;}
 
-  const id='TL-'+String((DB.toolInventory||[]).length+1).padStart(4,'0');
-  const tool={id,toolCode,name,category,compatibleMachine:machine,specification:spec,
+  const payload={toolCode,name,category,compatibleMachine:machine,specification:spec,
     qtyAvailable:qty,minStock,supplier,purchaseDate,cost,status:'Active',remarks:''};
+
+  toast('Saving to server…','⏳');
+  let tool;
+  try{
+    const resp=await apiCreateTool(payload);
+    tool=ensureToolDefaults(resp.tool);
+  }catch(err){
+    toast('Could not save this tool to the server: '+err.message,'⚠');
+    return;
+  }
+
   DB.toolInventory.push(tool);
   const ts=new Date().toISOString().replace('T',' ').slice(0,16);
   DB.auditLog.unshift({ts,user:'Admin',action:'Create',module:'Tool Inventory',entity:toolCode,field:'tool',old:'--',nw:'Added — '+qty+' pcs @ min '+minStock,ip:'192.168.1.1'});
@@ -11438,7 +11582,7 @@ function onIssueToolChange(){
   }
 }
 
-function submitToolIssue(){
+async function submitToolIssue(){
   const toolId=document.getElementById('tool_issue_tool')?.value;
   const qty=parseInt(document.getElementById('tool_issue_qty')?.value)||0;
   const machine=document.getElementById('tool_issue_machine')?.value;
@@ -11457,16 +11601,24 @@ function submitToolIssue(){
   if(!issueDate){toast('Issue Date is required.','⚠');return;}
 
   const proj = projSel ? DB.projects.find(p=>p.id===projSel) : null;
-  const id='TI-'+String((DB.toolIssueLog||[]).length+1).padStart(4,'0');
-  const ts=new Date().toISOString().replace('T',' ').slice(0,16);
-  const entry={id,toolId,toolName:tool.name,qtyIssued:qty,machine,operator,
-    projectId:proj?proj.id:'',projectSap:proj?proj.sap:'',issueDate,issueLocation,status:'Active',
-    componentsProcessed:null,productionHoursUsed:null,discardDate:null,discardReason:'',totalUsageDays:null,
-    enteredBy:'Admin User',ts};
-  DB.toolIssueLog.push(entry);
+  const payload={toolId,qtyIssued:qty,machine,operator,
+    projectId:proj?proj.id:'',projectSap:proj?proj.sap:'',issueDate,issueLocation,enteredBy:'Admin User'};
 
+  toast('Saving to server…','⏳');
+  let entry, updatedTool;
+  try{
+    const resp=await apiIssueTool(payload);
+    entry=resp.issue;
+    updatedTool=resp.tool;
+  }catch(err){
+    toast('Could not save this issue to the server: '+err.message,'⚠');
+    return;
+  }
+
+  DB.toolIssueLog.push(entry);
   const stockBefore=tool.qtyAvailable;
-  tool.qtyAvailable -= qty;
+  tool.qtyAvailable=updatedTool.qtyAvailable;
+  const ts=new Date().toISOString().replace('T',' ').slice(0,16);
 
   DB.auditLog.unshift({ts,user:'Admin',action:'Issue',module:'Tool Inventory',entity:tool.toolCode,
     field:'stock',old:stockBefore+' pcs',nw:tool.qtyAvailable+' pcs (issued '+qty+' to '+operator+')',ip:'192.168.1.1'});

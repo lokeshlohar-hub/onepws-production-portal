@@ -3413,6 +3413,11 @@ const M = {
   projectManagers:['SHYAM','MANVEER','Dipendra','MANIRAJ','Harshit Kothari'],
   engineers:['RAJU','VAIBHAV','KUSHAGRA','Mohit','Aditya'],
   bomComponents:['Table Top','Table Top 2','Table Top 3','Shutter','Side Panel','Base Frame','40x54 Profile','Door Panel','Drawer Front'],
+  // Maps each bomComponents entry -> 'wood' | 'ext' (Aluminium Extrusion).
+  // Kept as a separate map (not merged into bomComponents itself) so every
+  // existing reference to a component by its plain name string — routing,
+  // cycle time, BOM lines, reports — is completely unaffected.
+  bomComponentSegments:{'Table Top':'wood','Table Top 2':'wood','Table Top 3':'wood','Shutter':'wood','Side Panel':'wood','Base Frame':'wood','40x54 Profile':'ext','Door Panel':'wood','Drawer Front':'wood'},
   delayCategories:['Design Hold','Material Shortage','Machine Breakdown','Manpower Issue','Customer Change Request','Quality Hold','Job Work Delay (Extrusion)','Drawing Revision','Procurement Delay'],
   rejectionCategories:['Dimension Issue','Edge Banding Defect','Surface Damage','CNC Error','PU Finish Issue','Laminate Damage','Drilling Error','Cleaning Defect','Scratch/Handling Damage','Rework Required','Other Custom Reason'],
   // Special Characteristics — multi-select options for BOM line items (Admin-controlled)
@@ -4026,6 +4031,32 @@ async function loadAdminConfigFromServer() {
   } catch (err) {
     toast('Could not load saved admin settings from the server: ' + err.message, '⚠');
   }
+  ensureBomComponentSegments();
+}
+
+// Guarantees every entry in M.bomComponents has a Wood/Extrusion classification
+// in M.bomComponentSegments. Anything already classified is left untouched.
+// Anything new gets a best-guess default — profile/dimension-style names
+// (e.g. "40x54", "40 X 70 Profile") default to Extrusion, everything else
+// defaults to Wood — but this is only a starting point: Admin can change any
+// component's segment at any time from BOM Component Master.
+function ensureBomComponentSegments(){
+  if(!M.bomComponentSegments) M.bomComponentSegments={};
+  let changed=false;
+  (M.bomComponents||[]).forEach(name=>{
+    if(M.bomComponentSegments[name]==='wood' || M.bomComponentSegments[name]==='ext') return;
+    const looksLikeProfile = /profile/i.test(name) || /extrusion/i.test(name) || /alumin/i.test(name) || /^\s*\d+\s*[xX×]\s*\d+/.test(name);
+    M.bomComponentSegments[name] = looksLikeProfile ? 'ext' : 'wood';
+    changed=true;
+  });
+  if(changed) persistAdminConfig('bomComponentSegments');
+}
+
+// The single source of truth for which components a Wood vs Extrusion BOM
+// row dropdown should offer. seg is 'wood' or 'ext'.
+function bomComponentsForSegment(seg){
+  ensureBomComponentSegments();
+  return (M.bomComponents||[]).filter(c => (M.bomComponentSegments[c]||'wood')===seg);
 }
 
 // ============================================================================
@@ -4152,6 +4183,12 @@ BULK_IMPORT_CONFIGS.projects = {
       if(!qty || qty<=0){ errors.push('Component "'+item+'" has an invalid Quantity'); return; }
       if(segRaw!=='wood' && segRaw!=='extrusion'){ errors.push('Component "'+item+'" has an invalid Manufacturing Segment (use Wood or Extrusion)'); return; }
       const segKey = segRaw==='wood' ? 'wood' : 'ext';
+      ensureBomComponentSegments();
+      const assignedSeg = M.bomComponentSegments[item];
+      if(assignedSeg && assignedSeg!==segKey){
+        errors.push('Component "'+item+'" is classified as '+(assignedSeg==='wood'?'Wood':'Extrusion')+' in BOM Component Master, but this row is under '+(segKey==='wood'?'Wood':'Extrusion'));
+        return;
+      }
       if(segKey==='wood') hasWood=true; else hasExt=true;
       bom.push({
         item, seg:segKey,
@@ -5479,7 +5516,12 @@ function fillMasterSelects(){
 }
 
 function fillBOMDrops(){
-  document.querySelectorAll('[id^="bom_comp_"]').forEach(s=>{const cur=s.value;s.innerHTML=M.bomComponents.map(c=>'<option'+(c===cur?' selected':'')+'>'+c+'</option>').join('');});
+  document.querySelectorAll('[id^="bom_comp_"]').forEach(s=>{
+    const seg = s.id.includes('_ext_') ? 'ext' : 'wood';
+    const cur=s.value;
+    const opts=bomComponentsForSegment(seg);
+    s.innerHTML=opts.map(c=>'<option'+(c===cur?' selected':'')+'>'+c+'</option>').join('');
+  });
 }
 
 // Refreshes Special Characteristics checkbox panels (e.g. after Admin adds/edits/deletes an
@@ -6490,7 +6532,7 @@ function toggleSegments(){
 
 
 function makeSegBOMRow(i, seg){
-  const compOpts=M.bomComponents.map(c=>'<option>'+c+'</option>').join('');
+  const compOpts=bomComponentsForSegment(seg).map(c=>'<option>'+c+'</option>').join('');
   if(seg==='ext'){
     return '<tr>'
       +'<td style="font-size:12px">'+(i+1)+'</td>'
@@ -13739,6 +13781,67 @@ function makeAdminList(title,arr,key){
   </div>`;
 }
 
+function makeBomComponentAdminList(){
+  ensureBomComponentSegments();
+  const arr=M.bomComponents;
+  return `<div class="card">
+    <div class="card-header">
+      <div class="card-title">BOM Component Master${lockBadge('ADMIN ONLY')}</div>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-primary btn-sm" onclick="adminAddBomComponent()">+ Add</button>
+        <button class="btn btn-outline btn-sm" onclick="exportAdminList('bomComponents','BOM Component Master')">📥 Export CSV</button>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="alert alert-info mb-3" style="font-size:12px">These values appear as locked dropdowns in all operational modules. Every component must be classified as Wood or Extrusion — this determines which manufacturing segment it appears under in New Project Entry. Only Admin can manage entries here.</div>
+      <table>
+        <thead><tr><th>#</th><th>Value</th><th style="width:160px">Segment</th><th style="width:180px">Actions</th></tr></thead>
+        <tbody>${arr.map((v,i)=>`
+          <tr>
+            <td class="text-muted text-sm">${i+1}</td>
+            <td><input type="text" class="form-input" style="height:28px;width:100%;min-width:200px" value="${v}" id="al_bomComponents_${i}"></td>
+            <td><select class="form-select" style="height:28px" id="bomseg_${i}" onchange="saveBomComponentSegment(${i})">
+              <option value="wood"${M.bomComponentSegments[v]==='wood'?' selected':''}>🪵 Wood</option>
+              <option value="ext"${M.bomComponentSegments[v]==='ext'?' selected':''}>🔩 Extrusion</option>
+            </select></td>
+            <td style="display:flex;gap:4px">
+              <button class="btn btn-success btn-sm" onclick="adminSaveInline('bomComponents',${i})">💾 Save</button>
+              <button class="btn btn-outline btn-sm" onclick="adminEdit('bomComponents',${i})">✏ Edit</button>
+              <button class="btn btn-danger btn-sm" onclick="adminDel('bomComponents',${i})">🗑 Del</button>
+            </td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+  </div>`;
+}
+function saveBomComponentSegment(i){
+  const name=M.bomComponents[i]; if(!name) return;
+  const seg=document.getElementById('bomseg_'+i)?.value;
+  if(seg!=='wood' && seg!=='ext') return;
+  const old=M.bomComponentSegments[name];
+  M.bomComponentSegments[name]=seg;
+  const ts=new Date().toISOString().replace('T',' ').slice(0,16);
+  DB.auditLog.unshift({ts,user:'Admin',action:'Update',module:'BOM Segment',entity:name,field:'Segment',old:old==='ext'?'Extrusion':'Wood',nw:seg==='ext'?'Extrusion':'Wood',ip:'192.168.1.1'});
+  toast('"'+name+'" classified as '+(seg==='ext'?'Extrusion':'Wood')+'.','✓');
+  persistAdminConfig('bomComponentSegments');
+  fillMasterSelects();
+}
+function adminAddBomComponent(){
+  const v=prompt('New BOM component name:');
+  if(!v||!v.trim())return;
+  const name=v.trim();
+  if(M.bomComponents.includes(name)){toast('This component already exists.','⚠');return;}
+  const seg=confirm('Is this a Wood Production component?\n(OK = Wood, Cancel = Aluminium Extrusion)')?'wood':'ext';
+  M.bomComponents.push(name);
+  M.bomComponentSegments[name]=seg;
+  fillMasterSelects();
+  renderAdmin('bom',null);
+  toast('Added "'+name+'" — classified as '+(seg==='ext'?'Extrusion':'Wood'),'✓');
+  persistAdminConfig('bomComponents');
+  persistAdminConfig('bomComponentSegments');
+}
+
 // -- Admin current section tracker --
 let _adminSec = 'users';
 
@@ -13748,7 +13851,7 @@ function getAdminHTML(sec){
   if(sec==='eng')   return makeAdminList('Engineer Master', M.engineers, 'engineers');
   if(sec==='types') return makeAdminList('Product Types', M.productTypes, 'productTypes');
   if(sec==='cats')  return makeAdminList('Project Categories', M.categories, 'categories');
-  if(sec==='bom')   return makeAdminList('BOM Component Master', M.bomComponents, 'bomComponents');
+  if(sec==='bom')   return makeBomComponentAdminList();
   if(sec==='delay') return makeAdminList('Delay Categories', M.delayCategories, 'delayCategories');
   if(sec==='rejcat') return makeAdminList('Rejection Categories', M.rejectionCategories, 'rejectionCategories');
   if(sec==='specialchar') return makeAdminList('Special Characteristics', M.specialCharacteristics, 'specialCharacteristics');
@@ -14511,21 +14614,44 @@ function adminSaveInline(key,i){
   const v=document.getElementById('al_'+key+'_'+i)?.value.trim();
   if(!v){toast('Value cannot be empty.','⚠');return;}
   const old=M[key][i];M[key][i]=v;fillMasterSelects();
+  if(key==='bomComponents' && old!==v && M.bomComponentSegments && old in M.bomComponentSegments){
+    M.bomComponentSegments[v]=M.bomComponentSegments[old];
+    delete M.bomComponentSegments[old];
+    persistAdminConfig('bomComponentSegments');
+  }
   DB.auditLog.unshift({ts:new Date().toISOString().replace('T',' ').slice(0,16),user:'Admin',action:'Update',module:'Master',entity:key,field:'Value',old,nw:v,ip:'192.168.1.1'});
   toast('Saved: "'+v+'"','✓');
   persistAdminConfig(key);
 }
 function adminAdd(key){
   const v=prompt('Enter new value:');
-  if(v&&v.trim()){M[key].push(v.trim());fillMasterSelects();renderAdmin(_adminSec,null);toast('Added: '+v.trim(),'✓');persistAdminConfig(key);}
+  if(v&&v.trim()){
+    M[key].push(v.trim());fillMasterSelects();
+    if(key==='bomComponents') ensureBomComponentSegments();
+    renderAdmin(_adminSec,null);toast('Added: '+v.trim(),'✓');persistAdminConfig(key);
+  }
 }
 function adminEdit(key,i){
   const v=prompt('Edit value:',M[key][i]);
-  if(v&&v.trim()){M[key][i]=v.trim();fillMasterSelects();renderAdmin(_adminSec,null);toast('Updated.','✓');persistAdminConfig(key);}
+  if(v&&v.trim()){
+    const old=M[key][i];
+    M[key][i]=v.trim();fillMasterSelects();
+    if(key==='bomComponents' && old!==v.trim() && M.bomComponentSegments && old in M.bomComponentSegments){
+      M.bomComponentSegments[v.trim()]=M.bomComponentSegments[old];
+      delete M.bomComponentSegments[old];
+      persistAdminConfig('bomComponentSegments');
+    }
+    renderAdmin(_adminSec,null);toast('Updated.','✓');persistAdminConfig(key);
+  }
 }
 function adminDel(key,i){
   if(confirm('Delete "'+M[key][i]+'"?\nThis may affect existing projects using this value.')){
+    const removed=M[key][i];
     M[key].splice(i,1);fillMasterSelects();renderAdmin(_adminSec,null);toast('Deleted.','✓');
+    if(key==='bomComponents' && M.bomComponentSegments && removed in M.bomComponentSegments){
+      delete M.bomComponentSegments[removed];
+      persistAdminConfig('bomComponentSegments');
+    }
     persistAdminConfig(key);
   }
 }

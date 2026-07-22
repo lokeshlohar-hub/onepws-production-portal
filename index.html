@@ -3249,6 +3249,31 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
   </div>
 </div>
 
+<!-- PROCESS GROUP ADD/EDIT MODAL -->
+<div class="modal-overlay" id="processGroupModal">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-header">
+      <div class="modal-title" id="pgModalTitle">🏭 New Process Group</div>
+      <button class="modal-close" onclick="closeMod('processGroupModal')">×</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="pg_original_name">
+      <div class="form-group">
+        <label class="form-label">Group Name <span class="req">*</span></label>
+        <input type="text" class="form-input" id="pg_name" placeholder="e.g. Beam Saw, CNC, Edge Banding">
+      </div>
+      <div class="form-group" style="margin-bottom:0">
+        <label class="form-label">Assigned Machines <span class="req">*</span> <span class="text-xs text-muted">(select one or more)</span></label>
+        <div id="pg_machine_checklist" style="max-height:280px;overflow-y:auto;border:1px solid var(--border2);border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:4px"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeMod('processGroupModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveProcessGroupModal()">💾 Save Group</button>
+    </div>
+  </div>
+</div>
+
 <!-- MACHINE HISTORY CARD MODAL -->
 <div class="modal-overlay" id="machineHistoryModal">
   <div class="modal" style="max-width:1100px">
@@ -14017,116 +14042,110 @@ function getProcessGroupsAdmin(){
   // Every group with at least one member machine — QC-type entries ('In-Process QC',
   // 'Final QC') map to [] and aren't machine groups, so they're excluded here.
   const groupNames = Object.keys(M.stageToWorkstation).filter(k=>(M.stageToWorkstation[k]||[]).length>0);
-  const container = document.createElement('div');
-  container.className='card';
-  container.innerHTML = '<div class="card-header">'
-    + '<div><div class="card-title">🏭 Process / Workstation Groups'+lockBadge('ADMIN ONLY')+'</div>'
-    + '<div class="text-xs text-muted" style="margin-top:2px">Routing references only the group name (e.g. "Cutting"). Which specific machine actually does the work is chosen by the operator at production execution — only active machines are offered.</div></div>'
-    + '<div style="display:flex;gap:6px">'
-    + '<button class="btn btn-outline btn-sm" onclick="migrateRoutingToProcessGroups()">🔀 Migrate Routing to Groups</button>'
-    + '<button class="btn btn-primary btn-sm" onclick="addProcessGroup()">+ New Group</button>'
-    + '</div>'
-    + '</div>'
-    + '<div class="card-body">'
-    + '<div class="alert alert-info mb-3" style="font-size:12px">If a group shows as "used by" components but you expected it to be the old machine-specific name (e.g. "Selco Beam Saw"), your saved routing master hasn\'t been updated to the new group names yet — click <b>Migrate Routing to Groups</b> above to update it in one step, rather than editing each component by hand.</div>'
-    + '<div id="pg_blocks"></div></div>';
-  setTimeout(()=>{
-    const pgb=document.getElementById('pg_blocks');
-    if(!pgb) return;
-    pgb.innerHTML = groupNames.map(gName=>{
-      const memberIds = M.stageToWorkstation[gName]||[];
-      const usedByComponents = Object.entries(M.componentRouting).filter(([,route])=>route.includes(gName)).map(([comp])=>comp);
-      return '<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:12px">'
-        +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">'
-        +'<span style="font-family:Space Grotesk,sans-serif;font-size:13px;font-weight:700;flex:1">'+gName+'</span>'
-        +'<span class="text-xs text-muted">'+memberIds.length+' machine(s)'+(usedByComponents.length?' · used by '+usedByComponents.length+' component(s)':' · not yet used in routing')+'</span>'
-        +'<button class="btn btn-outline btn-sm" onclick="renameProcessGroup(\''+gName.replace(/'/g,"\\'")+'\')">✏ Rename</button>'
-        +'<button class="btn btn-success btn-sm" onclick="saveProcessGroupMachines(\''+gName.replace(/'/g,"\\'")+'\')">💾 Save</button>'
-        +'<button class="btn btn-danger btn-sm" onclick="deleteProcessGroup(\''+gName.replace(/'/g,"\\'")+'\')">🗑 Delete Group</button>'
-        +'</div>'
-        +'<div style="display:flex;flex-wrap:wrap;gap:10px" id="pg_members_'+gName.replace(/[^a-zA-Z0-9]/g,'_')+'">'
-        + M.workstations.map(w=>{
-            const checked = memberIds.includes(w.id);
-            const isDown = w.active===false || w.maintenanceStatus==='breakdown';
-            return '<label style="display:flex;align-items:center;gap:6px;font-size:12.5px;background:var(--surface2);padding:5px 10px;border-radius:6px;cursor:pointer'+(isDown?';opacity:.6':'')+'">'
-              +'<input type="checkbox" value="'+w.id+'" class="pg-machine-check-'+gName.replace(/[^a-zA-Z0-9]/g,'_')+'" '+(checked?'checked':'')+'>'
-              + w.name + (isDown?' <span style="color:var(--red);font-size:10px">(inactive)</span>':'')
-              +'</label>';
-          }).join('')
-        +'</div>'
-        +(usedByComponents.length ? '<div class="text-xs text-muted" style="margin-top:8px">Used in routing for: '+usedByComponents.join(', ')+'</div>' : '')
-        +'</div>';
-    }).join('');
-  },0);
-  return container.outerHTML;
+  const rows = groupNames.map(gName=>{
+    const memberIds = M.stageToWorkstation[gName]||[];
+    const memberNames = memberIds.map(id=>M.workstations.find(w=>w.id===id)?.name||id);
+    const usedByCount = Object.values(M.componentRouting).filter(route=>route.includes(gName)).length;
+    return `<tr>
+      <td class="fw-600 text-sm">${gName}</td>
+      <td class="text-sm">${memberNames.join(', ')||'<span class="text-muted">—</span>'}</td>
+      <td class="text-xs text-muted">${usedByCount ? usedByCount+' component(s)' : 'not yet used'}</td>
+      <td style="display:flex;gap:4px;flex-wrap:wrap">
+        <button class="btn btn-outline btn-sm" onclick="openProcessGroupModal('${gName.replace(/'/g,"\\'")}')">✏ Edit</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteProcessGroup('${gName.replace(/'/g,"\\'")}')">🗑 Delete</button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  return `<div class="card">
+    <div class="card-header">
+      <div><div class="card-title">🏭 Process / Workstation Groups${lockBadge('ADMIN ONLY')}</div>
+      <div class="text-xs text-muted" style="margin-top:2px">Routing references only the group name (e.g. "Beam Saw"). Which specific machine actually does the work is chosen by the operator at production execution — only active machines are offered.</div></div>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-outline btn-sm" onclick="migrateRoutingToProcessGroups()">🔀 Migrate Routing to Groups</button>
+        <button class="btn btn-primary btn-sm" onclick="openProcessGroupModal(null)">+ Add Group</button>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="alert alert-info mb-3" style="font-size:12px">If a group shows as "used by" components but you expected it to be the old machine-specific name (e.g. "Selco Beam Saw"), your saved routing master hasn't been updated to the new group names yet — click <b>Migrate Routing to Groups</b> above to update it in one step, rather than editing each component by hand.</div>
+      <table>
+        <thead><tr><th>Group Name</th><th>Assigned Machines</th><th>Used In Routing</th><th style="width:170px">Actions</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="4" class="text-sm text-muted" style="padding:14px;text-align:center">No process groups yet. Click + Add Group to create one.</td></tr>'}</tbody>
+      </table>
+    </div>
+  </div>`;
 }
 
-function saveProcessGroupMachines(gName){
-  const safeKey = gName.replace(/[^a-zA-Z0-9]/g,'_');
-  const checks = document.querySelectorAll('.pg-machine-check-'+safeKey+':checked');
-  const memberIds = Array.from(checks).map(c=>c.value);
-  if(!memberIds.length){
-    toast('A process group needs at least one machine — uncheck everything and use Delete Group instead if you want to remove it.','⚠');
+// Opens the add/edit modal. Pass null to create a new group, or an existing
+// group's name to edit it (pre-fills name + currently-assigned machines).
+function openProcessGroupModal(existingName){
+  document.getElementById('pgModalTitle').textContent = existingName ? '🏭 Edit Process Group' : '🏭 New Process Group';
+  document.getElementById('pg_original_name').value = existingName || '';
+  document.getElementById('pg_name').value = existingName || '';
+  const currentMembers = existingName ? (M.stageToWorkstation[existingName]||[]) : [];
+  const list = document.getElementById('pg_machine_checklist');
+  list.innerHTML = M.workstations.map(w=>{
+    const checked = currentMembers.includes(w.id);
+    const isDown = w.active===false || w.maintenanceStatus==='breakdown';
+    return `<label style="display:flex;align-items:center;gap:8px;font-size:12.5px;padding:4px 2px;cursor:pointer${isDown?';opacity:.6':''}">
+      <input type="checkbox" value="${w.id}" class="pg-modal-machine-check" ${checked?'checked':''}>
+      ${w.name}${isDown?' <span style="color:var(--red);font-size:10px">(inactive)</span>':''}
+    </label>`;
+  }).join('') || '<div class="text-sm text-muted">No machines in Machine Master yet — add one first.</div>';
+  document.getElementById('processGroupModal').classList.add('open');
+}
+
+function saveProcessGroupModal(){
+  const originalName = document.getElementById('pg_original_name').value; // '' if creating new
+  const newName = document.getElementById('pg_name').value.trim();
+  const memberIds = Array.from(document.querySelectorAll('.pg-modal-machine-check:checked')).map(c=>c.value);
+
+  if(!newName){ toast('Enter a group name.','⚠'); return; }
+  if(!memberIds.length){ toast('Select at least one machine for this group.','⚠'); return; }
+  // Name collision check — allowed to keep the same name when editing, but not to collide with a different existing group
+  if(M.stageToWorkstation[newName] && newName!==originalName){
+    toast('A group named "'+newName+'" already exists.','⚠');
     return;
   }
-  M.stageToWorkstation[gName] = memberIds;
+
   const ts=new Date().toISOString().replace('T',' ').slice(0,16);
-  DB.auditLog.unshift({ts,user:'Admin',action:'Update',module:'Process Groups',entity:gName,field:'Member Machines',old:'—',
-    nw:memberIds.map(id=>M.workstations.find(w=>w.id===id)?.name||id).join(', '),ip:'192.168.1.1'});
-  toast('Process group "'+gName+'" saved — '+memberIds.length+' machine(s).','✓');
-  persistAdminConfig('stageToWorkstation');
+
+  if(!originalName){
+    // Creating a new group
+    M.stageToWorkstation[newName]=memberIds;
+    if(!M.routing.includes(newName)) M.routing.push(newName);
+    DB.auditLog.unshift({ts,user:'Admin',action:'Create',module:'Process Groups',entity:newName,field:'New Group',old:'--',
+      nw:memberIds.map(id=>M.workstations.find(w=>w.id===id)?.name||id).join(', '),ip:'192.168.1.1'});
+    toast('Process group "'+newName+'" created with '+memberIds.length+' machine(s).','✓');
+  } else if(originalName===newName){
+    // Same name, just update membership
+    M.stageToWorkstation[newName]=memberIds;
+    DB.auditLog.unshift({ts,user:'Admin',action:'Update',module:'Process Groups',entity:newName,field:'Member Machines',old:'—',
+      nw:memberIds.map(id=>M.workstations.find(w=>w.id===id)?.name||id).join(', '),ip:'192.168.1.1'});
+    toast('Process group "'+newName+'" saved — '+memberIds.length+' machine(s).','✓');
+  } else {
+    // Renamed AND possibly reassigned machines — move the key and update every
+    // routing reference to the old name so existing routing doesn't break.
+    delete M.stageToWorkstation[originalName];
+    M.stageToWorkstation[newName]=memberIds;
+    const routeIdx=M.routing.indexOf(originalName);
+    if(routeIdx>=0) M.routing[routeIdx]=newName; else M.routing.push(newName);
+    let updatedComponents=0;
+    Object.keys(M.componentRouting).forEach(comp=>{
+      const route=M.componentRouting[comp];
+      const idx=route.indexOf(originalName);
+      if(idx>=0){ route[idx]=newName; updatedComponents++; }
+    });
+    DB.auditLog.unshift({ts,user:'Admin',action:'Update',module:'Process Groups',entity:originalName,field:'Renamed + Machines',
+      old:originalName,nw:newName+' — '+memberIds.map(id=>M.workstations.find(w=>w.id===id)?.name||id).join(', ')+(updatedComponents?' ('+updatedComponents+' component route(s) updated)':''),ip:'192.168.1.1'});
+    toast('Renamed "'+originalName+'" to "'+newName+'"'+(updatedComponents?' — updated in '+updatedComponents+' component route(s)':'')+'.','✓');
+  }
+
+  closeMod('processGroupModal');
   renderAdmin('processgroups',null);
-}
-
-function addProcessGroup(){
-  const name=prompt('New Process Group name (e.g. "Sanding", "Painting"):');
-  if(!name||!name.trim())return;
-  const gName=name.trim();
-  if(M.stageToWorkstation[gName]){toast('A group named "'+gName+'" already exists.','⚠');return;}
-  if(!M.workstations.length){toast('Add at least one machine in Machine Master before creating a process group.','⚠');return;}
-  const firstMachine=prompt('Which machine belongs to this group first? Enter its exact name from Machine Master:\n\n'+M.workstations.map(w=>'• '+w.name).join('\n'));
-  const ws=M.workstations.find(w=>w.name.toLowerCase()===((firstMachine||'').trim().toLowerCase()));
-  if(!ws){toast('Machine name not recognized — group not created. Try again with an exact name from Machine Master.','⚠');return;}
-  M.stageToWorkstation[gName]=[ws.id];
-  if(!M.routing.includes(gName)) M.routing.push(gName);
-  const ts=new Date().toISOString().replace('T',' ').slice(0,16);
-  DB.auditLog.unshift({ts,user:'Admin',action:'Create',module:'Process Groups',entity:gName,field:'New Group',old:'--',nw:ws.name,ip:'192.168.1.1'});
-  toast('Process group "'+gName+'" created with '+ws.name+'. It now appears as a routing option.','✓');
-  persistAdminConfig('stageToWorkstation');
-  persistAdminConfig('routing');
-  renderAdmin('processgroups',null);
-}
-
-// Renames a group: moves its stageToWorkstation entry to the new key, updates
-// its position in the routing options list, and rewrites every existing
-// componentRouting entry that references the old name so routing already
-// configured for this group doesn't silently break.
-function renameProcessGroup(oldName){
-  const newName=prompt('Rename process group "'+oldName+'" to:', oldName);
-  if(!newName||!newName.trim() || newName.trim()===oldName) return;
-  const gName=newName.trim();
-  if(M.stageToWorkstation[gName]){toast('A group named "'+gName+'" already exists.','⚠');return;}
-
-  M.stageToWorkstation[gName]=M.stageToWorkstation[oldName];
-  delete M.stageToWorkstation[oldName];
-
-  const routeIdx=M.routing.indexOf(oldName);
-  if(routeIdx>=0) M.routing[routeIdx]=gName; else M.routing.push(gName);
-
-  let updatedComponents=0;
-  Object.keys(M.componentRouting).forEach(comp=>{
-    const route=M.componentRouting[comp];
-    const idx=route.indexOf(oldName);
-    if(idx>=0){ route[idx]=gName; updatedComponents++; }
-  });
-
-  const ts=new Date().toISOString().replace('T',' ').slice(0,16);
-  DB.auditLog.unshift({ts,user:'Admin',action:'Update',module:'Process Groups',entity:oldName,field:'Rename',old:oldName,nw:gName+(updatedComponents?' ('+updatedComponents+' component route(s) updated)':''),ip:'192.168.1.1'});
-  toast('Renamed "'+oldName+'" to "'+gName+'"'+(updatedComponents?' — updated in '+updatedComponents+' component route(s)':'')+'.','✓');
   persistAdminConfig('stageToWorkstation');
   persistAdminConfig('routing');
-  if(updatedComponents) persistAdminConfig('componentRouting');
-  renderAdmin('processgroups',null);
+  if(originalName && originalName!==newName) persistAdminConfig('componentRouting');
 }
 
 function deleteProcessGroup(gName){

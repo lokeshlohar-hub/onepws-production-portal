@@ -13973,7 +13973,10 @@ function getAdminHTML(sec){
     <div class="card">
       <div class="card-header">
         <div class="card-title">Machine & Workstation Master${lockBadge('ADMIN ONLY')}</div>
-        <button class="btn btn-primary btn-sm" onclick="addWorkstation()">+ Add Workstation</button>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-outline btn-sm" onclick="importReferenceMachineList()">📥 Import Reference Machine List</button>
+          <button class="btn btn-primary btn-sm" onclick="addWorkstation()">+ Add Workstation</button>
+        </div>
       </div>
       <div class="card-body">
         <div class="alert alert-info mb-3" style="font-size:12px">Manage all production workstations, daily capacity, and maintenance status. Changes reflect immediately in Capacity Planning and the Maintenance Module. PM Frequency and Initial PM Date are now configured from Maintenance &rarr; Preventive Maintenance. Machine identity details (Make, Model, Asset ID, Power Rating, Location, Install Date) are edited via "🔧 Details" and are restricted to Master Admin.</div>
@@ -14868,6 +14871,80 @@ function ensureMachineMasterDefaults(w){
   if(w.initialPmDate===undefined) w.initialPmDate='';
   if(w.customPmFreqDays===undefined) w.customPmFreqDays='';
   return w;
+}
+
+// ------ REFERENCE MACHINE LIST IMPORT (one-time backfill) ------
+// Source: user-provided "Machine list at production" — every machine not
+// already present in Machine Master (matched by Identification/Asset ID,
+// since names can vary slightly). Capacity figures are NOT in the source
+// list — these are placeholder defaults only, clearly flagged, and MUST be
+// reviewed/corrected in Machine Master once real throughput data is known.
+// Idempotent: safe to run more than once — already-imported machines (by
+// assetId) are skipped, not duplicated.
+const REFERENCE_MACHINE_LIST = [
+  {id:'mr1', name:'Manual Router',            make:'Sandeep',        model:'MX506',            location:'India',       assetId:'PWSPL/1/02',  group:'Manual Routing',    cap:25,  capUnit:'Components/Day', isEdge:false},
+  {id:'pf1', name:'Post Forming',             make:'Sandeep',        model:'',                 location:'India',       assetId:'PWSPL/1/10',  group:'Post Forming',      cap:20,  capUnit:'Components/Day', isEdge:false},
+  {id:'sm1', name:'Spindle Moulder',          make:'Felder',         model:'F-500',            location:'UK',          assetId:'PWSPL/1/11',  group:'Spindle Moulding',  cap:30,  capUnit:'Components/Day', isEdge:false},
+  {id:'ps1', name:'Panel Saw',                make:'Felder',         model:'K-915',            location:'UK',          assetId:'PWSPL/1/12',  group:'Cutting',           cap:30,  capUnit:'Boards/Day',     isEdge:false},
+  {id:'ec1', name:'Extrusion Cutting',        make:'',               model:'',                 location:'China',       assetId:'PWSPL/2/24',  group:'Extrusion Cutting', cap:40,  capUnit:'Components/Day', isEdge:false},
+  {id:'sd1', name:'Stand Drill Machine (Small)',make:'',             model:'',                 location:'India',       assetId:'PWSPL/2/25',  group:'Stand Drilling',    cap:50,  capUnit:'Components/Day', isEdge:false},
+  {id:'ec2', name:'Extrusion Cutting',        make:'Sahyog',         model:'',                 location:'India',       assetId:'PWSPL/2/37',  group:'Extrusion Cutting', cap:35,  capUnit:'Components/Day', isEdge:false},
+  {id:'sd2', name:'Stand Drill Machine (Small)',make:'Hero',         model:'',                 location:'India',       assetId:'PWSPL/2/38',  group:'Stand Drilling',    cap:45,  capUnit:'Components/Day', isEdge:false},
+  {id:'no1', name:'Nosing Machine',           make:'OSV',            model:'OSV S400',         location:'Lithuania',   assetId:'PWSPL/1/96',  group:'Nosing',            cap:40,  capUnit:'Components/Day', isEdge:false},
+  {id:'ac1', name:'Aluminium Cutting',        make:'Fomindustrie',   model:'Blitz-50',         location:'Italy',       assetId:'PWSPL/01-98', group:'Aluminium Cutting', cap:40,  capUnit:'Components/Day', isEdge:false},
+  {id:'dm1', name:'Drilling Machine',         make:'MSK',            model:'MSK-73266',        location:'China',       assetId:'PWSPL/01-100',group:'Drilling',          cap:40,  capUnit:'Components/Day', isEdge:false},
+  {id:'ab1', name:'Aluminium Banding',        make:'PBT',            model:'PBT 25 PC 400',    location:'Switzerland', assetId:'PWSPL/1/102', group:'Aluminium Banding', cap:400, capUnit:'Meters/Day',     isEdge:true, edgeMetersPerComp:4},
+  {id:'sd3', name:'Stand Drill Machine (New)',make:'K.R. Panchal',   model:'',                 location:'India',       assetId:'PWSPL/01-124',group:'Stand Drilling',    cap:45,  capUnit:'Components/Day', isEdge:false},
+  {id:'ct1', name:'Corian Thermoform Machine',make:'',               model:'',                 location:'China',       assetId:'PWSPL/01-123',group:'Thermoforming',     cap:15,  capUnit:'Components/Day', isEdge:false},
+  {id:'pt1', name:'PET Machine',              make:'Emerging Grap',  model:'IECHO TK4S-2516',  location:'China',       assetId:'PWSPL/01-128',group:'PET Processing',    cap:25,  capUnit:'Components/Day', isEdge:false},
+  {id:'fl1', name:'Fork Lift',                make:'Godrej',         model:'GX300D',           location:'India',       assetId:'PWSPL/03-129',group:null,                cap:0,   capUnit:'N/A (Material Handling)', isEdge:false},
+  {id:'ip1', name:'Inkjet Printing Machine',  make:'Guangdong',      model:'TC JFX 200 2513',  location:'China',       assetId:'PWSPL/01-131',group:'Inkjet Printing',   cap:100, capUnit:'Components/Day', isEdge:false},
+  {id:'eb3', name:'Curve Edge Banding (Woodtech)',make:'Woodtech',   model:'HC-2D',            location:'China',       assetId:'PWSPL/01-133',group:'Edge Banding',      cap:350, capUnit:'Meters/Day',     isEdge:true, edgeMetersPerComp:4},
+  {id:'eb4', name:'Automatic Edge Banding (Woodtech)',make:'Woodtech',model:'RAPIDEDGE-665JS', location:'China',       assetId:'PWSPL/01-134',group:'Edge Banding',      cap:500, capUnit:'Meters/Day',     isEdge:true, edgeMetersPerComp:5},
+  {id:'mb2', name:'NC Boring Machine (Woodtech)',make:'Woodtech',    model:'RAPID DRILL-612KH',location:'China',       assetId:'PWSPL/01-135',group:'Multi Boring',      cap:30,  capUnit:'Components/Day', isEdge:false},
+  {id:'em1', name:'End Milling',              make:'Zenith',         model:'ZM14',             location:'India',       assetId:'PWSPL/01-140',group:'End Milling',       cap:25,  capUnit:'Components/Day', isEdge:false},
+  {id:'dc1', name:'Dust Collector',           make:'Welron',         model:'BF-WOSF128-18X1230',location:'India',      assetId:'PWSPL/01-141',group:null,                cap:0,   capUnit:'N/A (Utility Equipment)', isEdge:false},
+];
+
+function importReferenceMachineList(){
+  const existingAssetIds = new Set(M.workstations.map(w=>w.assetId).filter(Boolean));
+  const toAdd = REFERENCE_MACHINE_LIST.filter(m=>!existingAssetIds.has(m.assetId));
+  if(!toAdd.length){
+    toast('All reference machines are already present in Machine Master (matched by Identification No.) — nothing to import.','✓');
+    return;
+  }
+  if(!confirm('Import '+toAdd.length+' machine(s) from the reference production machine list?\n\n'
+    +'Capacity figures are NOT in the source list, so each new machine gets a placeholder daily capacity — please review and correct these in Machine Master once real throughput figures are known.\n\n'
+    +'Machines that only exist singly (no interchangeable duplicate) will still appear as their own single-machine Process Group, consistent with how Hot Press, PU Casting, etc. are already organized.\n\n'
+    +'Continue?')) return;
+
+  toAdd.forEach(m=>{
+    M.workstations.push({
+      id:m.id, name:m.name, cap:m.cap, capUnit:m.capUnit, unit:m.capUnit, hoursPerDay:8,
+      pmFrequency:'Monthly', maintenanceStatus:'none', active:true,
+      make:m.make||'', model:m.model||'', assetId:m.assetId, powerRating:'', location:m.location||'',
+      installDate:'', initialPmDate:'', customPmFreqDays:'',
+      isEdge:m.isEdge, edgeMetersPerComp:m.edgeMetersPerComp||undefined,
+      convIn: m.isEdge?'Component':(m.capUnit==='Boards/Day'?'Board':'Component'),
+      convOut: m.isEdge?(m.edgeMetersPerComp||4):1,
+      convOutUnit: m.isEdge?'Meters':(m.capUnit==='Boards/Day'?'Component':'Component'),
+    });
+    if(m.group){
+      if(!M.stageToWorkstation[m.group]) M.stageToWorkstation[m.group]=[];
+      M.stageToWorkstation[m.group].push(m.id);
+      if(!M.routing.includes(m.group)) M.routing.push(m.group);
+    }
+  });
+
+  const ts=new Date().toISOString().replace('T',' ').slice(0,16);
+  DB.auditLog.unshift({ts,user:'Admin',action:'Create',module:'Machine Master',entity:'Reference Machine Import',
+    field:toAdd.length+' machine(s)',old:'--',nw:toAdd.map(m=>m.name+' ('+m.assetId+')').join(', '),ip:'192.168.1.1'});
+
+  toast(toAdd.length+' machine(s) imported. Placeholder capacities set — please review each in Machine Master.','✓');
+  renderAdmin('machines',null);
+  persistAdminConfig('workstations');
+  persistAdminConfig('stageToWorkstation');
+  persistAdminConfig('routing');
 }
 
 function addWorkstation(){

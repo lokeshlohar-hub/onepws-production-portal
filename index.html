@@ -3260,12 +3260,24 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
       <input type="hidden" id="pg_original_name">
       <div class="form-group">
         <label class="form-label">Group Name <span class="req">*</span></label>
-        <input type="text" class="form-input" id="pg_name" placeholder="e.g. Beam Saw, CNC, Edge Banding">
+        <input type="text" class="form-input" id="pg_name" placeholder="e.g. Beam Saw, CNC, Assembly">
       </div>
-      <div class="form-group" style="margin-bottom:0">
+      <div class="form-group">
+        <label class="form-label">Machine Required? <span class="req">*</span></label>
+        <div style="display:flex;gap:16px;margin-top:4px">
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+            <input type="radio" name="pg_machine_required" value="yes" id="pg_req_yes" onchange="onPgMachineRequiredChange()" checked> Machine Required
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+            <input type="radio" name="pg_machine_required" value="no" id="pg_req_no" onchange="onPgMachineRequiredChange()"> Machine Not Required (process-only, e.g. Assembly, Fabrication, Manual Process)
+          </label>
+        </div>
+      </div>
+      <div class="form-group" style="margin-bottom:0" id="pg_machine_section">
         <label class="form-label">Assigned Machines <span class="req">*</span> <span class="text-xs text-muted">(select one or more)</span></label>
         <div id="pg_machine_checklist" style="max-height:280px;overflow-y:auto;border:1px solid var(--border2);border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:4px"></div>
       </div>
+      <div class="alert alert-info" id="pg_processonly_note" style="display:none;font-size:12px;margin-bottom:0">This group will not have any machine assigned. During production, the operator can complete this stage directly without selecting a machine.</div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeMod('processGroupModal')">Cancel</button>
@@ -7310,7 +7322,12 @@ function renderStageEntryForm(){
   const pend=pendingQty(b,st);
   const wsIds = M.stageToWorkstation[st] || [];
   const wsNames = wsIds.map(id=>M.workstations.find(w=>w.id===id)?.name||id).filter(Boolean);
-  const wsLabel = wsNames.length?wsNames.join(' / '):'No workstation mapped';
+  // A stage registered in stageToWorkstation with zero machines is an
+  // intentional Process-Only group (e.g. "Assembly", "Fabrication") — not an
+  // error. A stage not registered there at all is genuinely unmapped.
+  const isRegisteredGroup = Object.prototype.hasOwnProperty.call(M.stageToWorkstation, st);
+  const isProcessOnly = isRegisteredGroup && wsIds.length===0;
+  const wsLabel = wsNames.length ? wsNames.join(' / ') : (isProcessOnly ? 'Process-only — no machine required' : 'No workstation mapped');
   // Only machines that are actually available for selection at execution time —
   // matches Machine Master's active flag and excludes full breakdown.
   const activeWsIds = wsIds.filter(id=>{
@@ -7358,18 +7375,26 @@ function renderStageEntryForm(){
     +'</div>';
 
   let opOpts='<option value="">-- Select Operator --</option>';
-  activeWsIds.forEach(wsId=>{
-    M.operators.filter(o=>o.workstation===wsId).sort((a,c)=>a.seq-c.seq).forEach(o=>{
-      opOpts+='<option>'+o.name+(activeWsIds.length>1?' ('+(M.workstations.find(w=>w.id===wsId)?.name||wsId)+')':'')+'</option>';
+  if(isProcessOnly){
+    M.operators.slice().sort((a,c)=>a.name.localeCompare(c.name)).forEach(o=>{
+      opOpts+='<option>'+o.name+'</option>';
     });
-  });
+  } else {
+    activeWsIds.forEach(wsId=>{
+      M.operators.filter(o=>o.workstation===wsId).sort((a,c)=>a.seq-c.seq).forEach(o=>{
+        opOpts+='<option>'+o.name+(activeWsIds.length>1?' ('+(M.workstations.find(w=>w.id===wsId)?.name||wsId)+')':'')+'</option>';
+      });
+    });
+  }
 
   // Machine field: a single active machine keeps the exact previous read-only
   // behavior. More than one active machine in this process group means the
   // operator must pick which one actually did the work.
   const activeWsNames = activeWsIds.map(id=>M.workstations.find(w=>w.id===id)?.name||id);
   let machineFieldHTML;
-  if(activeWsIds.length<=1){
+  if(isProcessOnly){
+    machineFieldHTML = '<div class="form-group"><label class="form-label">Machine</label><input type="text" class="form-input" readonly style="color:var(--text-muted);font-style:italic" value="⚙️ Process-only stage — no machine assignment required"><input type="hidden" id="ce_machine" value=""></div>';
+  } else if(activeWsIds.length<=1){
     machineFieldHTML = '<div class="form-group"><label class="form-label">Machine <span class="lbl-lock">&#128274; AUTO</span></label><input type="text" class="form-input" readonly value="'+(activeWsNames[0]||wsLabel)+'"><input type="hidden" id="ce_machine" value="'+(activeWsIds[0]||'')+'"></div>';
   } else {
     machineFieldHTML = '<div class="form-group"><label class="form-label">Machine <span class="req">*</span> <span class="text-xs text-muted">('+activeWsIds.length+' active in '+st+')</span></label>'
@@ -14038,17 +14063,24 @@ function getAdminHTML(sec){
   return '<div class="card"><div class="card-body"><div class="text-muted text-sm">Section under construction.</div></div></div>';
 }
 
+// These are baked into every component's routing as QC gates and are not
+// user-manageable process groups — they're excluded from this admin list
+// even though they also have zero assigned machines, same as a Process-Only
+// group would. Everything else with zero machines IS a real Process-Only
+// group (e.g. "Assembly") and belongs in this list.
+const NON_ROUTING_GROUP_KEYS = ['In-Process QC', 'Final QC'];
+
 function getProcessGroupsAdmin(){
-  // Every group with at least one member machine — QC-type entries ('In-Process QC',
-  // 'Final QC') map to [] and aren't machine groups, so they're excluded here.
-  const groupNames = Object.keys(M.stageToWorkstation).filter(k=>(M.stageToWorkstation[k]||[]).length>0);
+  const groupNames = Object.keys(M.stageToWorkstation).filter(k=>!NON_ROUTING_GROUP_KEYS.includes(k));
   const rows = groupNames.map(gName=>{
     const memberIds = M.stageToWorkstation[gName]||[];
     const memberNames = memberIds.map(id=>M.workstations.find(w=>w.id===id)?.name||id);
+    const isProcessOnly = memberIds.length===0;
     const usedByCount = Object.values(M.componentRouting).filter(route=>route.includes(gName)).length;
     return `<tr>
       <td class="fw-600 text-sm">${gName}</td>
-      <td class="text-sm">${memberNames.join(', ')||'<span class="text-muted">—</span>'}</td>
+      <td>${isProcessOnly ? '<span class="badge" style="background:var(--purple)22;color:var(--purple)">⚙️ Process-Only</span>' : '<span class="badge" style="background:var(--blue)22;color:var(--blue)">🔧 Machine-Based</span>'}</td>
+      <td class="text-sm">${isProcessOnly ? '<span class="text-muted" style="font-style:italic">No machine required</span>' : memberNames.join(', ')}</td>
       <td class="text-xs text-muted">${usedByCount ? usedByCount+' component(s)' : 'not yet used'}</td>
       <td style="display:flex;gap:4px;flex-wrap:wrap">
         <button class="btn btn-outline btn-sm" onclick="openProcessGroupModal('${gName.replace(/'/g,"\\'")}')">✏ Edit</button>
@@ -14060,7 +14092,7 @@ function getProcessGroupsAdmin(){
   return `<div class="card">
     <div class="card-header">
       <div><div class="card-title">🏭 Process / Workstation Groups${lockBadge('ADMIN ONLY')}</div>
-      <div class="text-xs text-muted" style="margin-top:2px">Routing references only the group name (e.g. "Beam Saw"). Which specific machine actually does the work is chosen by the operator at production execution — only active machines are offered.</div></div>
+      <div class="text-xs text-muted" style="margin-top:2px">Routing references only the group name (e.g. "Beam Saw"). Machine-Based groups ask the operator to pick which active machine did the work; Process-Only groups (e.g. "Assembly") skip machine selection entirely.</div></div>
       <div style="display:flex;gap:6px">
         <button class="btn btn-outline btn-sm" onclick="migrateRoutingToProcessGroups()">🔀 Migrate Routing to Groups</button>
         <button class="btn btn-primary btn-sm" onclick="openProcessGroupModal(null)">+ Add Group</button>
@@ -14069,8 +14101,8 @@ function getProcessGroupsAdmin(){
     <div class="card-body">
       <div class="alert alert-info mb-3" style="font-size:12px">If a group shows as "used by" components but you expected it to be the old machine-specific name (e.g. "Selco Beam Saw"), your saved routing master hasn't been updated to the new group names yet — click <b>Migrate Routing to Groups</b> above to update it in one step, rather than editing each component by hand.</div>
       <table>
-        <thead><tr><th>Group Name</th><th>Assigned Machines</th><th>Used In Routing</th><th style="width:170px">Actions</th></tr></thead>
-        <tbody>${rows || '<tr><td colspan="4" class="text-sm text-muted" style="padding:14px;text-align:center">No process groups yet. Click + Add Group to create one.</td></tr>'}</tbody>
+        <thead><tr><th>Group Name</th><th style="width:140px">Type</th><th>Assigned Machines</th><th>Used In Routing</th><th style="width:170px">Actions</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="5" class="text-sm text-muted" style="padding:14px;text-align:center">No process groups yet. Click + Add Group to create one.</td></tr>'}</tbody>
       </table>
     </div>
   </div>`;
@@ -14092,16 +14124,31 @@ function openProcessGroupModal(existingName){
       ${w.name}${isDown?' <span style="color:var(--red);font-size:10px">(inactive)</span>':''}
     </label>`;
   }).join('') || '<div class="text-sm text-muted">No machines in Machine Master yet — add one first.</div>';
+
+  // Existing group with zero machines = process-only; new group defaults to machine-required
+  const isProcessOnly = existingName ? currentMembers.length===0 : false;
+  document.getElementById('pg_req_yes').checked = !isProcessOnly;
+  document.getElementById('pg_req_no').checked = isProcessOnly;
+  onPgMachineRequiredChange();
+
   document.getElementById('processGroupModal').classList.add('open');
+}
+
+// Toggles the machine checklist section based on the Machine Required radio.
+function onPgMachineRequiredChange(){
+  const required = document.getElementById('pg_req_yes').checked;
+  document.getElementById('pg_machine_section').style.display = required ? 'block' : 'none';
+  document.getElementById('pg_processonly_note').style.display = required ? 'none' : 'block';
 }
 
 function saveProcessGroupModal(){
   const originalName = document.getElementById('pg_original_name').value; // '' if creating new
   const newName = document.getElementById('pg_name').value.trim();
-  const memberIds = Array.from(document.querySelectorAll('.pg-modal-machine-check:checked')).map(c=>c.value);
+  const machineRequired = document.getElementById('pg_req_yes').checked;
+  const memberIds = machineRequired ? Array.from(document.querySelectorAll('.pg-modal-machine-check:checked')).map(c=>c.value) : [];
 
   if(!newName){ toast('Enter a group name.','⚠'); return; }
-  if(!memberIds.length){ toast('Select at least one machine for this group.','⚠'); return; }
+  if(machineRequired && !memberIds.length){ toast('Select at least one machine for this group, or choose "Machine Not Required" for a process-only group.','⚠'); return; }
   // Name collision check — allowed to keep the same name when editing, but not to collide with a different existing group
   if(M.stageToWorkstation[newName] && newName!==originalName){
     toast('A group named "'+newName+'" already exists.','⚠');
@@ -14109,20 +14156,19 @@ function saveProcessGroupModal(){
   }
 
   const ts=new Date().toISOString().replace('T',' ').slice(0,16);
+  const memberSummary = memberIds.length ? memberIds.map(id=>M.workstations.find(w=>w.id===id)?.name||id).join(', ') : 'Process-only — no machine required';
 
   if(!originalName){
     // Creating a new group
     M.stageToWorkstation[newName]=memberIds;
     if(!M.routing.includes(newName)) M.routing.push(newName);
-    DB.auditLog.unshift({ts,user:'Admin',action:'Create',module:'Process Groups',entity:newName,field:'New Group',old:'--',
-      nw:memberIds.map(id=>M.workstations.find(w=>w.id===id)?.name||id).join(', '),ip:'192.168.1.1'});
-    toast('Process group "'+newName+'" created with '+memberIds.length+' machine(s).','✓');
+    DB.auditLog.unshift({ts,user:'Admin',action:'Create',module:'Process Groups',entity:newName,field:'New Group',old:'--',nw:memberSummary,ip:'192.168.1.1'});
+    toast('Process group "'+newName+'" created'+(memberIds.length?' with '+memberIds.length+' machine(s)':' as process-only (no machine required)')+'.','✓');
   } else if(originalName===newName){
-    // Same name, just update membership
+    // Same name, just update membership / machine-required state
     M.stageToWorkstation[newName]=memberIds;
-    DB.auditLog.unshift({ts,user:'Admin',action:'Update',module:'Process Groups',entity:newName,field:'Member Machines',old:'—',
-      nw:memberIds.map(id=>M.workstations.find(w=>w.id===id)?.name||id).join(', '),ip:'192.168.1.1'});
-    toast('Process group "'+newName+'" saved — '+memberIds.length+' machine(s).','✓');
+    DB.auditLog.unshift({ts,user:'Admin',action:'Update',module:'Process Groups',entity:newName,field:'Member Machines',old:'—',nw:memberSummary,ip:'192.168.1.1'});
+    toast('Process group "'+newName+'" saved'+(memberIds.length?' — '+memberIds.length+' machine(s)':' as process-only (no machine required)')+'.','✓');
   } else {
     // Renamed AND possibly reassigned machines — move the key and update every
     // routing reference to the old name so existing routing doesn't break.
@@ -14137,7 +14183,7 @@ function saveProcessGroupModal(){
       if(idx>=0){ route[idx]=newName; updatedComponents++; }
     });
     DB.auditLog.unshift({ts,user:'Admin',action:'Update',module:'Process Groups',entity:originalName,field:'Renamed + Machines',
-      old:originalName,nw:newName+' — '+memberIds.map(id=>M.workstations.find(w=>w.id===id)?.name||id).join(', ')+(updatedComponents?' ('+updatedComponents+' component route(s) updated)':''),ip:'192.168.1.1'});
+      old:originalName,nw:newName+' — '+memberSummary+(updatedComponents?' ('+updatedComponents+' component route(s) updated)':''),ip:'192.168.1.1'});
     toast('Renamed "'+originalName+'" to "'+newName+'"'+(updatedComponents?' — updated in '+updatedComponents+' component route(s)':'')+'.','✓');
   }
 

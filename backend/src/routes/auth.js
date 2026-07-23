@@ -83,4 +83,21 @@ router.put('/users/:id', requireAuth, requireRole('superadmin'), async (req, res
   res.json({ user: rows[0] });
 });
 
+// DELETE /api/users/:id — remove a user account (Master Admin only)
+router.delete('/users/:id', requireAuth, requireRole('superadmin'), async (req, res) => {
+  const { rows: existingRows } = await pool.query('SELECT id, role, active, username FROM users WHERE id = $1', [req.params.id]);
+  if (!existingRows[0]) return res.status(404).json({ error: 'User not found' });
+  const target = existingRows[0];
+  if (target.role === 'superadmin' && target.active) {
+    const { rows: otherActiveSuperadmins } = await pool.query(
+      "SELECT id FROM users WHERE role = 'superadmin' AND active = true AND id != $1", [req.params.id]
+    );
+    if (!otherActiveSuperadmins.length) {
+      return res.status(400).json({ error: 'Cannot delete — at least one active Master Admin must remain.' });
+    }
+  }
+  await pool.query('DELETE FROM users WHERE id = $1', [req.params.id]);
+  res.json({ ok: true, deletedId: req.params.id, username: target.username });
+});
+
 module.exports = router;

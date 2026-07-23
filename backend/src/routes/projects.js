@@ -6,10 +6,18 @@ const engine = require('../lib/productionEngine');
 const router = express.Router();
 router.use(requireAuth);
 
-// GET /api/projects — list all projects (summary only, no BOM detail)
+// GET /api/projects — list all projects, each with its full BOM embedded
+// (the frontend needs this to populate DB.projects in one shot on login)
 router.get('/', async (req, res) => {
-  const { rows } = await pool.query('SELECT * FROM projects ORDER BY created_at DESC');
-  res.json({ projects: rows });
+  const projRes = await pool.query('SELECT * FROM projects ORDER BY created_at DESC');
+  const bomRes = await pool.query('SELECT * FROM bom_lines ORDER BY created_at');
+  const bomByProject = {};
+  bomRes.rows.forEach((row) => {
+    const line = engine.withDefaults(row);
+    (bomByProject[line.project_id] = bomByProject[line.project_id] || []).push(line);
+  });
+  const projects = projRes.rows.map((p) => ({ ...p, bom: bomByProject[p.id] || [] }));
+  res.json({ projects });
 });
 
 // GET /api/projects/:id — single project with its full BOM
@@ -85,6 +93,18 @@ router.post('/', requireRole('admin', 'superadmin'), async (req, res) => {
   } finally {
     client.release();
   }
+});
+
+// DELETE /api/projects/:id — permanently deletes the project and everything
+// tied to it (BOM lines, reject log entries, stage log entries) via the
+// ON DELETE CASCADE foreign keys already in the schema. This does not touch
+// dailyCap/dailyManpower-equivalent capacity history, since that data is
+// shared across projects at the workstation level, not project-specific.
+router.delete('/:id', requireRole('admin', 'superadmin'), async (req, res) => {
+  const projRes = await pool.query('SELECT id, sap FROM projects WHERE id = $1', [req.params.id]);
+  if (!projRes.rows[0]) return res.status(404).json({ error: 'Project not found' });
+  await pool.query('DELETE FROM projects WHERE id = $1', [req.params.id]);
+  res.json({ ok: true, deletedProjectId: req.params.id, sap: projRes.rows[0].sap });
 });
 
 module.exports = router;

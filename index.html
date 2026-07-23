@@ -3834,6 +3834,39 @@ async function apiRequest(path, opts) {
 function apiLogin(username, password) {
   return apiRequest('/auth/login', { method: 'POST', body: JSON.stringify({ username: username, password: password }) });
 }
+function apiLoadUsers() {
+  return apiRequest('/auth/users', { method: 'GET' });
+}
+function apiCreateUser(payload) {
+  return apiRequest('/auth/users', { method: 'POST', body: JSON.stringify(payload) });
+}
+function apiUpdateUser(id, payload) {
+  return apiRequest('/auth/users/' + encodeURIComponent(id), { method: 'PUT', body: JSON.stringify(payload) });
+}
+function apiDeleteUser(id) {
+  return apiRequest('/auth/users/' + encodeURIComponent(id), { method: 'DELETE' });
+}
+// Server rows use snake_case (full_name, created_at, last_login) — convert
+// to the frontend's existing camelCase shape so nothing else has to change.
+// The id is explicitly stringified: the server's id is a numeric SERIAL
+// column, but every onclick handler in this app passes ids as quoted
+// strings (e.g. onclick="openPermMatrixModal('3')") — comparing a numeric
+// id to that string with === would silently fail everywhere. Normalizing to
+// a string here, once, keeps every existing x.id===someId comparison working
+// exactly as originally written.
+function serverUserToLocal(row) {
+  return {
+    id: String(row.id),
+    username: row.username,
+    fullName: row.full_name || row.fullName,
+    role: row.role,
+    department: row.department,
+    active: row.active,
+    permissions: row.permissions,
+    createdAt: row.created_at || row.createdAt,
+    lastLogin: row.last_login || row.lastLogin || null,
+  };
+}
 function apiLoadProjects() {
   return apiRequest('/projects', { method: 'GET' });
 }
@@ -4077,6 +4110,18 @@ async function loadAdminConfigFromServer() {
     toast('Could not load saved admin settings from the server: ' + err.message, '⚠');
   }
   ensureBomComponentSegments();
+}
+// GET /api/auth/users is Master-Admin-only — only fetch it for a superadmin,
+// so a regular Admin/Viewer login doesn't hit an expected 403 for a list
+// they don't need anyway (their own permissions already came from login).
+async function loadUsersFromServer() {
+  if (!CURRENT_USER || CURRENT_USER.role !== 'superadmin') return;
+  try {
+    const resp = await apiLoadUsers();
+    DB.users = (resp.users || []).map(serverUserToLocal);
+  } catch (err) {
+    toast('Could not load saved user accounts from the server: ' + err.message, '⚠');
+  }
 }
 
 // Guarantees every entry in M.bomComponents has a Wood/Extrusion classification
@@ -4933,7 +4978,7 @@ async function attemptLogin(btn){
     try{ localStorage.setItem('onepws_token', AUTH_TOKEN); }catch(e){ /* storage unavailable — session just won't survive a refresh, login still works */ }
     const u = resp.user;
     const user = {
-      id:u.id, username:u.username, fullName:u.full_name, role:u.role,
+      id:String(u.id), username:u.username, fullName:u.full_name, role:u.role,
       department:u.department, active:u.active, permissions:u.permissions,
       lastLogin:u.last_login
     };
@@ -4947,6 +4992,7 @@ async function attemptLogin(btn){
     await loadToolsFromServer();
     await loadDailyCapacityFromServer();
     await loadAdminConfigFromServer();
+    await loadUsersFromServer();
 
     onLoginSuccess();
   } catch(err){
@@ -4978,7 +5024,7 @@ async function restoreSession(){
     const resp = await apiRequest('/auth/me', {method:'GET'});
     const u = resp.user;
     const user = {
-      id:u.id, username:u.username, fullName:u.full_name, role:u.role,
+      id:String(u.id), username:u.username, fullName:u.full_name, role:u.role,
       department:u.department, active:u.active, permissions:u.permissions
     };
     ensureUserDefaults(user);
@@ -4989,6 +5035,7 @@ async function restoreSession(){
     await loadToolsFromServer();
     await loadDailyCapacityFromServer();
     await loadAdminConfigFromServer();
+    await loadUsersFromServer();
     onLoginSuccess(true);
   } catch(err){
     try{ localStorage.removeItem('onepws_token'); }catch(e){}
@@ -5217,7 +5264,7 @@ function onUserFormRoleChange(){
   else note.textContent='Admin gets full access to modules relevant to the selected Department by default. Fine-tune via the Permissions matrix after saving.';
 }
 
-function saveUserForm(){
+async function saveUserForm(){
   const username=document.getElementById('uf_username').value.trim();
   const password=document.getElementById('uf_password').value;
   const fullName=document.getElementById('uf_fullname').value.trim();
@@ -5240,17 +5287,37 @@ function saveUserForm(){
       if(!others.length){toast('Cannot change role — at least one active Master Admin must remain.','⚠');return;}
     }
     const roleOrDeptChanged = u.role!==role || u.department!==department;
+    const newPermissions = roleOrDeptChanged ? defaultPermsForRole(role,department) : u.permissions;
+    const payload={fullName, role, department, active, permissions:newPermissions};
+    if(password) payload.password=password;
+
+    toast('Saving to server…','⏳');
+    try{
+      await apiUpdateUser(u.id, payload);
+    }catch(err){
+      toast('Could not save these changes to the server: '+err.message,'⚠');
+      return;
+    }
+
     u.username=username; u.fullName=fullName; u.active=active;
-    if(password) u.password=password;
-    if(roleOrDeptChanged){ u.role=role; u.department=department; u.permissions=defaultPermsForRole(role,department); }
+    if(roleOrDeptChanged){ u.role=role; u.department=department; u.permissions=newPermissions; }
     DB.auditLog.unshift({ts,user:actorName,action:'Update',module:'User Management',entity:username,field:'account',old:'--',nw:role+(department?' / '+department:''),ip:'192.168.1.1'});
     toast('User "'+fullName+'" updated.','✓');
+    if(CURRENT_USER && CURRENT_USER.id===u.id) applyPermissionsToUI();
   } else {
     if(!password){toast('Password is required for a new user.','⚠');return;}
-    const id='U'+String(Date.now()).slice(-6);
-    const newUser={id,username,password,fullName,role,department,active,
-      permissions: role==='superadmin'?null:defaultPermsForRole(role,department),
-      createdAt:new Date().toISOString().split('T')[0], lastLogin:null};
+    const permissions = role==='superadmin'?null:defaultPermsForRole(role,department);
+
+    toast('Saving to server…','⏳');
+    let newUser;
+    try{
+      const resp=await apiCreateUser({username, password, fullName, role, department, permissions});
+      newUser=serverUserToLocal(resp.user);
+    }catch(err){
+      toast('Could not save this user to the server: '+err.message,'⚠');
+      return;
+    }
+
     DB.users.push(newUser);
     DB.auditLog.unshift({ts,user:actorName,action:'Create',module:'User Management',entity:username,field:'account',old:'--',nw:'Created — '+role+(department?' / '+department:''),ip:'192.168.1.1'});
     toast('User "'+fullName+'" created.','✓');
@@ -5259,30 +5326,49 @@ function saveUserForm(){
   renderAdmin('users',null);
 }
 
-function resetUserPassword(userId){
+async function resetUserPassword(userId){
   const u=DB.users.find(x=>x.id===userId); if(!u) return;
   const newPw=prompt('Enter a new password for "'+u.fullName+'" ('+u.username+'):');
   if(!newPw||!newPw.trim()) return;
+
+  toast('Saving to server…','⏳');
+  try{
+    await apiUpdateUser(userId, {password:newPw.trim()});
+  }catch(err){
+    toast('Could not save this password change to the server: '+err.message,'⚠');
+    return;
+  }
+
   u.password=newPw.trim();
   const ts=new Date().toISOString().replace('T',' ').slice(0,16);
   DB.auditLog.unshift({ts,user:CURRENT_USER?CURRENT_USER.fullName:'Admin',action:'Update',module:'User Management',entity:u.username,field:'password',old:'--',nw:'Password reset',ip:'192.168.1.1'});
   toast('Password reset for "'+u.fullName+'".','✓');
 }
 
-function toggleUserActive(userId){
+async function toggleUserActive(userId){
   const u=DB.users.find(x=>x.id===userId); if(!u) return;
   if(u.active && u.role==='superadmin'){
     const others=DB.users.filter(x=>x.role==='superadmin'&&x.id!==userId&&x.active);
     if(!others.length){toast('Cannot deactivate the last active Master Admin account.','⚠');return;}
   }
-  u.active=!u.active;
+  const newActive=!u.active;
+
+  toast('Saving to server…','⏳');
+  try{
+    await apiUpdateUser(userId, {active:newActive});
+  }catch(err){
+    toast('Could not save this status change to the server: '+err.message,'⚠');
+    return;
+  }
+
+  u.active=newActive;
   const ts=new Date().toISOString().replace('T',' ').slice(0,16);
   DB.auditLog.unshift({ts,user:CURRENT_USER?CURRENT_USER.fullName:'Admin',action:'Update',module:'User Management',entity:u.username,field:'status',old:u.active?'Inactive':'Active',nw:u.active?'Active':'Inactive',ip:'192.168.1.1'});
   toast('User "'+u.fullName+'" '+(u.active?'activated':'deactivated')+'.','✓');
   renderAdmin('users',null);
 }
 
-function deleteUserAccount(userId){
+async function deleteUserAccount(userId){
   const u=DB.users.find(x=>x.id===userId); if(!u) return;
   if(CURRENT_USER && CURRENT_USER.id===userId){toast('You cannot delete your own account while logged in.','⚠');return;}
   if(u.role==='superadmin'){
@@ -5290,6 +5376,14 @@ function deleteUserAccount(userId){
     if(!others.length){toast('Cannot delete the last active Master Admin account.','⚠');return;}
   }
   if(confirm('Delete user "'+u.fullName+'" ('+u.username+')? This cannot be undone.')){
+    toast('Deleting from server…','⏳');
+    try{
+      await apiDeleteUser(userId);
+    }catch(err){
+      toast('Could not delete this user from the server: '+err.message,'⚠');
+      return;
+    }
+
     const ts=new Date().toISOString().replace('T',' ').slice(0,16);
     DB.auditLog.unshift({ts,user:CURRENT_USER?CURRENT_USER.fullName:'Admin',action:'Delete',module:'User Management',entity:u.username,field:'account',old:u.role,nw:'DELETED',ip:'192.168.1.1'});
     DB.users = DB.users.filter(x=>x.id!==userId);
@@ -5337,7 +5431,7 @@ function renderPermMatrixBody(user){
   return html;
 }
 
-function savePermMatrix(){
+async function savePermMatrix(){
   if(!_permMatrixUserId) return;
   const u=DB.users.find(x=>x.id===_permMatrixUserId); if(!u) return;
   const newPerms = {};
@@ -5360,6 +5454,15 @@ function savePermMatrix(){
       });
     }
   });
+
+  toast('Saving to server…','⏳');
+  try{
+    await apiUpdateUser(u.id, {permissions:newPerms});
+  }catch(err){
+    toast('Could not save these permission changes to the server: '+err.message,'⚠');
+    return;
+  }
+
   u.permissions = newPerms;
   const ts=new Date().toISOString().replace('T',' ').slice(0,16);
   DB.auditLog.unshift({ts,user:CURRENT_USER?CURRENT_USER.fullName:'Admin',action:'Update',module:'User Management',entity:u.username,field:'permissions',old:'--',nw:'Permission matrix updated',ip:'192.168.1.1'});

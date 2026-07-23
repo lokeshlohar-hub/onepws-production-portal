@@ -6535,6 +6535,17 @@ async function confirmDeleteProject(btn){
   toast('Project "'+projSap+'" has been permanently deleted.','🗑');
 }
 
+// Display-only helper: shows just the date portion (YYYY-MM-DD) regardless
+// of whether the underlying value is a plain date string or a full ISO
+// timestamp (e.g. from a database DATE/TIMESTAMP column serialized with a
+// time and "Z"). Used purely for what's rendered in a table cell — never
+// mutates the stored value, so date math, sorting, filtering, and TAT
+// calculations elsewhere are completely unaffected.
+function dateOnly(v){
+  if(!v) return '';
+  return String(v).split('T')[0];
+}
+
 function renderTracker(){
   const fy=getActiveFY();
   const q=(document.getElementById('trackerSearch')?.value||'').toLowerCase();
@@ -6606,9 +6617,9 @@ function renderTracker(){
       +'<td class="text-sm truncate" style="max-width:120px">'+p.customer+'</td>'
       +'<td class="text-sm">'+p.pm+'</td>'
       +'<td class="text-sm">'+p.eng+'</td>'
-      +'<td class="text-sm font-mono">'+(p.recWood||p.recExt||'—')+'</td>'
-      +'<td class="text-sm font-mono">'+(p.planWood||p.planExt||'—')+'</td>'
-      +'<td class="text-sm font-mono">'+(p.actWood||p.actExt||'—')+'</td>'
+      +'<td class="text-sm font-mono">'+(dateOnly(p.recWood||p.recExt)||'—')+'</td>'
+      +'<td class="text-sm font-mono">'+(dateOnly(p.planWood||p.planExt)||'—')+'</td>'
+      +'<td class="text-sm font-mono">'+(dateOnly(p.actWood||p.actExt)||'—')+'</td>'
       +'<td>'+extBadge+'</td>'
       +'<td>'+woodBadge+'</td>'
       +'<td>'+dlyHtml+'</td>'

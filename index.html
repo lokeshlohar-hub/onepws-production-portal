@@ -79,6 +79,11 @@ tbody td{padding:9px 12px;vertical-align:middle;white-space:nowrap}
 .form-label .req{color:var(--red)}
 .lbl-lock{font-size:10px;background:var(--teal-light);color:var(--teal);padding:1px 5px;border-radius:3px;font-weight:600;margin-left:4px}
 .form-input,.form-select,.form-textarea{height:34px;padding:0 10px;border:1.5px solid var(--border2);border-radius:7px;font-family:inherit;font-size:13px;color:var(--text-primary);background:var(--surface);outline:none;transition:var(--transition)}
+/* BOM dimension fields (L/W/T and extrusion length) — manual entry only, no
+   up/down spinner controls. Still type="number" underneath, so keyboard
+   entry, numeric validation, and every existing behavior is unchanged. */
+.dim-input::-webkit-outer-spin-button,.dim-input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.dim-input{-moz-appearance:textfield}
 .form-input:focus,.form-select:focus,.form-textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(26,86,219,.1)}
 .form-input[readonly]{background:var(--surface2);color:var(--text-muted);cursor:not-allowed}
 .form-textarea{height:auto;min-height:70px;padding:8px 10px;resize:vertical}
@@ -6697,7 +6702,7 @@ function makeSegBOMRow(i, seg){
       +'<td style="font-size:12px">'+(i+1)+'</td>'
       +'<td><select class="form-select" style="height:27px;min-width:120px" id="bom_comp_ext_'+i+'" onchange="autoFillRoutingSeg('+i+',\'ext\')">'+compOpts+'</select></td>'
       +'<td><input type="text" class="form-input" style="height:27px;width:75px" placeholder="40x54"></td>'
-      +'<td><input type="number" class="form-input" style="height:27px;width:70px" placeholder="6000"></td>'
+      +'<td><input type="number" class="form-input dim-input" style="height:27px;width:70px" placeholder="6000"></td>'
       +'<td><select class="form-select" style="height:27px;width:55px"><option>PC</option><option>MTR</option><option>NOS</option></select></td>'
       +'<td><input type="number" class="form-input" style="height:27px;width:52px" value="1" min="1"></td>'
       +'<td><input type="text" class="form-input" id="bom_finish_ext_'+i+'" style="height:27px;width:100px" placeholder="e.g. Powder Coating"></td>'
@@ -6709,9 +6714,9 @@ function makeSegBOMRow(i, seg){
   return '<tr>'
     +'<td style="font-size:12px">'+(i+1)+'</td>'
     +'<td><select class="form-select" style="height:27px;min-width:120px" id="bom_comp_wood_'+i+'" onchange="autoFillRoutingSeg('+i+',\'wood\')">'+compOpts+'</select></td>'
-    +'<td><input type="number" class="form-input" style="height:27px;width:65px" placeholder="L"></td>'
-    +'<td><input type="number" class="form-input" style="height:27px;width:65px" placeholder="W"></td>'
-    +'<td><input type="number" class="form-input" style="height:27px;width:58px" placeholder="T"></td>'
+    +'<td><input type="number" class="form-input dim-input" style="height:27px;width:65px" placeholder="L"></td>'
+    +'<td><input type="number" class="form-input dim-input" style="height:27px;width:65px" placeholder="W"></td>'
+    +'<td><input type="number" class="form-input dim-input" style="height:27px;width:58px" placeholder="T"></td>'
     +'<td><select class="form-select" style="height:27px;width:55px"><option>PC</option><option>SET</option><option>NOS</option></select></td>'
     +'<td title="Total COMPONENTS to manufacture (BOM quantity)"><input type="number" class="form-input" style="height:27px;width:52px" value="1" min="1"></td>'
     +'<td title="Boards Planned for Hot Press / Beam Saw. Auto = Qty if blank."><input type="number" class="form-input" style="height:27px;width:52px;background:#ede9fe;color:#7c3aed;font-weight:700" min="1" placeholder="Auto"></td>'

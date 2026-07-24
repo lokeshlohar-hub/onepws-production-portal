@@ -859,15 +859,15 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
         <div class="form-grid">
           <div class="form-row">
             <div class="form-group"><label class="form-label">System Project ID</label><input type="text" class="form-input" id="np_id" readonly></div>
-            <div class="form-group"><label class="form-label">SAP / Project No <span class="req">*</span></label><input type="text" class="form-input" id="np_sap" placeholder="e.g. CD-26-27-10180"></div>
+            <div class="form-group"><label class="form-label">SAP / Project No <span class="req">*</span></label><input type="text" class="form-input uppercase-input" id="np_sap" placeholder="e.g. CD-26-27-10180"></div>
           </div>
           <div class="form-row">
             <div class="form-group"><label class="form-label">Product Type <span class="req">*</span> <span class="lbl-lock">&#128274; ADMIN</span></label><select class="form-select" id="np_type" onchange="calcTAT()"><option value="">&#8212; Select &#8212;</option></select></div>
             <div class="form-group"><label class="form-label">Project Category <span class="req">*</span> <span class="lbl-lock">&#128274; ADMIN</span></label><select class="form-select" id="np_cat" onchange="calcTAT()"><option value="">&#8212; Select &#8212;</option></select></div>
           </div>
           <div class="form-row">
-            <div class="form-group"><label class="form-label">Customer / Business Unit <span class="req">*</span></label><input type="text" class="form-input" id="np_customer" placeholder="Customer name"></div>
-            <div class="form-group"><label class="form-label">PO Number</label><input type="text" class="form-input" id="np_po" placeholder="Purchase Order No."></div>
+            <div class="form-group"><label class="form-label">Customer / Business Unit <span class="req">*</span></label><input type="text" class="form-input uppercase-input" id="np_customer" placeholder="Customer name"></div>
+            <div class="form-group"><label class="form-label">PO Number</label><input type="text" class="form-input uppercase-input" id="np_po" placeholder="Purchase Order No."></div>
           </div>
           <div class="form-row">
             <div class="form-group"><label class="form-label">Project Manager <span class="req">*</span> <span class="lbl-lock">&#128274; ADMIN</span></label><select class="form-select" id="np_pm"><option value="">&#8212; Select &#8212;</option></select></div>
@@ -916,8 +916,8 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
           <div class="form-group"><label class="form-label">Wood TAT Deadline <span class="lbl-lock">&#128274; AUTO</span></label><input type="date" class="form-input" id="np_wood_tat" readonly><span class="form-hint" id="wood_tat_hint">Select category to auto-calculate</span></div>
         </div>
         <div class="form-row mb-3">
-          <div class="form-group"><label class="form-label">Drawing / File Reference</label><input type="text" class="form-input" id="np_wood_drawing" placeholder="Drawing no. or file reference"></div>
-          <div class="form-group"><label class="form-label">Wood Remarks</label><input type="text" class="form-input" id="np_wood_remarks" placeholder="Wood production notes..."></div>
+          <div class="form-group"><label class="form-label">Drawing / File Reference</label><input type="text" class="form-input uppercase-input" id="np_wood_drawing" placeholder="Drawing no. or file reference"></div>
+          <div class="form-group"><label class="form-label">Wood Remarks</label><input type="text" class="form-input uppercase-input" id="np_wood_remarks" placeholder="Wood production notes..."></div>
         </div>
         <div class="section-title">Wood Component BOM <span class="lbl-lock">&#128274; Components from Admin Master</span></div>
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
@@ -954,12 +954,12 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
           <div class="form-group"><label class="form-label">Extrusion TAT Deadline <span class="lbl-lock">&#128274; AUTO</span></label><input type="date" class="form-input" id="np_ext_tat" readonly><span class="form-hint" id="ext_tat_hint">Select category to auto-calculate</span></div>
         </div>
         <div class="form-row mb-3">
-          <div class="form-group"><label class="form-label">Job Work PO No.</label><input type="text" class="form-input" id="np_ext_po" placeholder="Job work purchase order"></div>
+          <div class="form-group"><label class="form-label">Job Work PO No.</label><input type="text" class="form-input uppercase-input" id="np_ext_po" placeholder="Job work purchase order"></div>
           <div class="form-group"><label class="form-label">Planned Cutting Date</label><input type="date" class="form-input" id="np_ext_plan_date"></div>
         </div>
         <div class="form-row mb-3">
-          <div class="form-group"><label class="form-label">Extrusion Drawing / File Reference</label><input type="text" class="form-input" id="np_ext_drawing" placeholder="Drawing no. or file reference"></div>
-          <div class="form-group"><label class="form-label">Extrusion Remarks</label><input type="text" class="form-input" id="np_ext_remarks" placeholder="Extrusion notes..."></div>
+          <div class="form-group"><label class="form-label">Extrusion Drawing / File Reference</label><input type="text" class="form-input uppercase-input" id="np_ext_drawing" placeholder="Drawing no. or file reference"></div>
+          <div class="form-group"><label class="form-label">Extrusion Remarks</label><input type="text" class="form-input uppercase-input" id="np_ext_remarks" placeholder="Extrusion notes..."></div>
         </div>
         <div class="section-title">Extrusion Component BOM <span class="lbl-lock">&#128274; Components from Admin Master</span></div>
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
@@ -3932,6 +3932,25 @@ async function apiRequest(path, opts) {
   }
 }
 
+// ------ Automatic uppercase for standardized manual-entry fields ------
+// Any input/textarea tagged with class="uppercase-input" gets its value
+// uppercased as the user types (or pastes). Delegated on document so it
+// applies uniformly without needing a handler wired to each field
+// individually, and preserves cursor position so typing feels normal rather
+// than jumping around.
+document.addEventListener('input', function(e){
+  const el = e.target;
+  if(!el || !el.classList || !el.classList.contains('uppercase-input')) return;
+  const start = el.selectionStart, end = el.selectionEnd;
+  const upper = el.value.toUpperCase();
+  if(upper !== el.value){
+    el.value = upper;
+    if(start!=null && end!=null && typeof el.setSelectionRange==='function'){
+      try{ el.setSelectionRange(start, end); }catch(e){ /* some input types don't support this — harmless */ }
+    }
+  }
+}, true);
+
 function apiLogin(username, password) {
   return apiRequest('/auth/login', { method: 'POST', body: JSON.stringify({ username: username, password: password }) });
 }
@@ -4381,11 +4400,11 @@ BULK_IMPORT_CONFIGS.projects = {
   validateGroup(rows, rowLabel){
     const errors = [];
     const first = field => { for(const r of rows){ if((r[field]||'').trim()) return r[field].trim(); } return ''; };
-    const sap = first('Project SAP No');
+    const sap = first('Project SAP No').toUpperCase();
     const type = first('Product Type');
     const cat = first('Project Category');
-    const customer = first('Customer');
-    const po = first('PO Number');
+    const customer = first('Customer').toUpperCase();
+    const po = first('PO Number').toUpperCase();
     const pm = first('Project Manager');
     const eng = first('Engineer');
     const certificationsRaw = first('Certifications (semicolon separated)');
@@ -6942,10 +6961,10 @@ async function saveProject(btn){
     toast('You do not have permission to create new projects.','⚠');
     return;
   }
-  const sap=document.getElementById('np_sap')?.value.trim();
+  const sap=document.getElementById('np_sap')?.value.trim().toUpperCase();
   const type=document.getElementById('np_type')?.value;
   const cat=document.getElementById('np_cat')?.value;
-  const customer=document.getElementById('np_customer')?.value.trim();
+  const customer=document.getElementById('np_customer')?.value.trim().toUpperCase();
   const pm=document.getElementById('np_pm')?.value;
   const eng=document.getElementById('np_eng')?.value;
   const hasWood=document.getElementById('chk_wood')?.checked;
@@ -6978,8 +6997,8 @@ async function saveProject(btn){
     wStages.forEach((sc,i)=>stages.push({n:sc.name,s:i===0?'active':'pending',d:null,u:'',type:'production',seg:'wood'}));
     ['Assembly','Final QC','Dispatch'].forEach(n=>stages.push({n,s:'pending',d:null,u:'',type:'project',seg:'wood'}));
     woodData={received:rec,tat,
-      drawing:document.getElementById('np_wood_drawing')?.value||'',
-      remarks:document.getElementById('np_wood_remarks')?.value||'',
+      drawing:(document.getElementById('np_wood_drawing')?.value||'').toUpperCase(),
+      remarks:(document.getElementById('np_wood_remarks')?.value||'').toUpperCase(),
       status:'Running',actualDate:null,delayDays:null,
       bom,stages,docs:collectSegDocs('woodFileList')};
   }
@@ -6999,9 +7018,9 @@ async function saveProject(btn){
     stages.push({n:'Handover',s:'pending',d:null,u:'',type:'project',seg:'ext'});
     extData={received:rec,tat,
       plannedCuttingDate:document.getElementById('np_ext_plan_date')?.value||'',
-      jobWorkPO:document.getElementById('np_ext_po')?.value||'',
-      drawing:document.getElementById('np_ext_drawing')?.value||'',
-      remarks:document.getElementById('np_ext_remarks')?.value||'',
+      jobWorkPO:(document.getElementById('np_ext_po')?.value||'').toUpperCase(),
+      drawing:(document.getElementById('np_ext_drawing')?.value||'').toUpperCase(),
+      remarks:(document.getElementById('np_ext_remarks')?.value||'').toUpperCase(),
       status:'Running',actualDate:null,delayDays:null,
       bom,stages,docs:collectSegDocs('extFileList')};
   }
@@ -7027,7 +7046,7 @@ async function saveProject(btn){
   let serverResult;
   try{
     serverResult = await apiCreateProject({
-      sap, type, category:cat, customer, pm, eng, po:document.getElementById('np_po')?.value||'',
+      sap, type, category:cat, customer, pm, eng, po:(document.getElementById('np_po')?.value||'').toUpperCase(),
       hasWood:!!hasWood, hasExt:!!hasExt,
       recWood:woodData?.received||null, planWood:woodData?.tat||null,
       recExt:extData?.received||null, planExt:extData?.tat||null,
@@ -7051,7 +7070,7 @@ async function saveProject(btn){
 
   const proj={
     id:nid,sap,type,cat,customer,pm,eng,
-    po:document.getElementById('np_po')?.value||'',
+    po:(document.getElementById('np_po')?.value||'').toUpperCase(),
     hasWood:!!hasWood,hasExt:!!hasExt,
     wood:woodData, ext:extData,
     recWood:woodData?.received||null,  planWood:woodData?.tat||null,

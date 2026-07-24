@@ -3663,8 +3663,14 @@ const M = {
     'Curved Edge Banding':        ['eb2'],
     'Manual Edge Banding':        ['meb'],
     'Multi Boring':               ['mb'],
-    'PU Casting':                 ['pu'],
-    'Cleaning':                   ['cl'],
+    // Keys here must match the exact names in M.routing (what Routing Admin
+    // actually offers, and therefore what ends up stored in a component's
+    // route array) — these two previously read 'PU Casting'/'Cleaning'
+    // without "Unit", silently failing this lookup at execution time even
+    // though the machine was correctly assigned, since the route array
+    // always contained the full "...Unit" name.
+    'PU Casting Unit':            ['pu'],
+    'Cleaning Unit':              ['cl'],
     'In-Process QC':              [],
     'Final QC':                   [],
     // -- Process Groups (added — routing now uses these instead of naming a

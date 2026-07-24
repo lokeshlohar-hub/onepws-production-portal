@@ -22,7 +22,7 @@ const USERS = [
   { username: 'qc.admin', password: 'qc123', fullName: 'Priya Sharma', role: 'admin', department: 'Quality',
     permissions: { quality: fullPerm(), stageupdate: fullPerm(), dashboard: viewOnly(), tracker: viewOnly() } },
   { username: 'maint.admin', password: 'maint123', fullName: 'Vikram Singh', role: 'admin', department: 'Maintenance',
-    permissions: { maintenance: fullPerm(), dashboard: viewOnly() } },
+    permissions: { maintenance: { view: true, subs: { breakdown: fullPerm(), log: fullPerm(), whywhy: fullPerm(), pm: fullPerm(), mttr: fullPerm(), toolinv: fullPerm() } }, dashboard: viewOnly() } },
   { username: 'viewer', password: 'view123', fullName: 'Guest Viewer', role: 'viewer', department: null,
     permissions: { tracker: viewOnly(), quality: viewOnly(), maintenance: viewOnly(), dashboard: viewOnly() } },
 ];

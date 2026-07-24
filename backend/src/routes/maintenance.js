@@ -158,4 +158,37 @@ router.put('/why-why/:id', requireRole('admin', 'superadmin'), async (req, res) 
   res.json({ whyWhy: rowToWhyWhy(rows[0]) });
 });
 
+// PUT /api/breakdown-log/:id — update an existing breakdown entry
+router.put('/:id', requireRole('admin', 'superadmin'), async (req, res) => {
+  const b = req.body || {};
+  const { rows: existingRows } = await pool.query('SELECT * FROM breakdown_log WHERE id = $1', [req.params.id]);
+  if (!existingRows[0]) return res.status(404).json({ error: 'Breakdown record not found' });
+  const existing = rowToBreakdown(existingRows[0]);
+  const merged = { ...existing, ...b };
+  const { rows } = await pool.query(
+    `UPDATE breakdown_log SET
+       segment=$1, machine_id=$2, machine_name=$3, breakdown_date=$4, start_time=$5, problem=$6, category=$7,
+       priority=$8, technician_id=$9, technician_name=$10, repair_start=$11, repair_end=$12, spare_parts_used=$13,
+       corrective_action=$14, restoration_confirmed=$15, status_after_repair=$16, downtime_hours=$17
+     WHERE id=$18 RETURNING *`,
+    [merged.segment, merged.machineId, merged.machineName, merged.breakdownDate, merged.startTime, merged.problem,
+     merged.category, merged.priority, merged.technicianId, merged.technicianName, merged.repairStart, merged.repairEnd,
+     merged.sparePartsUsed || '', merged.correctiveAction || '', !!merged.restorationConfirmed, merged.statusAfterRepair,
+     merged.downtimeHours || 0, req.params.id]
+  );
+  res.json({ breakdown: rowToBreakdown(rows[0]) });
+});
+
+// DELETE /api/breakdown-log/:id — permanently remove a breakdown entry.
+// Scoped strictly to this one record — a linked Why-Why RCA record (if any)
+// is left exactly as it is; there's no foreign key forcing removal, and nothing
+// here was asked to touch RCA records.
+router.delete('/:id', requireRole('admin', 'superadmin'), async (req, res) => {
+  const { rows } = await pool.query('SELECT * FROM breakdown_log WHERE id = $1', [req.params.id]);
+  if (!rows[0]) return res.status(404).json({ error: 'Breakdown record not found' });
+  const deleted = rowToBreakdown(rows[0]);
+  await pool.query('DELETE FROM breakdown_log WHERE id = $1', [req.params.id]);
+  res.json({ ok: true, deleted });
+});
+
 module.exports = router;

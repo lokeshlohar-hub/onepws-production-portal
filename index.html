@@ -1845,7 +1845,7 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
     </div>
     <div class="card">
       <div class="table-wrap">
-        <table><thead><tr><th>Date</th><th>Segment</th><th>Machine / Equipment</th><th>Category</th><th>Priority</th><th>Technician</th><th>Downtime</th><th>Status</th><th>RCA</th></tr></thead><tbody id="breakdownLogBody"></tbody></table>
+        <table><thead><tr><th>Date</th><th>Segment</th><th>Machine / Equipment</th><th>Category</th><th>Priority</th><th>Technician</th><th>Downtime</th><th>Status</th><th>RCA</th><th>Actions</th></tr></thead><tbody id="breakdownLogBody"></tbody></table>
       </div>
     </div>
   </div>
@@ -3327,6 +3327,66 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
   </div>
 </div>
 
+<!-- EDIT BREAKDOWN RECORD MODAL -->
+<div class="modal-overlay" id="editBreakdownModal">
+  <div class="modal">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">✏ Edit Breakdown Record</div>
+        <div class="text-xs text-muted" id="ebSub" style="margin-top:2px"></div>
+      </div>
+      <button class="modal-close" onclick="closeMod('editBreakdownModal')">×</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="eb_id">
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Machine / Equipment <span class="req">*</span></label><select class="form-select" id="eb_machine"></select></div>
+        <div class="form-group"><label class="form-label">Breakdown Category <span class="req">*</span></label><select class="form-select" id="eb_category"></select></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Breakdown Date <span class="req">*</span></label><input type="date" class="form-input" id="eb_date"></div>
+        <div class="form-group"><label class="form-label">Start Time <span class="req">*</span></label><input type="time" class="form-input" id="eb_starttime"></div>
+      </div>
+      <div class="form-group"><label class="form-label">Problem Description <span class="req">*</span></label><textarea class="form-textarea" id="eb_problem" style="height:55px"></textarea></div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Priority</label><select class="form-select" id="eb_priority"><option>Low</option><option>Medium</option><option>High</option></select></div>
+        <div class="form-group"><label class="form-label">Technician <span class="req">*</span></label><select class="form-select" id="eb_tech"></select></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Repair Start Time</label><input type="time" class="form-input" id="eb_repairstart"></div>
+        <div class="form-group"><label class="form-label">Repair End Time</label><input type="time" class="form-input" id="eb_repairend"></div>
+      </div>
+      <div class="form-group"><label class="form-label">Spare Parts Used</label><input type="text" class="form-input" id="eb_spares"></div>
+      <div class="form-group"><label class="form-label">Corrective Action</label><textarea class="form-textarea" id="eb_action" style="height:45px"></textarea></div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Status After Repair</label><select class="form-select" id="eb_statusafter"><option value="running">Running</option><option value="partial">Partial</option><option value="breakdown">Still Down</option></select></div>
+        <div class="form-group" style="display:flex;align-items:flex-end;padding-bottom:8px"><label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="checkbox" id="eb_restored"> Restoration Confirmed</label></div>
+      </div>
+      <div class="text-xs text-muted">Segment: <span id="eb_segment_display" class="fw-600"></span> (fixed — create a new entry to log a breakdown under a different segment)</div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeMod('editBreakdownModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveBreakdownEdit()">💾 Save Changes</button>
+    </div>
+  </div>
+</div>
+
+<!-- DELETE BREAKDOWN RECORD CONFIRMATION MODAL -->
+<div class="modal-overlay" id="deleteBreakdownModal">
+  <div class="modal modal-sm">
+    <div class="modal-header"><div class="modal-title">🗑 Delete Breakdown Record</div><button class="modal-close" onclick="closeMod('deleteBreakdownModal')">×</button></div>
+    <div class="modal-body">
+      <input type="hidden" id="db_id">
+      <div class="alert alert-danger" style="font-size:13px">This will permanently delete this breakdown record. This cannot be undone.</div>
+      <div id="dbSummary" style="background:var(--surface2);border-radius:8px;padding:10px 13px;margin-top:10px;font-size:12.5px"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeMod('deleteBreakdownModal')">Cancel</button>
+      <button class="btn btn-danger" onclick="confirmDeleteBreakdown()">🗑 Permanently Delete</button>
+    </div>
+  </div>
+</div>
+
 <!-- MACHINE HISTORY CARD MODAL -->
 <div class="modal-overlay" id="machineHistoryModal">
   <div class="modal" style="max-width:1100px">
@@ -3946,6 +4006,12 @@ function apiLoadMaintenanceLog() {
 }
 function apiCreateBreakdown(breakdown, whyWhy) {
   return apiRequest('/breakdown-log', { method: 'POST', body: JSON.stringify({ breakdown, whyWhy }) });
+}
+function apiUpdateBreakdown(id, payload) {
+  return apiRequest('/breakdown-log/' + encodeURIComponent(id), { method: 'PUT', body: JSON.stringify(payload) });
+}
+function apiDeleteBreakdown(id) {
+  return apiRequest('/breakdown-log/' + encodeURIComponent(id), { method: 'DELETE' });
 }
 function apiBulkCreateBreakdowns(breakdowns) {
   return apiRequest('/breakdown-log/bulk', { method: 'POST', body: JSON.stringify({ breakdowns }) });
@@ -4927,7 +4993,7 @@ const PERMISSION_MODULES = [
   {key:'dimensional',  label:'Machine Dimensional Capability',  actions:['view','create','export']},
   {key:'maintenance',  label:'Maintenance',                    actions:['view'], subs:[
     {key:'breakdown', label:'Breakdown Entry',            actions:['view','create']},
-    {key:'log',       label:'Breakdown Log',               actions:['view']},
+    {key:'log',       label:'Breakdown Log',               actions:['view','edit','delete']},
     {key:'whywhy',    label:'Why-Why (RCA)',               actions:['view','edit']},
     {key:'pm',        label:'Preventive Maintenance',      actions:['view','edit']},
     {key:'mttr',      label:'MTTR / MTBF Dashboard',        actions:['view']},
@@ -10902,6 +10968,8 @@ function renderBreakdownLog(){
   const segFilter = document.getElementById('logSegFilter')?.value || 'all';
   const segIcons = {production:'🏭',utility:'⚡',handmachine:'🔨'};
   const segLabels = {production:'Production',utility:'Utility',handmachine:'Hand Machine'};
+  const canEdit = hasPermission('maintenance','log','edit');
+  const canDelete = hasPermission('maintenance','log','delete');
   let logs = DB.breakdownLog;
   if(segFilter!=='all') logs = logs.filter(b=>b.segment===segFilter);
   logs = logs.filter(b=>inDateRange('maintenance', b.breakdownDate));
@@ -10909,13 +10977,156 @@ function renderBreakdownLog(){
     const statusLabel = b.statusAfterRepair==='breakdown'?'🔴 Down':b.statusAfterRepair==='partial'?'🟡 Partial':'✅ Running';
     const rcaCell = b.whyWhyId ? (DB.whyWhyLog.find(w=>w.id===b.whyWhyId)?.status==='Closed'?'<span class="badge badge-complete">Closed</span>':'<span class="badge badge-delayed">Open</span>') : '<span class="text-xs text-muted">N/A</span>';
     const seg = b.segment||'production';
+    const actionsCell = (canEdit||canDelete)
+      ? '<td style="display:flex;gap:4px;flex-wrap:wrap">'
+        +(canEdit?'<button class="btn btn-outline btn-sm" onclick="openEditBreakdownModal(\''+b.id+'\')">✏ Edit</button>':'')
+        +(canDelete?'<button class="btn btn-danger btn-sm" onclick="openDeleteBreakdownModal(\''+b.id+'\')">🗑 Delete</button>':'')
+        +'</td>'
+      : '<td class="text-xs text-muted">—</td>';
     return '<tr><td class="log-td">'+b.breakdownDate+' '+b.startTime+'</td>'
       +'<td><span style="font-size:13px">'+segIcons[seg]+'</span> <span class="text-xs">'+segLabels[seg]+'</span></td>'
       +'<td class="fw-600">'+b.machineName+'</td><td class="text-xs">'+b.category+'</td>'
       +'<td><span class="badge '+(b.priority==='High'?'badge-delayed':b.priority==='Medium'?'badge-hold':'badge-complete')+'">'+b.priority+'</span></td>'
       +'<td class="text-xs" style="color:var(--accent);font-weight:600">'+b.technicianName+'</td>'
-      +'<td class="font-mono fw-600">'+b.downtimeHours+'h</td><td>'+statusLabel+'</td><td>'+rcaCell+'</td></tr>';
-  }).join('') : '<tr><td colspan="9" class="text-sm text-muted" style="padding:12px">No breakdown records'+( segFilter!=='all'?' for this segment':'')+'.</td></tr>';
+      +'<td class="font-mono fw-600">'+b.downtimeHours+'h</td><td>'+statusLabel+'</td><td>'+rcaCell+'</td>'+actionsCell+'</tr>';
+  }).join('') : '<tr><td colspan="10" class="text-sm text-muted" style="padding:12px">No breakdown records'+( segFilter!=='all'?' for this segment':'')+'.</td></tr>';
+}
+
+// Opens the Edit Breakdown modal, pre-filling every field from the existing
+// record. Segment stays fixed/read-only — changing it would mean switching
+// to a different equipment list entirely, which is out of scope here.
+function openEditBreakdownModal(id){
+  if(!hasPermission('maintenance','log','edit')){ toast('You do not have permission to edit breakdown records.','⚠'); return; }
+  const b = DB.breakdownLog.find(x=>x.id===id); if(!b) return;
+  const seg = b.segment||'production';
+  const cfg = BD_SEGMENTS[seg];
+
+  document.getElementById('eb_id').value = b.id;
+  document.getElementById('ebSub').textContent = b.machineName+' — '+b.breakdownDate+' '+b.startTime;
+  document.getElementById('eb_segment_display').textContent = cfg.label;
+
+  const machineSel = document.getElementById('eb_machine');
+  machineSel.innerHTML = cfg.getEquipment().map(w=>'<option value="'+w.id+'"'+(w.id===b.machineId?' selected':'')+'>'+w.name+'</option>').join('');
+
+  const catSel = document.getElementById('eb_category');
+  catSel.innerHTML = M.breakdownCategories.map(c=>'<option'+(c===b.category?' selected':'')+'>'+c+'</option>').join('');
+
+  document.getElementById('eb_date').value = b.breakdownDate||'';
+  document.getElementById('eb_starttime').value = b.startTime||'';
+  document.getElementById('eb_problem').value = b.problem||'';
+  document.getElementById('eb_priority').value = b.priority||'Medium';
+
+  const techSel = document.getElementById('eb_tech');
+  techSel.innerHTML = M.technicians.filter(t=>t.active!==false).map(t=>'<option value="'+t.id+'"'+(t.id===b.technicianId?' selected':'')+'>'+t.name+'</option>').join('');
+
+  document.getElementById('eb_repairstart').value = b.repairStart||'';
+  document.getElementById('eb_repairend').value = b.repairEnd||'';
+  document.getElementById('eb_spares').value = b.sparePartsUsed||'';
+  document.getElementById('eb_action').value = b.correctiveAction||'';
+  document.getElementById('eb_statusafter').value = b.statusAfterRepair||'running';
+  document.getElementById('eb_restored').checked = !!b.restorationConfirmed;
+
+  document.getElementById('editBreakdownModal').classList.add('open');
+}
+
+async function saveBreakdownEdit(){
+  const id = document.getElementById('eb_id').value;
+  const original = DB.breakdownLog.find(x=>x.id===id); if(!original) return;
+  const cfg = BD_SEGMENTS[original.segment||'production'];
+
+  const machineId = document.getElementById('eb_machine').value;
+  const category = document.getElementById('eb_category').value;
+  const date = document.getElementById('eb_date').value;
+  const startTime = document.getElementById('eb_starttime').value;
+  const problem = document.getElementById('eb_problem').value.trim();
+  const priority = document.getElementById('eb_priority').value;
+  const techId = document.getElementById('eb_tech').value;
+  const repairStart = document.getElementById('eb_repairstart').value;
+  const repairEnd = document.getElementById('eb_repairend').value;
+  const spares = document.getElementById('eb_spares').value.trim();
+  const action = document.getElementById('eb_action').value.trim();
+  const statusAfter = document.getElementById('eb_statusafter').value;
+  const restored = document.getElementById('eb_restored').checked;
+
+  if(!machineId){toast('Select the equipment.','⚠');return;}
+  if(!category){toast('Select a breakdown category.','⚠');return;}
+  if(!date){toast('Enter the breakdown date.','⚠');return;}
+  if(!startTime){toast('Enter the breakdown start time.','⚠');return;}
+  if(!problem){toast('Describe the problem.','⚠');return;}
+  if(!techId){toast('Assign a technician.','⚠');return;}
+
+  const equipment = cfg.getById(machineId);
+  const equipmentName = equipment?.name || machineId;
+  const technician = M.technicians.find(t=>t.id===techId);
+  const downtimeHours = computeBreakdownDowntime(startTime, repairEnd) || 0;
+
+  const payload = {
+    machineId, machineName:equipmentName, breakdownDate:date, startTime, problem, category, priority,
+    technicianId:techId, technicianName:technician?.name||techId, repairStart, repairEnd,
+    sparePartsUsed:spares, correctiveAction:action, restorationConfirmed:restored,
+    statusAfterRepair:statusAfter, downtimeHours
+  };
+
+  toast('Saving to server…','⏳');
+  try{
+    await apiUpdateBreakdown(id, payload);
+  }catch(err){
+    toast('Could not save these changes to the server: '+err.message,'⚠');
+    return;
+  }
+
+  const ts=new Date().toISOString().replace('T',' ').slice(0,16);
+  DB.auditLog.unshift({ts,user:CURRENT_USER?CURRENT_USER.fullName:'Admin',action:'Update',module:'Maintenance',
+    entity:equipmentName,field:'Breakdown Record ('+id+')',old:original.category+' / '+original.priority,
+    nw:category+' / '+priority,ip:'192.168.1.1'});
+
+  Object.assign(original, payload);
+  closeMod('editBreakdownModal');
+  renderBreakdownLog();
+  toast('Breakdown record updated.','✓');
+}
+
+// Opens the delete confirmation, showing a summary of exactly what will be
+// removed so the confirming user can double-check before proceeding.
+function openDeleteBreakdownModal(id){
+  if(!hasPermission('maintenance','log','delete')){ toast('You do not have permission to delete breakdown records.','⚠'); return; }
+  const b = DB.breakdownLog.find(x=>x.id===id); if(!b) return;
+  document.getElementById('db_id').value = id;
+  document.getElementById('dbSummary').innerHTML =
+    '<div class="fw-600" style="margin-bottom:4px">'+b.machineName+'</div>'
+    +'<div class="text-xs text-muted">'+b.breakdownDate+' '+b.startTime+' &nbsp;·&nbsp; '+b.category+' &nbsp;·&nbsp; '+b.priority+' priority</div>'
+    +'<div class="text-xs text-muted" style="margin-top:4px">Technician: '+b.technicianName+' &nbsp;·&nbsp; Downtime: '+b.downtimeHours+'h</div>'
+    +(b.problem?'<div class="text-xs text-muted" style="margin-top:4px">Problem: '+b.problem+'</div>':'');
+  document.getElementById('deleteBreakdownModal').classList.add('open');
+}
+
+async function confirmDeleteBreakdown(){
+  const id = document.getElementById('db_id').value;
+  const b = DB.breakdownLog.find(x=>x.id===id); if(!b) return;
+
+  toast('Deleting from server…','⏳');
+  try{
+    await apiDeleteBreakdown(id);
+  }catch(err){
+    toast('Could not delete this record from the server: '+err.message,'⚠');
+    return;
+  }
+
+  // Full details of the deleted record are captured in the Audit Trail entry
+  // itself (not just "deleted"), so this remains traceable after the record
+  // is gone — matching what was specifically asked for.
+  const ts=new Date().toISOString().replace('T',' ').slice(0,16);
+  const details = 'Segment: '+(b.segment||'production')+' | Date: '+b.breakdownDate+' '+b.startTime
+    +' | Category: '+b.category+' | Priority: '+b.priority+' | Technician: '+b.technicianName
+    +' | Downtime: '+b.downtimeHours+'h | Status: '+b.statusAfterRepair
+    +' | Problem: '+(b.problem||'—')+' | Corrective Action: '+(b.correctiveAction||'—');
+  DB.auditLog.unshift({ts,user:CURRENT_USER?CURRENT_USER.fullName:'Admin',action:'Delete',module:'Maintenance',
+    entity:b.machineName,field:'Breakdown Record ('+id+') — PERMANENTLY DELETED',old:details,nw:'DELETED',ip:'192.168.1.1'});
+
+  DB.breakdownLog = DB.breakdownLog.filter(x=>x.id!==id);
+  closeMod('deleteBreakdownModal');
+  renderBreakdownLog();
+  toast('Breakdown record deleted.','✓');
 }
 
 // ----------------------------------------------------------------------

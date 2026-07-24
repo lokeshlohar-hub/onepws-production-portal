@@ -95,6 +95,75 @@ router.post('/', requireRole('admin', 'superadmin'), async (req, res) => {
   }
 });
 
+// POST /api/projects/:id/add-segment — adds a currently-missing manufacturing
+// segment (Wood or Extrusion) to an existing project. This is strictly
+// additive: it never touches the project's existing BOM lines, stage
+// history, or QC records — it only inserts new BOM lines for the new
+// segment and sets that segment's own fields, which by definition were
+// previously null/false. Rejects if the segment is already present, so this
+// can never be used to accidentally duplicate or overwrite an existing
+// segment's data.
+router.post('/:id/add-segment', requireRole('admin', 'superadmin'), async (req, res) => {
+  const body = req.body || {};
+  const { segment } = body;
+  if (segment !== 'wood' && segment !== 'ext') {
+    return res.status(400).json({ error: 'segment must be "wood" or "ext"' });
+  }
+  if (!Array.isArray(body.bom) || !body.bom.length) {
+    return res.status(400).json({ error: 'At least one BOM line is required' });
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: projRows } = await client.query('SELECT * FROM projects WHERE id = $1 FOR UPDATE', [req.params.id]);
+    if (!projRows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Project not found' }); }
+    const proj = projRows[0];
+    if (segment === 'wood' && proj.has_wood) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'This project already has a Wood Production segment' }); }
+    if (segment === 'ext' && proj.has_ext) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'This project already has an Aluminium Extrusion segment' }); }
+
+    if (segment === 'wood') {
+      await client.query('UPDATE projects SET has_wood = true, rec_wood = $1, plan_wood = $2 WHERE id = $3',
+        [body.received || null, body.tat || null, req.params.id]);
+    } else {
+      await client.query('UPDATE projects SET has_ext = true, rec_ext = $1, plan_ext = $2 WHERE id = $3',
+        [body.received || null, body.tat || null, req.params.id]);
+    }
+
+    const createdLines = [];
+    for (const b of body.bom) {
+      const lineId = await engine.nextBomLineId(client);
+      const route = Array.isArray(b.route) ? b.route : [];
+      const stageData = {};
+      route.forEach((st) => { stageData[st] = { completed: 0, qc_queue: 0, qc_approved: 0, qc_rejected: 0, rework: 0, scrap: 0, history: [] }; });
+
+      await client.query(
+        `INSERT INTO bom_lines (
+           line_id, project_id, item, seg, l, w, t, profile, uom, qty, original_qty,
+           color_finish, special_chars, components_per_board, edge_meters_per_comp,
+           board_qty, components_released, route, stage_data
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10,$11,$12,$13,$14,$15,0,$16,$17)`,
+        [
+          lineId, req.params.id, b.item, segment, b.l || null, b.w || null, b.t || null, b.profile || null,
+          b.uom || 'PC', b.qty,
+          b.colorFinish || '', JSON.stringify(b.specialChars || []),
+          b.componentsPerBoard || null, b.edgeMetersPerComp || null,
+          b.boardQty || Math.max(1, Math.ceil(b.qty / (b.componentsPerBoard || 8))),
+          JSON.stringify(route), JSON.stringify(stageData),
+        ]
+      );
+      createdLines.push(lineId);
+    }
+
+    await client.query('COMMIT');
+    res.status(201).json({ ok: true, projectId: req.params.id, bomLineIds: createdLines });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+});
+
 // DELETE /api/projects/:id — permanently deletes the project and everything
 // tied to it (BOM lines, reject log entries, stage log entries) via the
 // ON DELETE CASCADE foreign keys already in the schema. This does not touch

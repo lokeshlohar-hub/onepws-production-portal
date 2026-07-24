@@ -4065,6 +4065,9 @@ function apiSubmitStageEntry(lineId, payload) {
 function apiSubmitQcDecision(lineId, payload) {
   return apiRequest('/bom-lines/' + encodeURIComponent(lineId) + '/qc-decision', { method: 'POST', body: JSON.stringify(payload) });
 }
+function apiReconcileRoute(lineId, route, stageData) {
+  return apiRequest('/bom-lines/' + encodeURIComponent(lineId) + '/reconcile-route', { method: 'PUT', body: JSON.stringify({ route, stageData }) });
+}
 function apiLoadRejectLog() {
   return apiRequest('/bom-lines/qc/reject-log', { method: 'GET' });
 }
@@ -4308,6 +4311,116 @@ async function loadAdminConfigFromServer() {
     toast('Could not load saved admin settings from the server: ' + err.message, '⚠');
   }
   ensureBomComponentSegments();
+  await reconcileRoutingGroupNames();
+}
+
+// Self-healing fix for a specific, recurring failure mode: a Process Group's
+// name (the canonical key in M.stageToWorkstation, which carries the actual
+// machine assignment) can end up referenced with slightly different
+// case/whitespace somewhere else — a routing array in M.componentRouting, or
+// an entry in M.routing — e.g. "Cleaning Unit" vs "Cleaning unit". Because
+// every lookup in this app matches these as exact strings, that tiny
+// difference silently breaks the machine lookup at production execution and
+// silently breaks the "used in routing" count in Process Groups admin, with
+// no error anywhere to point at the cause.
+//
+// This reconciles by treating M.stageToWorkstation's key as the source of
+// truth (since that's what actually carries the machine assignment) and
+// correcting any near-match elsewhere in place, then persists the
+// corrections it made — so this heals on every login rather than requiring
+// an admin to find and retype an exact name they can't visually distinguish
+// from the correct one.
+// The database's stage_data JSONB always uses the engine's snake_case field
+// names (qc_queue/qc_approved/qc_rejected) — every other write path goes
+// through backend engine functions that already produce this shape;
+// reconcileRoutingGroupNames() is the first place the frontend writes a
+// whole stageData object back directly, so it needs this conversion itself.
+function stageDataToServerShape(stageData){
+  const out = {};
+  Object.keys(stageData||{}).forEach(stage=>{
+    const sd = stageData[stage]||{};
+    out[stage] = {
+      completed: sd.completed||0,
+      qc_queue: sd.qcQueue||0,
+      qc_approved: sd.qcApproved||0,
+      qc_rejected: sd.qcRejected||0,
+      rework: sd.rework||0,
+      scrap: sd.scrap||0,
+      history: sd.history||[],
+    };
+  });
+  return out;
+}
+
+async function reconcileRoutingGroupNames(){
+  const canonicalKeys = Object.keys(M.stageToWorkstation||{});
+  if(!canonicalKeys.length) return;
+  const normalize = s => String(s||'').trim().toLowerCase();
+  const canonicalByNormalized = {};
+  canonicalKeys.forEach(k=>{ canonicalByNormalized[normalize(k)] = k; });
+
+  let routingChanged = false;
+  let componentRoutingChanged = false;
+
+  if(Array.isArray(M.routing)){
+    M.routing = M.routing.map(name=>{
+      const canon = canonicalByNormalized[normalize(name)];
+      if(canon && canon!==name){ routingChanged = true; return canon; }
+      return name;
+    });
+  }
+
+  Object.keys(M.componentRouting||{}).forEach(comp=>{
+    const route = M.componentRouting[comp];
+    if(!Array.isArray(route)) return;
+    const fixed = route.map(step=>{
+      const canon = canonicalByNormalized[normalize(step)];
+      if(canon && canon!==step){ componentRoutingChanged = true; return canon; }
+      return step;
+    });
+    M.componentRouting[comp] = fixed;
+  });
+
+  // Existing, already-created projects have their own frozen copy of route
+  // (and stageData, keyed by the same stage names) taken at creation time —
+  // fixing the master componentRouting above does not reach these, so the
+  // same correction is applied here directly to each affected BOM line.
+  // stageData is a rename-in-place: the entire object for that stage (qty,
+  // QC counts, history — everything) moves to the corrected key untouched.
+  const linesToPersist = [];
+  (DB.projects||[]).forEach(p=>{
+    (p.bom||[]).forEach(b=>{
+      if(!Array.isArray(b.route)) return;
+      let lineChanged = false;
+      const fixedRoute = b.route.map(step=>{
+        const canon = canonicalByNormalized[normalize(step)];
+        if(canon && canon!==step){
+          lineChanged = true;
+          if(b.stageData && b.stageData[step] && !b.stageData[canon]){
+            b.stageData[canon] = b.stageData[step];
+            delete b.stageData[step];
+          }
+          return canon;
+        }
+        return step;
+      });
+      if(lineChanged){
+        b.route = fixedRoute;
+        linesToPersist.push(b);
+      }
+    });
+  });
+
+  if(routingChanged) persistAdminConfig('routing');
+  if(componentRoutingChanged) persistAdminConfig('componentRouting');
+  for(const b of linesToPersist){
+    try{ await apiReconcileRoute(b.lineId, b.route, stageDataToServerShape(b.stageData)); }
+    catch(err){ toast('Corrected "'+b.item+'" locally, but could not save it to the server: '+err.message,'⚠'); }
+  }
+  if(routingChanged || componentRoutingChanged || linesToPersist.length){
+    toast('Found and corrected a routing name mismatch (e.g. spacing/capitalization) so it now matches your Process Groups correctly.','✓');
+    renderComponentTrace(); renderStageEntryForm();
+  }
 }
 // GET /api/auth/users is Master-Admin-only — only fetch it for a superadmin,
 // so a regular Admin/Viewer login doesn't hit an expected 403 for a list
@@ -14873,7 +14986,8 @@ function getProcessGroupsAdmin(){
     const memberIds = M.stageToWorkstation[gName]||[];
     const memberNames = memberIds.map(id=>M.workstations.find(w=>w.id===id)?.name||id);
     const isProcessOnly = memberIds.length===0;
-    const usedByCount = Object.values(M.componentRouting).filter(route=>route.includes(gName)).length;
+    const gNameNorm = gName.trim().toLowerCase();
+    const usedByCount = Object.values(M.componentRouting).filter(route=>route.some(step=>String(step||'').trim().toLowerCase()===gNameNorm)).length;
     return `<tr>
       <td class="fw-600 text-sm">${gName}</td>
       <td>${isProcessOnly ? '<span class="badge" style="background:var(--purple)22;color:var(--purple)">⚙️ Process-Only</span>' : '<span class="badge" style="background:var(--blue)22;color:var(--blue)">🔧 Machine-Based</span>'}</td>
@@ -14992,7 +15106,8 @@ function saveProcessGroupModal(){
 }
 
 function deleteProcessGroup(gName){
-  const usedByComponents = Object.entries(M.componentRouting).filter(([,route])=>route.includes(gName)).map(([comp])=>comp);
+  const gNameNorm = gName.trim().toLowerCase();
+  const usedByComponents = Object.entries(M.componentRouting).filter(([,route])=>route.some(step=>String(step||'').trim().toLowerCase()===gNameNorm)).map(([comp])=>comp);
   const memberCount = (M.stageToWorkstation[gName]||[]).length;
   let msg = 'Delete process group "'+gName+'"'+(memberCount>1?' ('+memberCount+' machines)':'')+'?\n\nThis removes it as a routing option. The machines themselves stay in Machine Master — only the group is removed.';
   if(usedByComponents.length){

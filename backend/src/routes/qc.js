@@ -100,4 +100,24 @@ router.get('/qc/reject-log', async (req, res) => {
   res.json({ rejectLog: rows });
 });
 
+// PUT /api/bom-lines/:lineId/reconcile-route — narrowly-scoped self-healing
+// correction for a specific, recurring failure mode: a stage name in this
+// line's route/stage_data ends up with different case/whitespace than the
+// Process Group it's supposed to reference (e.g. "Cleaning unit" vs
+// "Cleaning Unit"), which silently breaks the machine lookup at production
+// execution. This only renames stage-name keys/entries — every quantity, QC
+// count, and history entry in stage_data is carried over unchanged.
+router.put('/:lineId/reconcile-route', requireRole('admin', 'superadmin'), async (req, res) => {
+  const { route, stageData } = req.body || {};
+  if (!Array.isArray(route) || typeof stageData !== 'object') {
+    return res.status(400).json({ error: 'route (array) and stageData (object) are required' });
+  }
+  const { rows } = await pool.query(
+    'UPDATE bom_lines SET route = $1, stage_data = $2 WHERE line_id = $3 RETURNING line_id',
+    [JSON.stringify(route), JSON.stringify(stageData), req.params.lineId]
+  );
+  if (!rows[0]) return res.status(404).json({ error: 'BOM line not found' });
+  res.json({ ok: true, lineId: rows[0].line_id });
+});
+
 module.exports = router;

@@ -21,7 +21,7 @@ app.use(express.json());
 // running the code you think it's running — this exists specifically because
 // "is the deployment actually up to date" has been the real cause behind more
 // than one reported bug that looked like an application issue.
-const BACKEND_VERSION = '2026-07-25.1-handover-notification';
+const BACKEND_VERSION = '2026-07-25.2-routing-name-reconciliation';
 app.get('/api/health', (req, res) => res.json({
   ok: true,
   service: 'onepws-backend',
@@ -30,6 +30,7 @@ app.get('/api/health', (req, res) => res.json({
     'DELETE /api/projects/:id': true,
     'POST /api/bom-lines/:lineId/stage-entry': true,
     'POST /api/bom-lines/:lineId/qc-decision': true,
+    'PUT /api/bom-lines/:lineId/reconcile-route': true,
     'GET /api/calibration-instruments': true,
     'POST /api/calibration-instruments/bulk': true,
     'GET /api/breakdown-log': true,

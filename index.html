@@ -1054,7 +1054,9 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
 
       <!-- Quantity traceability summary -->
       <div class="card mb-4">
-        <div class="card-header"><div class="card-title">📊 Quantity Traceability — All Stages</div></div>
+        <div class="card-header"><div class="card-title">📊 Quantity Traceability — All Stages</div>
+          <button class="btn btn-primary btn-sm" id="handoverNotifyBtn" style="display:none" onclick="openHandoverNotifyModal()">📧 Notify Handover</button>
+        </div>
         <div class="card-body" style="padding:0">
           <table style="font-size:11.5px;width:100%">
             <thead><tr>
@@ -1081,6 +1083,12 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
           <div class="card-header"><div class="card-title">📋 Component Stage History</div></div>
           <div class="card-body" style="padding:8px 12px">
             <table style="font-size:11px"><thead><tr><th>Timestamp</th><th>Stage</th><th>WS</th><th>Operator</th><th>Done</th><th>Shift</th><th>Action</th></tr></thead><tbody id="compHistLog"></tbody></table>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header"><div class="card-title">📧 Handover Notification History</div></div>
+          <div class="card-body" style="padding:8px 12px">
+            <table style="font-size:11px"><thead><tr><th>Timestamp</th><th>Final Stage</th><th>Qty</th><th>Department</th><th>Email</th><th>Triggered By</th></tr></thead><tbody id="compHandoverLog"></tbody></table>
           </div>
         </div>
       </div>
@@ -2513,6 +2521,7 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
         <div class="nav-item" onclick="renderAdmin('bom',this)">📦 BOM Components</div>
         <div class="nav-item" onclick="renderAdmin('routing',this)">🗺 BOM Routing Rules</div>
         <div class="nav-item" onclick="renderAdmin('processgroups',this)">🏭 Process Groups</div>
+        <div class="nav-item" onclick="renderAdmin('handoverrecipients',this)">📧 Handover Recipients</div>
         <div class="nav-item" onclick="renderAdmin('cycletime',this)">⏱ Cycle Time Master</div>
         <div class="nav-item" onclick="renderAdmin('machines',this)">⚙️ Machine Master</div>
         <div class="nav-item" onclick="renderAdmin('delay',this)">⚠️ Delay Categories</div>
@@ -3387,6 +3396,48 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
   </div>
 </div>
 
+<!-- HANDOVER RECIPIENT ADD/EDIT MODAL -->
+<div class="modal-overlay" id="handoverRecipientModal">
+  <div class="modal">
+    <div class="modal-header"><div class="modal-title" id="hrModalTitle">📧 New Handover Recipient</div><button class="modal-close" onclick="closeMod('handoverRecipientModal')">×</button></div>
+    <div class="modal-body">
+      <input type="hidden" id="hr_edit_idx">
+      <div class="form-group"><label class="form-label">Department / Team <span class="req">*</span></label><input type="text" class="form-input" id="hr_department" placeholder="e.g. Assembly Team, Dispatch Team"></div>
+      <div class="form-group"><label class="form-label">Email Address <span class="req">*</span></label><input type="email" class="form-input" id="hr_email" placeholder="team@company.com"></div>
+      <div class="form-group"><label class="form-label">Applies To</label><select class="form-select" id="hr_segment"><option value="all">All Segments</option><option value="wood">Wood Production only</option><option value="ext">Aluminium Extrusion only</option></select></div>
+      <div class="form-group" style="margin-bottom:0"><label class="form-label">Note (optional)</label><input type="text" class="form-input" id="hr_note" placeholder="e.g. Notify for final assembly handover"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeMod('handoverRecipientModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveHandoverRecipient()">💾 Save Recipient</button>
+    </div>
+  </div>
+</div>
+
+<!-- FINAL-STAGE HANDOVER NOTIFICATION MODAL -->
+<div class="modal-overlay" id="handoverNotifyModal">
+  <div class="modal" style="max-width:640px">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">📧 Final-Stage Handover Notification</div>
+        <div class="text-xs text-muted" style="margin-top:2px">Review the details below, choose the recipient, then send — this opens your email client with the message ready to go.</div>
+      </div>
+      <button class="modal-close" onclick="closeMod('handoverNotifyModal')">×</button>
+    </div>
+    <div class="modal-body">
+      <div id="handoverPreview" style="background:var(--surface2);border-radius:8px;padding:12px 14px;font-size:12.5px;line-height:1.7;margin-bottom:14px"></div>
+      <div class="form-group" style="margin-bottom:0">
+        <label class="form-label">Send To <span class="req">*</span></label>
+        <select class="form-select" id="handoverRecipientSelect"></select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeMod('handoverNotifyModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="sendHandoverNotification()">📧 Send Handover Notification</button>
+    </div>
+  </div>
+</div>
+
 <!-- MACHINE HISTORY CARD MODAL -->
 <div class="modal-overlay" id="machineHistoryModal">
   <div class="modal" style="max-width:1100px">
@@ -3748,6 +3799,11 @@ const M = {
   // HR-issued training record that Production is responsible for keeping
   // current is filed under Production with Origin = "HR".
   dmsOrigins:['Production','Quality','Maintenance','HR','HSE','Engineering','Purchase','Company Management','Other'],
+  // Admin-managed library mapping a segment (Wood/Extrusion/All) to the
+  // concerned department's email — used to populate the recipient dropdown
+  // when triggering a final-stage handover notification. Empty by default;
+  // Admin adds real entries via Admin Panel > Handover Recipients.
+  handoverRecipients:[],
 };
 
 // ------ LIVE DATABASE ------
@@ -3771,6 +3827,7 @@ const DB = {
   projects:[],
   stageLog:[],
   rejectLog:[],
+  handoverLog:[],
   auditLog:[],
   notifications:[],
   dailyCap:{},
@@ -4004,6 +4061,12 @@ function apiSubmitQcDecision(lineId, payload) {
 }
 function apiLoadRejectLog() {
   return apiRequest('/bom-lines/qc/reject-log', { method: 'GET' });
+}
+function apiLoadHandoverLog() {
+  return apiRequest('/handover-log', { method: 'GET' });
+}
+function apiCreateHandover(payload) {
+  return apiRequest('/handover-log', { method: 'POST', body: JSON.stringify(payload) });
 }
 function apiLoadCalibrationInstruments() {
   return apiRequest('/calibration-instruments', { method: 'GET' });
@@ -4284,6 +4347,14 @@ async function loadRejectLogFromServer() {
     DB.rejectLog = (resp.rejectLog || []).map(serverRejectLogRowToLocal);
   } catch (err) {
     toast('Could not load the saved reject/rework log from the server: ' + err.message, '⚠');
+  }
+}
+async function loadHandoverLogFromServer() {
+  try {
+    const resp = await apiLoadHandoverLog();
+    DB.handoverLog = resp.handoverLog || [];
+  } catch (err) {
+    toast('Could not load the saved handover notification history from the server: ' + err.message, '⚠');
   }
 }
 
@@ -5157,6 +5228,7 @@ async function attemptLogin(btn){
     await loadAdminConfigFromServer();
     await loadUsersFromServer();
     await loadRejectLogFromServer();
+    await loadHandoverLogFromServer();
 
     onLoginSuccess();
   } catch(err){
@@ -5201,6 +5273,7 @@ async function restoreSession(){
     await loadAdminConfigFromServer();
     await loadUsersFromServer();
     await loadRejectLogFromServer();
+    await loadHandoverLogFromServer();
     onLoginSuccess(true);
   } catch(err){
     try{ localStorage.removeItem('onepws_token'); }catch(e){}
@@ -7204,6 +7277,34 @@ const SAW_STAGES = new Set([
   'Selco Beam Saw','Homag Beam Saw','Beam Saw Cutting','Beam Saw','Saw','Cutting'
 ]);
 
+// QC gate stages that mark the end of a routing sequence but aren't
+// themselves "production" — the final production stage is whichever real
+// stage sits right before these.
+const QC_GATE_STAGES = new Set(['In-Process QC','Final QC']);
+
+// Returns the name of the last actual production stage in a component's
+// routing sequence (skipping trailing QC gate entries), or null if the
+// route is empty or has no non-QC stage at all.
+function getFinalProductionStage(route){
+  if(!route || !route.length) return null;
+  for(let i=route.length-1; i>=0; i--){
+    if(!QC_GATE_STAGES.has(route[i])) return route[i];
+  }
+  return null;
+}
+
+// A BOM line is ready for a handover notification once its final production
+// stage has at least some QC-approved quantity — matches the existing
+// "qcApproved" field already tracked per stage, so this reads existing state
+// rather than introducing any new completion logic.
+function isHandoverReady(b){
+  if(!b || !b.route) return false;
+  const finalStage = getFinalProductionStage(b.route);
+  if(!finalStage) return false;
+  const sd = b.stageData && b.stageData[finalStage];
+  return !!(sd && sd.qcApproved > 0);
+}
+
 function isBoardStage(stageName){
   return BOARD_STAGES.has(stageName);
 }
@@ -7493,6 +7594,7 @@ function selectBomComponent(idx){
   renderComponentRoute();
   renderComponentTrace();
   renderComponentHistory();
+  renderComponentHandoverHistory();
   document.getElementById('stageEntryFormBody').innerHTML = '<div class="text-sm text-muted">Select a stage in the routing sequence above to enter production quantities.</div>';
   document.getElementById('activeStageBadge').textContent='';
   document.getElementById('componentWorkArea').scrollIntoView({behavior:'smooth',block:'start'});
@@ -7564,6 +7666,89 @@ function renderComponentTrace(){
       +'<td class="font-mono text-muted">'+sd.scrap+'</td>'
       +'</tr>';
   }).join('');
+  const notifyBtn = document.getElementById('handoverNotifyBtn');
+  if(notifyBtn) notifyBtn.style.display = isHandoverReady(b) ? 'inline-flex' : 'none';
+}
+
+// Compiles the handover details for the current component and opens the
+// notification modal — shown only once the final production stage has
+// QC-approved quantity (mirrors isHandoverReady(), used to show the button).
+function openHandoverNotifyModal(){
+  const b=CUR_BOM_LINE, p=CUR_PROJ;
+  if(!b || !p){ toast('Select a component first.','⚠'); return; }
+  if(!isHandoverReady(b)){ toast('This component has not yet cleared final-stage QC.','⚠'); return; }
+  const finalStage = getFinalProductionStage(b.route);
+  const sd = b.stageData[finalStage];
+  const segment = b.seg==='ext' ? 'Aluminium Extrusion' : 'Wood Production';
+  const size = b.seg==='ext' ? (b.profile||'—') : ([b.l,b.w,b.t].filter(Boolean).join(' × ')||'—')+' mm';
+
+  window._handoverContext = {
+    lineId:b.lineId, projectId:p.id, proj:p.sap, item:b.item, qty:sd.qcApproved, uom:b.uom||'PC',
+    segment: b.seg==='ext'?'ext':'wood', finalStage,
+    details:{
+      projectNo:p.sap, customer:p.customer, productType:p.type, component:b.item,
+      completedQty:sd.qcApproved+' '+(b.uom||'PC'), colorFinish:b.colorFinish||'—',
+      size, segment, finalStage, qcStatus:'Approved'
+    }
+  };
+
+  document.getElementById('handoverPreview').innerHTML =
+    '<div style="display:grid;grid-template-columns:140px 1fr;row-gap:6px">'
+    +['Project No','Customer','Product Type','Component','Completed Qty','Color / Finish','Size / Dimensions','Manufacturing Segment','Final Production Stage','QC Status']
+      .map((label,i)=>{
+        const val=[p.sap,p.customer,p.type,b.item,sd.qcApproved+' '+(b.uom||'PC'),b.colorFinish||'—',size,segment,finalStage,'✅ Approved'][i];
+        return '<div class="text-muted">'+label+'</div><div class="fw-600">'+val+'</div>';
+      }).join('')
+    +'</div>';
+
+  const recipients = (M.handoverRecipients||[]).filter(r=>r.segment==='all'||r.segment===(b.seg==='ext'?'ext':'wood'));
+  const sel = document.getElementById('handoverRecipientSelect');
+  sel.innerHTML = recipients.length
+    ? recipients.map(r=>'<option value="'+r.email+'" data-dept="'+r.department+'">'+r.department+' ('+r.email+')</option>').join('')
+    : '<option value="">No recipients configured for this segment — add one in Admin Panel</option>';
+
+  document.getElementById('handoverNotifyModal').classList.add('open');
+}
+
+// Opens the user's own mail client with the handover message pre-filled
+// (this app has no outbound email service configured, so a human reviews
+// and sends via their own client) and records the event to the audit trail
+// regardless — the record is what makes this traceable, not the send itself.
+async function sendHandoverNotification(){
+  const ctx = window._handoverContext;
+  const sel = document.getElementById('handoverRecipientSelect');
+  const email = sel.value;
+  const department = sel.selectedOptions[0]?.getAttribute('data-dept')||'';
+  if(!email){ toast('No recipient selected — add one in Admin Panel > Handover Recipients first.','⚠'); return; }
+
+  const d = ctx.details;
+  const subject = 'Handover Notification — '+d.projectNo+' — '+d.component+' ('+d.finalStage+' Complete)';
+  const body = 'The following component has cleared final-stage QC and is ready for handover:\n\n'
+    +'Project No: '+d.projectNo+'\nCustomer: '+d.customer+'\nProduct Type: '+d.productType
+    +'\nComponent: '+d.component+'\nCompleted Quantity: '+d.completedQty+'\nColor / Finish: '+d.colorFinish
+    +'\nSize / Dimensions: '+d.size+'\nManufacturing Segment: '+d.segment
+    +'\nFinal Production Stage: '+d.finalStage+'\nQC Status: '+d.qcStatus
+    +'\n\n— Sent from ONEPWS Production Control Portal';
+
+  window.location.href = 'mailto:'+encodeURIComponent(email)+'?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(body);
+
+  const payload = { ...ctx, department, email, triggeredBy: CURRENT_USER?CURRENT_USER.fullName:'Unknown' };
+  try{
+    const resp = await apiCreateHandover(payload);
+    DB.handoverLog.unshift(resp.handover);
+  } catch(err){
+    toast('Notification opened in your mail client, but could not be recorded in the audit trail: '+err.message,'⚠');
+    closeMod('handoverNotifyModal');
+    return;
+  }
+
+  const ts=new Date().toISOString().replace('T',' ').slice(0,16);
+  DB.auditLog.unshift({ts,user:CURRENT_USER?CURRENT_USER.fullName:'Admin',action:'Handover Notification',module:'Stage-wise Production',
+    entity:ctx.item,field:ctx.proj,old:'--',nw:'Notified '+department+' ('+email+') — '+ctx.qty+' '+ctx.uom,ip:'192.168.1.1'});
+
+  toast('Handover notification opened for '+department+' and recorded.','✓');
+  closeMod('handoverNotifyModal');
+  if(typeof renderComponentHandoverHistory==='function') renderComponentHandoverHistory();
 }
 
 function renderComponentHistory(){
@@ -7585,6 +7770,20 @@ function renderComponentHistory(){
       +'<td>'+shiftBadge+'</td>'
       +'<td class="text-xs">'+(h.action||'—')+'</td></tr>';
   }).join('') : '<tr><td colspan="7" class="text-sm text-muted" style="padding:10px">No stage activity recorded yet for this component.</td></tr>';
+}
+
+function renderComponentHandoverHistory(){
+  const b=CUR_BOM_LINE; if(!b) return;
+  const tbody=document.getElementById('compHandoverLog'); if(!tbody) return;
+  const rows=(DB.handoverLog||[]).filter(h=>h.lineId===b.lineId);
+  tbody.innerHTML = rows.length ? rows.map(h=>{
+    const ts = h.ts ? String(h.ts).replace('T',' ').slice(0,16) : '';
+    return '<tr><td class="log-td">'+ts+'</td><td class="fw-600">'+(h.finalStage||'—')+'</td>'
+      +'<td class="font-mono">'+h.qty+' '+(h.uom||'')+'</td>'
+      +'<td class="text-xs" style="color:var(--accent);font-weight:600">'+(h.department||'—')+'</td>'
+      +'<td class="text-xs text-muted">'+(h.email||'—')+'</td>'
+      +'<td class="text-xs">'+(h.triggeredBy||'—')+'</td></tr>';
+  }).join('') : '<tr><td colspan="6" class="text-sm text-muted" style="padding:10px">No handover notifications sent yet for this component.</td></tr>';
 }
 
 // ------ STAGE PRODUCTION ENTRY FORM ------
@@ -7807,7 +8006,7 @@ async function submitStageEntry(btn){
   document.getElementById('ce_remark').value='';
   // Reset shift back to Day after each entry
   selectShift('day');
-  renderComponentRoute(); renderComponentTrace(); renderComponentHistory();
+  renderComponentRoute(); renderComponentTrace(); renderComponentHistory(); renderComponentHandoverHistory();
   renderStageEntryForm(); // re-render to show updated today's shift summary
   renderBomComponentPicker(p); renderStageQcStatus(); renderActLog();
   if(typeof renderQcQueue==='function') renderQcQueue();
@@ -8119,7 +8318,7 @@ function processQcDecision(p, b, stageName, approveQty, rejectQty, disposition, 
   if(typeof renderDailyRejFeed==='function') renderDailyRejFeed();
   // Auto-refresh Pareto & PPM if those analytics tabs are currently open
   if(typeof refreshParetoIfVisible==='function') refreshParetoIfVisible();
-  if(CUR_PROJ===p && CUR_BOM_LINE===b){ renderComponentRoute(); renderComponentTrace(); renderComponentHistory(); renderStageEntryForm(); }
+  if(CUR_PROJ===p && CUR_BOM_LINE===b){ renderComponentRoute(); renderComponentTrace(); renderComponentHistory(); renderComponentHandoverHistory(); renderStageEntryForm(); }
   if(CUR_PROJ===p){ renderBomComponentPicker(p); renderStageQcStatus(); }
   if(reworkLine){
     toast(approveQty+' approved, '+rejectQty+' rejected → NEW BOM LINE AUTO-CREATED: "'+reworkLine.item+'" ('+reworkLine.lineId+') sent back to '+(reworkLine.route[0]||'first stage')+' for remanufacture.','🔁');
@@ -14511,6 +14710,7 @@ function getAdminHTML(sec){
   if(sec==='utility')    return getUtilityAdmin();
   if(sec==='routing')    return getRoutingAdmin();
   if(sec==='processgroups') return getProcessGroupsAdmin();
+  if(sec==='handoverrecipients') return getHandoverRecipientsAdmin();
   if(sec==='cycletime') return getCycleTimeAdmin();
   if(sec==='dmsdepts')  return getDmsDeptsAdmin();
   if(sec==='dmsorigins') return getDmsOriginsAdmin();
@@ -14584,6 +14784,82 @@ function getAdminHTML(sec){
 // group would. Everything else with zero machines IS a real Process-Only
 // group (e.g. "Assembly") and belongs in this list.
 const NON_ROUTING_GROUP_KEYS = ['In-Process QC', 'Final QC'];
+
+function getHandoverRecipientsAdmin(){
+  const list = M.handoverRecipients||[];
+  const rows = list.map((r,i)=>`<tr>
+    <td class="fw-600 text-sm">${r.department}</td>
+    <td class="text-sm">${r.email}</td>
+    <td class="text-xs">${r.segment==='wood'?'🪵 Wood':r.segment==='ext'?'🔩 Extrusion':'All Segments'}</td>
+    <td class="text-xs text-muted">${r.note||'—'}</td>
+    <td style="display:flex;gap:4px;flex-wrap:wrap">
+      <button class="btn btn-outline btn-sm" onclick="openHandoverRecipientModal(${i})">✏ Edit</button>
+      <button class="btn btn-danger btn-sm" onclick="deleteHandoverRecipient(${i})">🗑 Delete</button>
+    </td>
+  </tr>`).join('');
+
+  return `<div class="card">
+    <div class="card-header">
+      <div><div class="card-title">📧 Handover Recipients${lockBadge('ADMIN ONLY')}</div>
+      <div class="text-xs text-muted" style="margin-top:2px">Defines which concerned department gets notified when a component's final production stage is QC-approved — e.g. Assembly Team for Wood, Dispatch Team for Extrusion.</div></div>
+      <button class="btn btn-primary btn-sm" onclick="openHandoverRecipientModal(null)">+ Add Recipient</button>
+    </div>
+    <div class="card-body">
+      <table>
+        <thead><tr><th>Department</th><th>Email</th><th>Applies To</th><th>Note</th><th style="width:170px">Actions</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="5" class="text-sm text-muted" style="padding:14px;text-align:center">No recipients configured yet. Click + Add Recipient to set up the first one.</td></tr>'}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+function openHandoverRecipientModal(idx){
+  const r = (idx!=null) ? M.handoverRecipients[idx] : null;
+  document.getElementById('hr_edit_idx').value = idx!=null ? idx : -1;
+  document.getElementById('hr_department').value = r ? r.department : '';
+  document.getElementById('hr_email').value = r ? r.email : '';
+  document.getElementById('hr_segment').value = r ? r.segment : 'all';
+  document.getElementById('hr_note').value = r ? (r.note||'') : '';
+  document.getElementById('hrModalTitle').textContent = r ? '✏ Edit Handover Recipient' : '📧 New Handover Recipient';
+  document.getElementById('handoverRecipientModal').classList.add('open');
+}
+
+function saveHandoverRecipient(){
+  const idx = parseInt(document.getElementById('hr_edit_idx').value);
+  const department = document.getElementById('hr_department').value.trim();
+  const email = document.getElementById('hr_email').value.trim();
+  const segment = document.getElementById('hr_segment').value;
+  const note = document.getElementById('hr_note').value.trim();
+
+  if(!department){ toast('Department name is required.','⚠'); return; }
+  if(!email || !email.includes('@')){ toast('Enter a valid email address.','⚠'); return; }
+
+  const ts=new Date().toISOString().replace('T',' ').slice(0,16);
+  if(idx===-1){
+    M.handoverRecipients.push({department, email, segment, note});
+    DB.auditLog.unshift({ts,user:CURRENT_USER?CURRENT_USER.fullName:'Admin',action:'Create',module:'Handover Recipients',entity:department,field:'New Recipient',old:'--',nw:email,ip:'192.168.1.1'});
+    toast('Recipient "'+department+'" added.','✓');
+  } else {
+    const old = M.handoverRecipients[idx];
+    M.handoverRecipients[idx] = {department, email, segment, note};
+    DB.auditLog.unshift({ts,user:CURRENT_USER?CURRENT_USER.fullName:'Admin',action:'Update',module:'Handover Recipients',entity:department,field:'Recipient',old:old.email,nw:email,ip:'192.168.1.1'});
+    toast('Recipient "'+department+'" updated.','✓');
+  }
+  closeMod('handoverRecipientModal');
+  renderAdmin('handoverrecipients',null);
+  persistAdminConfig('handoverRecipients');
+}
+
+function deleteHandoverRecipient(idx){
+  const r = M.handoverRecipients[idx]; if(!r) return;
+  if(!confirm('Delete handover recipient "'+r.department+'" ('+r.email+')?')) return;
+  M.handoverRecipients.splice(idx,1);
+  const ts=new Date().toISOString().replace('T',' ').slice(0,16);
+  DB.auditLog.unshift({ts,user:CURRENT_USER?CURRENT_USER.fullName:'Admin',action:'Delete',module:'Handover Recipients',entity:r.department,field:'Recipient',old:r.email,nw:'Deleted',ip:'192.168.1.1'});
+  toast('Recipient "'+r.department+'" deleted.','✓');
+  renderAdmin('handoverrecipients',null);
+  persistAdminConfig('handoverRecipients');
+}
 
 function getProcessGroupsAdmin(){
   const groupNames = Object.keys(M.stageToWorkstation).filter(k=>!NON_ROUTING_GROUP_KEYS.includes(k));

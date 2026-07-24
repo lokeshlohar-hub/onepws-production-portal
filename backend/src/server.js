@@ -10,6 +10,7 @@ const maintenanceRoutes = require('./routes/maintenance');
 const toolsRoutes = require('./routes/tools');
 const capacityRoutes = require('./routes/capacity');
 const adminConfigRoutes = require('./routes/adminConfig');
+const handoverRoutes = require('./routes/handover');
 
 const app = express();
 app.use(cors());
@@ -20,7 +21,7 @@ app.use(express.json());
 // running the code you think it's running — this exists specifically because
 // "is the deployment actually up to date" has been the real cause behind more
 // than one reported bug that looked like an application issue.
-const BACKEND_VERSION = '2026-07-24.1-breakdown-edit-delete';
+const BACKEND_VERSION = '2026-07-25.1-handover-notification';
 app.get('/api/health', (req, res) => res.json({
   ok: true,
   service: 'onepws-backend',
@@ -44,6 +45,8 @@ app.get('/api/health', (req, res) => res.json({
     'GET /api/auth/users': true,
     'PUT /api/auth/users/:id': true,
     'DELETE /api/auth/users/:id': true,
+    'GET /api/handover-log': true,
+    'POST /api/handover-log': true,
   }
 }));
 
@@ -55,6 +58,7 @@ app.use('/api/breakdown-log', maintenanceRoutes);
 app.use('/api/tool-inventory', toolsRoutes);
 app.use('/api/daily-capacity', capacityRoutes);
 app.use('/api/admin-config', adminConfigRoutes);
+app.use('/api/handover-log', handoverRoutes);
 
 // Central error handler — keeps unexpected exceptions from crashing the
 // process and always returns JSON instead of an HTML error page.

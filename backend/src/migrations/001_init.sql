@@ -262,3 +262,27 @@ CREATE TABLE IF NOT EXISTS admin_config (
 -- app has no existing file-upload infrastructure and one JSONB/TEXT column
 -- is the simplest correct fit for an optional single image per rejection.
 ALTER TABLE reject_log ADD COLUMN IF NOT EXISTS photo_data TEXT;
+
+-- Final-Stage Handover Notification — Phase 7. One row per triggered
+-- handover notification, kept as a permanent audit record even though the
+-- recipient email library (admin_config key 'handoverRecipients') can change
+-- later — details is a JSONB snapshot of everything shown in the email at
+-- the time it was sent, so history stays accurate regardless of later edits.
+CREATE TABLE IF NOT EXISTS handover_log (
+  id              VARCHAR(30) PRIMARY KEY,
+  ts              TIMESTAMPTZ NOT NULL DEFAULT now(),
+  line_id         VARCHAR(20),
+  project_id      VARCHAR(20),
+  proj_sap        VARCHAR(50),
+  item            VARCHAR(200),
+  qty             INT,
+  uom             VARCHAR(20),
+  segment         VARCHAR(20),
+  final_stage     VARCHAR(100),
+  department      VARCHAR(100),
+  email           VARCHAR(200),
+  triggered_by    VARCHAR(100),
+  details         JSONB NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_handover_project ON handover_log(project_id);
+CREATE INDEX IF NOT EXISTS idx_handover_line ON handover_log(line_id);

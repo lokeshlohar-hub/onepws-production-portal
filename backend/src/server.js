@@ -20,7 +20,7 @@ app.use(express.json());
 // running the code you think it's running — this exists specifically because
 // "is the deployment actually up to date" has been the real cause behind more
 // than one reported bug that looked like an application issue.
-const BACKEND_VERSION = '2026-07-22.1-user-permission-persistence';
+const BACKEND_VERSION = '2026-07-23.1-qc-photo-evidence';
 app.get('/api/health', (req, res) => res.json({
   ok: true,
   service: 'onepws-backend',

@@ -96,6 +96,8 @@ tbody td{padding:9px 12px;vertical-align:middle;white-space:nowrap}
 .modal-header{padding:16px 20px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px}
 .modal-title{font-family:Space Grotesk,sans-serif;font-size:15px;font-weight:600;flex:1}
 .modal-close{width:26px;height:26px;border-radius:6px;border:none;background:transparent;cursor:pointer;color:var(--text-muted);font-size:18px;display:flex;align-items:center;justify-content:center;transition:var(--transition)}
+.qc-photo-icon-btn{width:28px;height:28px;border-radius:6px;border:1.5px solid var(--border2);background:var(--surface);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;transition:var(--transition);padding:0}
+.qc-photo-icon-btn:hover{border-color:var(--accent);background:var(--surface2)}
 .modal-close:hover{background:var(--surface2)}
 .modal-body{padding:18px 20px;overflow-y:auto;flex:1}
 .modal-footer{padding:12px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px}
@@ -1555,7 +1557,7 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
       </div>
       <div class="card-body" style="padding:0">
         <table style="font-size:11.5px;width:100%">
-          <thead><tr><th>Date</th><th>Project</th><th>Component</th><th>Stage</th><th>Qty Rejected</th><th>Rejection Category</th><th>Disposition</th><th>QC Person</th><th>Root Cause</th><th>Status</th><th>Rework</th></tr></thead>
+          <thead><tr><th>Date</th><th>Project</th><th>Component</th><th>Stage</th><th>Qty Rejected</th><th>Rejection Category</th><th>Disposition</th><th>QC Person</th><th>Root Cause</th><th>Status</th><th>Rework</th><th>Photo</th></tr></thead>
           <tbody id="rejectLogBody"></tbody>
         </table>
       </div>
@@ -1685,7 +1687,7 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Date</th><th>Project</th><th>Component</th><th>Machine/Stage</th><th>Qty Rejected</th><th>Category</th><th>QC Person</th><th>QC Instrument</th><th>Root Cause</th><th>Status</th></tr></thead>
+          <thead><tr><th>Date</th><th>Project</th><th>Component</th><th>Machine/Stage</th><th>Qty Rejected</th><th>Category</th><th>QC Person</th><th>QC Instrument</th><th>Root Cause</th><th>Status</th><th>Photo</th></tr></thead>
           <tbody id="qualityLogBody"></tbody>
         </table>
       </div>
@@ -3085,7 +3087,22 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
           <label class="form-label">QC Inspector Name <span class="req">*</span></label>
           <select class="form-select" id="qc_person_only"><option value="">— Select QC Inspector —</option></select>
         </div>
-        <div class="form-group"><label class="form-label">Root Cause / Remarks <span class="req" id="qcRootCauseReq" style="display:none">*</span></label><textarea class="form-textarea" id="qc_remarks" style="height:55px" placeholder="Required for rejections — e.g. blade wear, RM defect, operator error…"></textarea></div>
+        <div class="form-group">
+          <label class="form-label">Root Cause / Remarks <span class="req" id="qcRootCauseReq" style="display:none">*</span></label>
+          <textarea class="form-textarea" id="qc_remarks" style="height:55px" placeholder="Required for rejections — e.g. blade wear, RM defect, operator error…"></textarea>
+          <div style="display:flex;align-items:center;gap:10px;margin-top:8px">
+            <span class="text-xs text-muted">Photo evidence (optional):</span>
+            <button type="button" class="qc-photo-icon-btn" onclick="document.getElementById('qc_photo_capture').click()" title="Capture Photo" aria-label="Capture Photo">📷</button>
+            <button type="button" class="qc-photo-icon-btn" onclick="document.getElementById('qc_photo_upload').click()" title="Upload Photo" aria-label="Upload Photo">🖼️</button>
+            <input type="file" accept="image/*" capture="environment" id="qc_photo_capture" style="display:none" onchange="onQcPhotoSelected(this)">
+            <input type="file" accept="image/*" id="qc_photo_upload" style="display:none" onchange="onQcPhotoSelected(this)">
+            <span id="qc_photo_status" class="text-xs text-muted"></span>
+          </div>
+          <div id="qc_photo_preview_wrap" style="display:none;margin-top:8px;position:relative;width:fit-content">
+            <img id="qc_photo_preview" style="max-height:90px;max-width:160px;border-radius:6px;border:1.5px solid var(--border2);display:block">
+            <button type="button" onclick="clearQcPhoto()" title="Remove photo" style="position:absolute;top:-8px;right:-8px;width:20px;height:20px;border-radius:50%;background:var(--red);color:#fff;border:none;cursor:pointer;font-size:11px;line-height:1">×</button>
+          </div>
+        </div>
       </div>
     </div>
     <div class="modal-footer">
@@ -3287,6 +3304,25 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeMod('processGroupModal')">Cancel</button>
       <button class="btn btn-primary" onclick="saveProcessGroupModal()">💾 Save Group</button>
+    </div>
+  </div>
+</div>
+
+<!-- QC PHOTO EVIDENCE VIEW MODAL -->
+<div class="modal-overlay" id="qcPhotoViewModal">
+  <div class="modal" style="max-width:600px">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">📷 QC Rejection Photo</div>
+        <div class="text-xs text-muted" id="qcPhotoViewSub" style="margin-top:2px"></div>
+      </div>
+      <button class="modal-close" onclick="closeMod('qcPhotoViewModal')">×</button>
+    </div>
+    <div class="modal-body" style="text-align:center">
+      <img id="qcPhotoViewImg" style="max-width:100%;max-height:60vh;border-radius:8px;border:1px solid var(--border2)">
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeMod('qcPhotoViewModal')">Close</button>
     </div>
   </div>
 </div>
@@ -3887,6 +3923,9 @@ function apiSubmitStageEntry(lineId, payload) {
 function apiSubmitQcDecision(lineId, payload) {
   return apiRequest('/bom-lines/' + encodeURIComponent(lineId) + '/qc-decision', { method: 'POST', body: JSON.stringify(payload) });
 }
+function apiLoadRejectLog() {
+  return apiRequest('/bom-lines/qc/reject-log', { method: 'GET' });
+}
 function apiLoadCalibrationInstruments() {
   return apiRequest('/calibration-instruments', { method: 'GET' });
 }
@@ -4126,6 +4165,40 @@ async function loadUsersFromServer() {
     DB.users = (resp.users || []).map(serverUserToLocal);
   } catch (err) {
     toast('Could not load saved user accounts from the server: ' + err.message, '⚠');
+  }
+}
+
+// Converts a reject_log server row to the exact shape processQcDecision()
+// has always built locally, so every existing consumer (Reject & Rework Log,
+// Quality dashboards/reports, Pareto charts) works unchanged either way.
+function serverRejectLogRowToLocal(row) {
+  return {
+    ts: row.ts ? String(row.ts).replace('T', ' ').slice(0, 16) : '',
+    date: dateOnly(row.date),
+    proj: row.proj_sap,
+    projId: row.project_id,
+    item: row.item,
+    stage: row.stage,
+    workstation: row.workstation,
+    qty: row.qty,
+    category: row.category,
+    disposition: row.disposition,
+    qcPerson: row.qc_person,
+    qcInstrument: row.qc_instrument,
+    qcInstrumentDueDate: dateOnly(row.qc_instrument_due_date),
+    rootCause: row.root_cause,
+    sourceLineId: row.source_line_id,
+    reworkLineId: row.rework_line_id,
+    status: row.status,
+    photoData: row.photo_data || null,
+  };
+}
+async function loadRejectLogFromServer() {
+  try {
+    const resp = await apiLoadRejectLog();
+    DB.rejectLog = (resp.rejectLog || []).map(serverRejectLogRowToLocal);
+  } catch (err) {
+    toast('Could not load the saved reject/rework log from the server: ' + err.message, '⚠');
   }
 }
 
@@ -4998,6 +5071,7 @@ async function attemptLogin(btn){
     await loadDailyCapacityFromServer();
     await loadAdminConfigFromServer();
     await loadUsersFromServer();
+    await loadRejectLogFromServer();
 
     onLoginSuccess();
   } catch(err){
@@ -5041,6 +5115,7 @@ async function restoreSession(){
     await loadDailyCapacityFromServer();
     await loadAdminConfigFromServer();
     await loadUsersFromServer();
+    await loadRejectLogFromServer();
     onLoginSuccess(true);
   } catch(err){
     try{ localStorage.removeItem('onepws_token'); }catch(e){}
@@ -7685,6 +7760,61 @@ function renderQcQueue(){
 
 let QC_INSPECT_CTX = null; // {projId, lineId, stageName}
 
+// ------ QC Photo Evidence (optional) ------
+// Held only in memory for the current inspection; cleared on modal open/close
+// and after a successful submit. Never mandatory — confirmQcDecision() works
+// exactly as before when this stays null.
+let _qcPhotoData = null;
+
+function onQcPhotoSelected(inputEl){
+  const file = inputEl.files && inputEl.files[0];
+  inputEl.value = ''; // allow re-selecting the same file later if removed
+  if(!file) return;
+  if(!file.type.startsWith('image/')){ toast('Please choose an image file.','⚠'); return; }
+  if(file.size > 15*1024*1024){ toast('That image is quite large — please choose one under 15MB.','⚠'); return; }
+
+  const statusEl = document.getElementById('qc_photo_status');
+  if(statusEl) statusEl.textContent = 'Processing…';
+
+  const reader = new FileReader();
+  reader.onload = function(e){
+    const img = new Image();
+    img.onload = function(){
+      // Resize/compress client-side so the stored payload stays reasonable —
+      // there's no separate file-storage service in this app, so this keeps
+      // a single JSONB/TEXT column a practical fit.
+      const maxDim = 900;
+      let w = img.width, h = img.height;
+      if(w > maxDim || h > maxDim){
+        const scale = maxDim / Math.max(w,h);
+        w = Math.round(w*scale); h = Math.round(h*scale);
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      _qcPhotoData = canvas.toDataURL('image/jpeg', 0.7);
+
+      const previewImg = document.getElementById('qc_photo_preview');
+      const previewWrap = document.getElementById('qc_photo_preview_wrap');
+      if(previewImg) previewImg.src = _qcPhotoData;
+      if(previewWrap) previewWrap.style.display = 'block';
+      if(statusEl) statusEl.textContent = 'Photo attached';
+    };
+    img.onerror = function(){ toast('Could not read that image — please try a different file.','⚠'); if(statusEl) statusEl.textContent=''; };
+    img.src = e.target.result;
+  };
+  reader.onerror = function(){ toast('Could not read that file.','⚠'); if(statusEl) statusEl.textContent=''; };
+  reader.readAsDataURL(file);
+}
+
+function clearQcPhoto(){
+  _qcPhotoData = null;
+  const previewWrap = document.getElementById('qc_photo_preview_wrap');
+  const statusEl = document.getElementById('qc_photo_status');
+  if(previewWrap) previewWrap.style.display = 'none';
+  if(statusEl) statusEl.textContent = '';
+}
+
 function openQcInspect(projId, lineId, stageName){
   const p=DB.projects.find(x=>x.id===projId); if(!p) return;
   const b=p.bom.find(x=>x.lineId===lineId); if(!b) return;
@@ -7728,6 +7858,7 @@ function openQcInspect(projId, lineId, stageName){
   document.getElementById('qcRejCategoryGroup').style.display='none';
   document.getElementById('qcDispositionGroup').style.display='none';
   document.getElementById('qcPersonOnlyGroup').style.display='block';
+  clearQcPhoto();
 
   document.getElementById('qcInspectModal').classList.add('open');
 }
@@ -7811,7 +7942,8 @@ async function confirmQcDecision(btn){
   try{
     serverResult = await apiSubmitQcDecision(b.lineId, {
       stage:stageName, approveQty, rejectQty, disposition, category, qcPerson, remarks,
-      instrument: instrument ? {tagNo:instrument.tagNo, name:instrument.name, nextDueDate:instrument.nextDueDate} : null
+      instrument: instrument ? {tagNo:instrument.tagNo, name:instrument.name, nextDueDate:instrument.nextDueDate} : null,
+      photoData: rejectQty>0 ? _qcPhotoData : null
     });
   } catch(err){
     toast('Could not save this QC decision to the server: '+err.message,'⚠');
@@ -7822,12 +7954,13 @@ async function confirmQcDecision(btn){
 
   // If the server spawned a rework line, use its real ID for the local copy too
   const forcedReworkLineId = serverResult.reworkLine ? serverResult.reworkLine.line_id : null;
-  processQcDecision(p, b, stageName, approveQty, rejectQty, disposition, category, qcPerson, remarks, instrument, forcedReworkLineId);
+  processQcDecision(p, b, stageName, approveQty, rejectQty, disposition, category, qcPerson, remarks, instrument, forcedReworkLineId, rejectQty>0?_qcPhotoData:null);
+  clearQcPhoto();
   closeMod('qcInspectModal');
   QC_INSPECT_CTX=null;
 }
 
-function processQcDecision(p, b, stageName, approveQty, rejectQty, disposition, category, qcPerson, remarks, instrument, forcedReworkLineId){
+function processQcDecision(p, b, stageName, approveQty, rejectQty, disposition, category, qcPerson, remarks, instrument, forcedReworkLineId, photoData){
   const sd=b.stageData[stageName];
   const ts=new Date().toISOString().replace('T',' ').slice(0,16);
   const today=ts.split(' ')[0];
@@ -7877,6 +8010,7 @@ function processQcDecision(p, b, stageName, approveQty, rejectQty, disposition, 
       rootCause: remarks||'',
       sourceLineId: b.lineId,
       reworkLineId: reworkLine ? reworkLine.lineId : null,
+      photoData: photoData || null,
       // Both dispositions are now fully actioned the instant QC records them —
       // rework immediately spawns its replacement line, scrap immediately
       // removes the quantity — so there is nothing left "pending" afterward.
@@ -7924,8 +8058,40 @@ function renderRejectLog(){
     +'<td class="text-xs" style="color:var(--accent);font-weight:600">'+(r.qcPerson||'—')+'</td>'
     +'<td class="text-xs text-muted" style="max-width:130px;overflow:hidden;text-overflow:ellipsis" title="'+(r.rootCause||'').replace(/"/g,'&quot;')+'">'+(r.rootCause||'—')+'</td>'
     +'<td><span class="badge '+(r.status==='Closed'?'badge-complete':'badge-delayed')+'">'+r.status+'</span></td>'
-    +'<td>'+(r.reworkLineId?'<span class="badge" style="background:#fef3c7;color:#92400e;font-size:9.5px" title="A new BOM line ('+r.reworkLineId+') was automatically created and sent back to the first production stage">&#128260; New Line Created</span>':'—')+'</td></tr>';
-  }).join('') : '<tr><td colspan="11" class="text-sm text-muted" style="padding:12px">No rejections recorded.</td></tr>';
+    +'<td>'+(r.reworkLineId?'<span class="badge" style="background:#fef3c7;color:#92400e;font-size:9.5px" title="A new BOM line ('+r.reworkLineId+') was automatically created and sent back to the first production stage">&#128260; New Line Created</span>':'—')+'</td>'
+    +'<td>'+(r.photoData?'<button type="button" onclick="viewQcPhoto('+i+')" title="View defect photo" aria-label="View defect photo" style="border:none;background:transparent;cursor:pointer;font-size:16px;line-height:1">📷</button>':'<span class="text-muted">—</span>')+'</td></tr>';
+  }).join('') : '<tr><td colspan="12" class="text-sm text-muted" style="padding:12px">No rejections recorded.</td></tr>';
+}
+
+// Opens the photo view modal for a Reject & Rework Log row, by index into
+// DB.rejectLog (safe here since the table renders DB.rejectLog.slice(0,25)
+// starting at index 0). Kept separate from viewQcPhotoData() below so other
+// views showing the same records from a different array/order can look up
+// their own entry correctly rather than reusing this index blindly.
+function viewQcPhoto(index){
+  const r = DB.rejectLog[index];
+  if(!r || !r.photoData){ toast('No photo attached to this record.','⚠'); return; }
+  viewQcPhotoData(r.photoData, (r.proj||'—')+' — '+r.item+' @ '+r.stage+' · '+(r.date||''));
+}
+// Shared low-level opener — takes the photo data URL and a descriptive label
+// directly, so any view (Reject & Rework Log, QC History, Project History,
+// Reports) can show the same photo without needing shared array indexing.
+function viewQcPhotoData(photoData, label){
+  if(!photoData){ toast('No photo attached to this record.','⚠'); return; }
+  document.getElementById('qcPhotoViewImg').src = photoData;
+  document.getElementById('qcPhotoViewSub').textContent = label || '';
+  document.getElementById('qcPhotoViewModal').classList.add('open');
+}
+// Generic indexed lookup for any table that renders a locally-filtered/sorted
+// copy of DB.rejectLog (not the same index order as DB.rejectLog itself).
+// The render function stores its own rows array on the named module-level
+// variable right before building HTML; this just looks it up by index.
+window._qualityLogRenderRows = [];
+function viewQcPhotoAt(varName, idx){
+  const list = window[varName];
+  const r = list && list[idx];
+  if(!r || !r.photoData){ toast('No photo attached to this record.','⚠'); return; }
+  viewQcPhotoData(r.photoData, (r.proj||'—')+' — '+r.item+' @ '+(r.stage||r.workstation||'')+' · '+(r.date||''));
 }
 
 // ------ Progress rollup: project progress derived from BOM component completion ------
@@ -16148,12 +16314,13 @@ function renderQualityLog(){
   const tbody = document.getElementById('qualityLogBody');
   if(!tbody) return;
   const rows = (DB.rejectLog||[]).filter(r=>inDateRange('quality',r.date));
+  window._qualityLogRenderRows = rows; // referenced by viewQcPhotoAt() below for safe indexed lookup
   if(!rows.length){
     const f=DATE_FILTER.quality;
-    tbody.innerHTML='<tr><td colspan="10" class="text-muted text-sm" style="padding:16px;text-align:center">'+((f.from||f.to)?'No rejections recorded in the selected date range ('+dateRangeStatusText('quality')+').':'No rejections recorded yet. This table updates automatically when QC records a rejection.')+'</td></tr>';
+    tbody.innerHTML='<tr><td colspan="11" class="text-muted text-sm" style="padding:16px;text-align:center">'+((f.from||f.to)?'No rejections recorded in the selected date range ('+dateRangeStatusText('quality')+').':'No rejections recorded yet. This table updates automatically when QC records a rejection.')+'</td></tr>';
     return;
   }
-  tbody.innerHTML = rows.slice(0,50).map(r=>
+  tbody.innerHTML = rows.slice(0,50).map((r,i)=>
     '<tr>'
     +'<td class="font-mono text-sm">'+(r.date||'—')+'</td>'
     +'<td class="text-sm fw-600">'+(r.proj||'—')+'</td>'
@@ -16165,6 +16332,7 @@ function renderQualityLog(){
     +'<td class="text-xs" style="max-width:150px;overflow:hidden;text-overflow:ellipsis" title="'+(r.qcInstrument||'')+'">'+(r.qcInstrument||'—')+(r.qcInstrumentDueDate?' <span class="text-muted">(Due: '+r.qcInstrumentDueDate+')</span>':'')+'</td>'
     +'<td class="text-muted text-xs" style="max-width:140px;overflow:hidden;text-overflow:ellipsis">'+(r.rootCause||'—')+'</td>'
     +'<td><span class="badge '+(r.status==='Closed'?'badge-complete':'badge-delayed')+'" style="font-size:9.5px">'+r.status+'</span></td>'
+    +'<td>'+(r.photoData?'<button type="button" onclick="viewQcPhotoAt(\'_qualityLogRenderRows\','+i+')" title="View defect photo" aria-label="View defect photo" style="border:none;background:transparent;cursor:pointer;font-size:16px;line-height:1">📷</button>':'<span class="text-muted">—</span>')+'</td>'
     +'</tr>'
   ).join('');
 }

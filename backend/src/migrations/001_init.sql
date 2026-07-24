@@ -255,3 +255,10 @@ CREATE TABLE IF NOT EXISTS admin_config (
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_by    VARCHAR(100)
 );
+
+-- Optional photo evidence for a QC rejection — Phase 6. Stored as a base64
+-- data URL (client-side resized/compressed before upload, so this stays a
+-- reasonable size) rather than a separate file-storage service, since this
+-- app has no existing file-upload infrastructure and one JSONB/TEXT column
+-- is the simplest correct fit for an optional single image per rejection.
+ALTER TABLE reject_log ADD COLUMN IF NOT EXISTS photo_data TEXT;

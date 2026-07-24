@@ -67,7 +67,7 @@ router.post('/:lineId/stage-entry', requireRole('admin', 'superadmin'), async (r
 // disposition 'rework' automatically spawns a new BOM line — this is the
 // endpoint that answers "did the rejected component get added back to the BOM".
 router.post('/:lineId/qc-decision', requireRole('admin', 'superadmin'), async (req, res) => {
-  const { stage, approveQty, rejectQty, disposition, category, qcPerson, remarks, instrument } = req.body || {};
+  const { stage, approveQty, rejectQty, disposition, category, qcPerson, remarks, instrument, photoData } = req.body || {};
   if (!stage || approveQty == null || rejectQty == null || !qcPerson) {
     return res.status(400).json({ error: 'stage, approveQty, rejectQty, and qcPerson are required' });
   }
@@ -78,7 +78,7 @@ router.post('/:lineId/qc-decision', requireRole('admin', 'superadmin'), async (r
       approveQty: Number(approveQty),
       rejectQty: Number(rejectQty),
       disposition: disposition || 'rework',
-      category, qcPerson, remarks, instrument,
+      category, qcPerson, remarks, instrument, photoData,
     });
     res.json({
       ok: true,

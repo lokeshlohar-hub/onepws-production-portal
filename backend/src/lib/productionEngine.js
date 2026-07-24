@@ -159,7 +159,7 @@ async function refreshProjectProgress(client, projectId) {
 // a transaction: reads the line, mutates stage_data exactly like the
 // frontend does, spawns a rework line when applicable, writes the reject
 // log + stage log entries, and recomputes project progress — all atomically.
-async function processQcDecision(lineId, { stageName, approveQty, rejectQty, disposition, category, qcPerson, remarks, instrument }) {
+async function processQcDecision(lineId, { stageName, approveQty, rejectQty, disposition, category, qcPerson, remarks, instrument, photoData }) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -196,12 +196,12 @@ async function processQcDecision(lineId, { stageName, approveQty, rejectQty, dis
       await client.query(
         `INSERT INTO reject_log (date, project_id, proj_sap, item, stage, workstation, qty, category,
            disposition, qc_person, qc_instrument, qc_instrument_due_date, root_cause,
-           source_line_id, rework_line_id, status)
-         VALUES (CURRENT_DATE,$1,$2,$3,$4,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'Closed')`,
+           source_line_id, rework_line_id, status, photo_data)
+         VALUES (CURRENT_DATE,$1,$2,$3,$4,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'Closed',$14)`,
         [
           line.project_id, projSap, line.item, stageName, rejectQty, category || 'Uncategorized',
           disposition, qcPerson, instrumentLabel, instrument ? instrument.nextDueDate : null,
-          remarks || '', line.line_id, reworkLine ? reworkLine.line_id : null,
+          remarks || '', line.line_id, reworkLine ? reworkLine.line_id : null, photoData || null,
         ]
       );
     }

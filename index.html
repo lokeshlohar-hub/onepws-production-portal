@@ -7077,10 +7077,6 @@ function openEditBomForProject(projectId){
   }
   const p = DB.projects.find(x=>x.id===projectId);
   if(!p){ toast('Project not found.','⚠'); return; }
-  if(p.hasWood && p.hasExt){
-    toast('This project already has both Wood and Extrusion segments — there is no missing segment to add.','⚠');
-    return;
-  }
   nav('newproject', null);
   setTimeout(()=>enterEditProjectMode(projectId), 60);
 }
@@ -7112,7 +7108,7 @@ function enterEditProjectMode(projectId){
   const banner = document.getElementById('editModeBanner');
   if(banner){
     banner.style.display='block';
-    banner.innerHTML = '📝 Adding a missing segment to existing project <b>'+p.sap+'</b> — project details above are locked; only a segment not yet present can be filled in below. <button class="btn btn-outline btn-sm" style="margin-left:10px" onclick="cancelEditProjectMode()">Cancel</button>';
+    banner.innerHTML = '📝 Updating BOM for existing project <b>'+p.sap+'</b> — project details above are locked. Add a new segment below, or add new components to a segment that already exists — existing components stay exactly as they are. <button class="btn btn-outline btn-sm" style="margin-left:10px" onclick="cancelEditProjectMode()">Cancel</button>';
   }
 
   setupSegmentForEdit('wood', p);
@@ -7121,18 +7117,32 @@ function enterEditProjectMode(projectId){
   fillMasterSelects();
 
   const saveBtn = document.getElementById('npSaveBtn');
-  if(saveBtn){ saveBtn.textContent='💾 Add Segment to Project'; saveBtn.setAttribute('onclick','saveProjectAddSegment(this)'); }
+  if(saveBtn){ saveBtn.textContent='💾 Save BOM Changes'; saveBtn.setAttribute('onclick','saveProjectAddSegment(this)'); }
 }
 
-// Configures one segment's section for edit mode: if the project already has
-// this segment, locks its checkbox on and shows a read-only summary of what's
-// already there (never editable — that data has real production history
-// against it). If the project does NOT have this segment, leaves the
-// checkbox and section exactly as a fresh entry — fully editable.
+// Configures one segment's section for edit mode.
+// - If the project does NOT yet have this segment: leaves it exactly as a
+//   fresh entry — checkbox unlocked, section fully editable, for adding the
+//   segment for the first time.
+// - If the project already has this segment: locks the checkbox on, shows a
+//   read-only summary of the components already in production (never
+//   editable — those have real stage history and QC against them), then
+//   appends one fresh, fully-editable row underneath so new components can
+//   be added for late-arriving requirements or design changes. The "+ Add
+//   Component" button stays available to add further new rows.
 function setupSegmentForEdit(seg, p){
   const has = seg==='wood' ? p.hasWood : p.hasExt;
   const chk = document.getElementById(seg==='wood'?'chk_wood':'chk_ext');
+  // p.wood/p.ext (the nested segment object) only exists reliably right after
+  // same-session creation — after any server round-trip (a refresh, or just
+  // loading the page) it comes back null and this data lives in flat
+  // top-level fields instead (p.recWood/p.planWood etc.). received/tat are
+  // required for saving, so those always come from the reliable flat
+  // fields; drawing/remarks/PO are display-only here and fall back to the
+  // nested object when it happens to be present.
   const data = seg==='wood' ? p.wood : p.ext;
+  const reliableReceived = dateOnly(seg==='wood' ? p.recWood : p.recExt);
+  const reliableTat = seg==='wood' ? p.planWood : p.planExt;
 
   if(!has){
     if(chk){ chk.checked=false; chk.disabled=false; }
@@ -7145,26 +7155,32 @@ function setupSegmentForEdit(seg, p){
   const drawEl = document.getElementById('np_'+seg+'_drawing');
   const remEl = document.getElementById('np_'+seg+'_remarks');
   [recEl,tatEl,drawEl,remEl].forEach(el=>{ if(el) el.disabled=true; });
-  if(recEl) recEl.value = data?.received||'';
-  if(tatEl) tatEl.value = data?.tat||'';
+  if(recEl) recEl.value = reliableReceived || data?.received || '';
+  if(tatEl) tatEl.value = reliableTat || data?.tat || '';
   if(drawEl) drawEl.value = data?.drawing||'';
   if(remEl) remEl.value = data?.remarks||'';
   if(seg==='ext'){
     const poEl=document.getElementById('np_ext_po'), planEl=document.getElementById('np_ext_plan_date');
     if(poEl){ poEl.disabled=true; poEl.value=data?.jobWorkPO||''; }
-    if(planEl){ planEl.disabled=true; planEl.value=data?.plannedCuttingDate||''; }
+    if(planEl){ planEl.disabled=true; planEl.value=dateOnly(data?.plannedCuttingDate)||''; }
   }
 
   const bodyId = seg==='wood'?'woodBomBody':'extBomBody';
   const tbody = document.getElementById(bodyId);
   const existingComps = (p.bom||[]).filter(b=>b.seg===seg);
   if(tbody){
-    tbody.innerHTML = '<tr><td colspan="10" style="padding:10px"><div class="text-xs text-muted" style="margin-bottom:6px">Already in production — view-only here. Use Stage-wise Production Updates to work with these components.</div>'
+    // Only the read-only summary — deliberately NOT auto-appending a fresh
+    // editable row here. An untouched fresh row still has a valid default
+    // component selected and a default quantity, so collectSegBOM() would
+    // silently treat it as an intentional new component even if the user
+    // never touched this segment at all. Requiring an explicit "+ Add
+    // Component" click means a row only exists, and only gets saved, when
+    // the user actually means to add one.
+    tbody.innerHTML = '<tr><td colspan="10" style="padding:10px"><div class="text-xs text-muted" style="margin-bottom:6px">Already in production — view-only here. Use "+ Add Component" below only if you need to add a new one.</div>'
       + existingComps.map(b=>'<div class="text-sm" style="padding:3px 0">• '+b.item+' — Qty: '+b.qty+' '+b.uom+(b.colorFinish?' — '+b.colorFinish:'')+'</div>').join('')
       + '</td></tr>';
   }
-  const addBtn = document.querySelector('#'+(seg==='wood'?'woodSegCard':'extSegCard')+' button[onclick*="addBOMToSegment"]');
-  if(addBtn) addBtn.style.display='none';
+  if(seg==='wood') woodBomIdx=0; else extBomIdx=0;
 }
 
 function cancelEditProjectMode(){
@@ -7432,101 +7448,128 @@ async function saveProjectAddSegment(btn){
   const p = DB.projects.find(x=>x.id===_editingProjectId);
   if(!p){ toast('Project not found — please reopen from the project.','⚠'); return; }
 
-  const addingWood = document.getElementById('chk_wood')?.checked && !p.hasWood;
-  const addingExt  = document.getElementById('chk_ext')?.checked && !p.hasExt;
-  if(!addingWood && !addingExt){
-    toast('Check the box for the segment you want to add (only a segment not already on this project can be added).','⚠');
+  // Only a segment whose checkbox is checked is touched at all — an
+  // already-existing segment stays checked+locked throughout, so this
+  // naturally covers both "add the missing segment" and "add new components
+  // to a segment that's already there".
+  const segsToCheck = [];
+  if(document.getElementById('chk_wood')?.checked) segsToCheck.push('wood');
+  if(document.getElementById('chk_ext')?.checked) segsToCheck.push('ext');
+  if(!segsToCheck.length){
+    toast('Check Wood and/or Extrusion, then add component(s), before saving.','⚠');
     return;
   }
-  if(addingWood && addingExt){
-    toast('This screen adds one missing segment at a time — add Wood and Extrusion in two separate steps if both are missing.','⚠');
+
+  // Validate every segment being touched BEFORE calling the server for any
+  // of them — so a mistake in the second segment can't leave the first one
+  // partially saved with no way to know from the error alone.
+  const plans = [];
+  for(const seg of segsToCheck){
+    const isNewSegment = seg==='wood' ? !p.hasWood : !p.hasExt;
+    const bom = collectSegBOM(seg);
+    if(!bom.length){
+      if(isNewSegment){
+        toast('Add at least one BOM component for the '+(seg==='wood'?'Wood':'Extrusion')+' segment.','⚠');
+        return;
+      }
+      continue; // existing segment, nothing new added here — fine, just skip it
+    }
+    const rec=document.getElementById('np_'+seg+'_received')?.value;
+    if(!rec){toast((seg==='wood'?'Wood':'Extrusion')+' segment: File Receiving Date is required.','⚠');return;}
+    plans.push({seg, isNewSegment, bom, rec, tat: document.getElementById('np_'+seg+'_tat')?.value||''});
+  }
+  if(!plans.length){
+    toast('No new components were added — check a segment\'s components before saving.','⚠');
     return;
   }
-  const seg = addingWood ? 'wood' : 'ext';
-
-  const rec=document.getElementById('np_'+seg+'_received')?.value;
-  if(!rec){toast((seg==='wood'?'Wood':'Extrusion')+' segment: File Receiving Date is required.','⚠');return;}
-  const tat=document.getElementById('np_'+seg+'_tat')?.value||'';
-  const bom=collectSegBOM(seg);
-  if(!bom.length){toast('Add at least one BOM component for the '+(seg==='wood'?'Wood':'Extrusion')+' segment.','⚠');return;}
-
-  let stages, segData;
-  if(seg==='wood'){
-    const woodRouteSet=new Set();
-    bom.forEach(b=>(M.componentRouting[b.item]||[]).forEach(r=>woodRouteSet.add(r)));
-    const woodStages=M.stageConfig
-      .filter(sc=>sc.type==='production'&&(sc.stream==='wood'||sc.stream==='all'))
-      .filter(sc=>woodRouteSet.has(sc.name)||sc.name==='In-Process QC')
-      .sort((a,b)=>a.seq-b.seq);
-    const wStages=woodStages.length>0?woodStages
-      :M.stageConfig.filter(sc=>sc.type==='production'&&(sc.stream==='wood'||sc.stream==='all')).sort((a,b)=>a.seq-b.seq);
-    stages=[];
-    stages.push({n:'File Receiving',s:'done',d:rec,u:p.pm,type:'project',seg:'wood'});
-    wStages.forEach((sc,i)=>stages.push({n:sc.name,s:i===0?'active':'pending',d:null,u:'',type:'production',seg:'wood'}));
-    ['Assembly','Final QC','Dispatch'].forEach(n=>stages.push({n,s:'pending',d:null,u:'',type:'project',seg:'wood'}));
-    segData={received:rec,tat,
-      drawing:(document.getElementById('np_wood_drawing')?.value||'').toUpperCase(),
-      remarks:(document.getElementById('np_wood_remarks')?.value||'').toUpperCase(),
-      status:'Running',actualDate:null,delayDays:null,
-      bom,stages,docs:collectSegDocs('woodFileList')};
-  } else {
-    const extStages=M.stageConfig
-      .filter(sc=>sc.type==='production'&&(sc.stream==='extrusion'||sc.stream==='all'))
-      .sort((a,b)=>a.seq-b.seq);
-    stages=[];
-    stages.push({n:'File Receiving',s:'done',d:rec,u:p.pm,type:'project',seg:'ext'});
-    extStages.forEach((sc,i)=>stages.push({n:sc.name,s:i===0?'active':'pending',d:null,u:'',type:'production',seg:'ext'}));
-    stages.push({n:'Handover',s:'pending',d:null,u:'',type:'project',seg:'ext'});
-    segData={received:rec,tat,
-      plannedCuttingDate:document.getElementById('np_ext_plan_date')?.value||'',
-      jobWorkPO:(document.getElementById('np_ext_po')?.value||'').toUpperCase(),
-      drawing:(document.getElementById('np_ext_drawing')?.value||'').toUpperCase(),
-      remarks:(document.getElementById('np_ext_remarks')?.value||'').toUpperCase(),
-      status:'Running',actualDate:null,delayDays:null,
-      bom,stages,docs:collectSegDocs('extFileList')};
-  }
-
-  bom.forEach(ensureBomLineStructure); // attach route[] to every new BOM line, needed for the API payload
 
   const originalBtnText = btn ? btn.textContent : '';
   if(btn){ btn.disabled=true; btn.textContent='Saving to server…'; }
-  let serverResult;
-  try{
-    serverResult = await apiAddSegmentToProject(p.id, {
-      segment: seg, received: rec, tat,
-      bom: bom.map(b=>({
-        item:b.item, l:b.l, w:b.w, t:b.t, profile:b.profile, uom:b.uom, qty:b.qty,
-        colorFinish:b.colorFinish, specialChars:b.specialChars,
-        componentsPerBoard:b.componentsPerBoard, edgeMetersPerComp:b.edgeMetersPerComp, boardQty:b.boardQty,
-        route:b.route
-      }))
-    });
-  } catch(err){
-    toast('Could not save this segment to the server: '+err.message,'⚠');
-    if(btn){ btn.disabled=false; btn.textContent=originalBtnText||'💾 Add Segment to Project'; }
-    return;
-  }
-  if(btn){ btn.disabled=false; btn.textContent=originalBtnText||'💾 Add Segment to Project'; }
 
-  bom.forEach((b,i)=>{ b.lineId = serverResult.bomLineIds[i]; });
+  const results = [];
+  for(const plan of plans){
+    const {seg, isNewSegment, bom, rec, tat} = plan;
+    let stages, segData;
+    if(seg==='wood'){
+      const woodRouteSet=new Set();
+      bom.forEach(b=>(M.componentRouting[b.item]||[]).forEach(r=>woodRouteSet.add(r)));
+      const woodStages=M.stageConfig
+        .filter(sc=>sc.type==='production'&&(sc.stream==='wood'||sc.stream==='all'))
+        .filter(sc=>woodRouteSet.has(sc.name)||sc.name==='In-Process QC')
+        .sort((a,b)=>a.seq-b.seq);
+      const wStages=woodStages.length>0?woodStages
+        :M.stageConfig.filter(sc=>sc.type==='production'&&(sc.stream==='wood'||sc.stream==='all')).sort((a,b)=>a.seq-b.seq);
+      stages=[];
+      if(isNewSegment) stages.push({n:'File Receiving',s:'done',d:rec,u:p.pm,type:'project',seg:'wood'});
+      wStages.forEach((sc,i)=>stages.push({n:sc.name,s:i===0&&isNewSegment?'active':'pending',d:null,u:'',type:'production',seg:'wood'}));
+      if(isNewSegment) ['Assembly','Final QC','Dispatch'].forEach(n=>stages.push({n,s:'pending',d:null,u:'',type:'project',seg:'wood'}));
+      segData={received:rec,tat,
+        drawing:(document.getElementById('np_wood_drawing')?.value||'').toUpperCase(),
+        remarks:(document.getElementById('np_wood_remarks')?.value||'').toUpperCase(),
+        status:'Running',actualDate:null,delayDays:null,
+        bom,stages,docs:collectSegDocs('woodFileList')};
+    } else {
+      const extStages=M.stageConfig
+        .filter(sc=>sc.type==='production'&&(sc.stream==='extrusion'||sc.stream==='all'))
+        .sort((a,b)=>a.seq-b.seq);
+      stages=[];
+      if(isNewSegment) stages.push({n:'File Receiving',s:'done',d:rec,u:p.pm,type:'project',seg:'ext'});
+      extStages.forEach((sc,i)=>stages.push({n:sc.name,s:i===0&&isNewSegment?'active':'pending',d:null,u:'',type:'production',seg:'ext'}));
+      if(isNewSegment) stages.push({n:'Handover',s:'pending',d:null,u:'',type:'project',seg:'ext'});
+      segData={received:rec,tat,
+        plannedCuttingDate:document.getElementById('np_ext_plan_date')?.value||'',
+        jobWorkPO:(document.getElementById('np_ext_po')?.value||'').toUpperCase(),
+        drawing:(document.getElementById('np_ext_drawing')?.value||'').toUpperCase(),
+        remarks:(document.getElementById('np_ext_remarks')?.value||'').toUpperCase(),
+        status:'Running',actualDate:null,delayDays:null,
+        bom,stages,docs:collectSegDocs('extFileList')};
+    }
+
+    bom.forEach(ensureBomLineStructure); // attach route[] to every new BOM line, needed for the API payload
+
+    let serverResult;
+    try{
+      serverResult = await apiAddSegmentToProject(p.id, {
+        segment: seg, received: rec, tat,
+        bom: bom.map(b=>({
+          item:b.item, l:b.l, w:b.w, t:b.t, profile:b.profile, uom:b.uom, qty:b.qty,
+          colorFinish:b.colorFinish, specialChars:b.specialChars,
+          componentsPerBoard:b.componentsPerBoard, edgeMetersPerComp:b.edgeMetersPerComp, boardQty:b.boardQty,
+          route:b.route
+        }))
+      });
+    } catch(err){
+      toast('Could not save the '+(seg==='wood'?'Wood':'Extrusion')+' component(s) to the server: '+err.message
+        +(results.length?' (earlier segment(s) in this save already succeeded and are safe).':''),'⚠');
+      if(btn){ btn.disabled=false; btn.textContent=originalBtnText||'💾 Save BOM Changes'; }
+      return;
+    }
+    bom.forEach((b,i)=>{ b.lineId = serverResult.bomLineIds[i]; });
+    results.push({seg, isNewSegment, bom, segData, stages});
+  }
+
+  if(btn){ btn.disabled=false; btn.textContent=originalBtnText||'💾 Save BOM Changes'; }
 
   const ts=new Date().toISOString().replace('T',' ').slice(0,16);
-  if(seg==='wood'){
-    p.hasWood=true; p.wood=segData; p.recWood=rec; p.planWood=tat; p.woodSt='Running';
-  } else {
-    p.hasExt=true; p.ext=segData; p.recExt=rec; p.planExt=tat; p.extSt='Running';
-  }
-  p.bom = [...(p.bom||[]), ...bom];
-  p.stages = [...(p.stages||[]), ...stages.filter(s=>!p.stages.some(e=>e.n===s.n))];
-  p.docs = [...(p.docs||[]), ...(segData.docs||[])];
-  p.history = [...(p.history||[]), {ts,u:CURRENT_USER?CURRENT_USER.fullName:'Admin',act:'Segment added',f:'segments',old:'',nw:(seg==='wood'?'Wood':'Extrusion')+' segment added to existing project'}];
-
-  DB.auditLog.unshift({ts,user:CURRENT_USER?CURRENT_USER.fullName:'Admin',action:'Update',module:'Project',entity:p.id,
-    field:'segments',old:(p.hasWood&&seg==='ext'?'Wood only':p.hasExt&&seg==='wood'?'Extrusion only':'—'),
-    nw:'Added '+(seg==='wood'?'Wood':'Extrusion')+' segment ('+bom.length+' component(s))',ip:'192.168.1.1'});
+  results.forEach(({seg, isNewSegment, bom, segData, stages})=>{
+    if(isNewSegment){
+      if(seg==='wood'){ p.hasWood=true; p.wood=segData; p.recWood=segData.received; p.planWood=segData.tat; p.woodSt='Running'; }
+      else { p.hasExt=true; p.ext=segData; p.recExt=segData.received; p.planExt=segData.tat; p.extSt='Running'; }
+      p.stages = [...(p.stages||[]), ...stages.filter(s=>!p.stages.some(e=>e.n===s.n))];
+    }
+    p.bom = [...(p.bom||[]), ...bom];
+    p.docs = [...(p.docs||[]), ...(segData.docs||[])];
+    p.history = [...(p.history||[]), {ts,u:CURRENT_USER?CURRENT_USER.fullName:'Admin',
+      act: isNewSegment?'Segment added':'Components added',f:'segments',old:'',
+      nw:(isNewSegment?(seg==='wood'?'Wood':'Extrusion')+' segment added':bom.length+' new component(s) added to '+(seg==='wood'?'Wood':'Extrusion'))+' — '+bom.map(b=>b.item).join(', ')}];
+    DB.auditLog.unshift({ts,user:CURRENT_USER?CURRENT_USER.fullName:'Admin',action:'Update',module:'Project',entity:p.id,
+      field:'BOM', old:isNewSegment?'—':(seg==='wood'?'Wood':'Extrusion')+' segment existing',
+      nw:(isNewSegment?'Added new '+(seg==='wood'?'Wood':'Extrusion')+' segment':'Added component(s) to '+(seg==='wood'?'Wood':'Extrusion'))+' ('+bom.length+' component(s): '+bom.map(b=>b.item).join(', ')+')',ip:'192.168.1.1'});
+  });
 
   _editingProjectId = null;
-  toast((seg==='wood'?'Wood':'Extrusion')+' segment added to '+p.sap+'! Routing generated — visible in Stage-wise Production Updates.','✓');
+  const summary = results.map(r=>(r.isNewSegment?'new ':'')+(r.seg==='wood'?'Wood':'Extrusion')+' ('+r.bom.length+')').join(', ');
+  toast('BOM updated for '+p.sap+' — '+summary+'. Routing generated — visible in Stage-wise Production Updates.','✓');
   setTimeout(()=>goUpdateProj(p.id),1300);
 }
 
@@ -7874,7 +7917,7 @@ function loadStageUI(p){
   document.getElementById('stageOTD').innerHTML=dly>0?'<span class="badge badge-delayed">Delayed +'+dly+'d</span>':'<span class="badge badge-complete">On Time</span>';
   document.getElementById('stageCertLine').innerHTML='<span class="text-xs text-muted" style="margin-right:6px">Certification Requirement:</span>'+certChipsHTML(p.certifications);
   const editBomBtn = document.getElementById('editBomBtn');
-  if(editBomBtn) editBomBtn.style.display = (!(p.hasWood&&p.hasExt) && hasPermission('newproject', null, 'create')) ? 'inline-flex' : 'none';
+  if(editBomBtn) editBomBtn.style.display = hasPermission('newproject', null, 'create') ? 'inline-flex' : 'none';
 
   (p.bom||[]).forEach(ensureBomLineStructure);
   renderBomComponentPicker(p);

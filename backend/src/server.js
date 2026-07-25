@@ -21,7 +21,7 @@ app.use(express.json());
 // running the code you think it's running — this exists specifically because
 // "is the deployment actually up to date" has been the real cause behind more
 // than one reported bug that looked like an application issue.
-const BACKEND_VERSION = '2026-07-26.1-add-segment-to-project';
+const BACKEND_VERSION = '2026-07-27.1-bom-edit-always-available';
 app.get('/api/health', (req, res) => res.json({
   ok: true,
   service: 'onepws-backend',

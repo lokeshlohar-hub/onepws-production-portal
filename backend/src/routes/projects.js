@@ -95,14 +95,14 @@ router.post('/', requireRole('admin', 'superadmin'), async (req, res) => {
   }
 });
 
-// POST /api/projects/:id/add-segment — adds a currently-missing manufacturing
-// segment (Wood or Extrusion) to an existing project. This is strictly
-// additive: it never touches the project's existing BOM lines, stage
-// history, or QC records — it only inserts new BOM lines for the new
-// segment and sets that segment's own fields, which by definition were
-// previously null/false. Rejects if the segment is already present, so this
-// can never be used to accidentally duplicate or overwrite an existing
-// segment's data.
+// POST /api/projects/:id/add-segment — adds BOM component(s) to a project's
+// Wood or Extrusion segment. Works whether that segment is currently missing
+// (first-time addition — sets has_wood/has_ext and the segment's received
+// date/TAT) or already exists (appending additional components as design
+// changes/late requirements come in — in that case the segment's original
+// received date/TAT are left completely untouched, only new BOM lines are
+// inserted). This is strictly additive either way: it never touches the
+// project's existing BOM lines, stage history, or QC records.
 router.post('/:id/add-segment', requireRole('admin', 'superadmin'), async (req, res) => {
   const body = req.body || {};
   const { segment } = body;
@@ -118,15 +118,16 @@ router.post('/:id/add-segment', requireRole('admin', 'superadmin'), async (req, 
     const { rows: projRows } = await client.query('SELECT * FROM projects WHERE id = $1 FOR UPDATE', [req.params.id]);
     if (!projRows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Project not found' }); }
     const proj = projRows[0];
-    if (segment === 'wood' && proj.has_wood) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'This project already has a Wood Production segment' }); }
-    if (segment === 'ext' && proj.has_ext) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'This project already has an Aluminium Extrusion segment' }); }
+    const segmentAlreadyExists = segment === 'wood' ? proj.has_wood : proj.has_ext;
 
-    if (segment === 'wood') {
-      await client.query('UPDATE projects SET has_wood = true, rec_wood = $1, plan_wood = $2 WHERE id = $3',
-        [body.received || null, body.tat || null, req.params.id]);
-    } else {
-      await client.query('UPDATE projects SET has_ext = true, rec_ext = $1, plan_ext = $2 WHERE id = $3',
-        [body.received || null, body.tat || null, req.params.id]);
+    if (!segmentAlreadyExists) {
+      if (segment === 'wood') {
+        await client.query('UPDATE projects SET has_wood = true, rec_wood = $1, plan_wood = $2 WHERE id = $3',
+          [body.received || null, body.tat || null, req.params.id]);
+      } else {
+        await client.query('UPDATE projects SET has_ext = true, rec_ext = $1, plan_ext = $2 WHERE id = $3',
+          [body.received || null, body.tat || null, req.params.id]);
+      }
     }
 
     const createdLines = [];

@@ -286,3 +286,51 @@ CREATE TABLE IF NOT EXISTS handover_log (
 );
 CREATE INDEX IF NOT EXISTS idx_handover_project ON handover_log(project_id);
 CREATE INDEX IF NOT EXISTS idx_handover_line ON handover_log(line_id);
+
+-- To-Do List — Phase 8. Simple task tracker. "Overdue" is computed on read
+-- (due_date passed and status isn't Completed) rather than stored, so it's
+-- always accurate without needing a background job to flip it.
+CREATE TABLE IF NOT EXISTS todo_list (
+  id            VARCHAR(30) PRIMARY KEY,
+  task          TEXT NOT NULL,
+  assigned_to   VARCHAR(200),
+  department    VARCHAR(100),
+  remarks       TEXT,
+  status        VARCHAR(20) NOT NULL DEFAULT 'Pending', -- Pending, In Progress, Completed
+  due_date      DATE,
+  created_by    VARCHAR(100),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  completed_by  VARCHAR(100),
+  completed_at  TIMESTAMPTZ,
+  history       JSONB NOT NULL DEFAULT '[]'
+);
+CREATE INDEX IF NOT EXISTS idx_todo_status ON todo_list(status);
+
+-- Mistake Register — Phase 8. Records a mistake/issue against any
+-- department (the recorder's own, or another's), with optional project
+-- linkage and an optional photo/document attachment (same base64-data-URL
+-- approach used for QC rejection photos, since there's no separate
+-- file-storage service in this app).
+CREATE TABLE IF NOT EXISTS mistake_register (
+  id                  VARCHAR(30) PRIMARY KEY,
+  description         TEXT NOT NULL,
+  mistake_date        DATE,
+  project_id          VARCHAR(20),
+  project_sap         VARCHAR(50),
+  department          VARCHAR(100),
+  responsible_person  VARCHAR(200),
+  process             VARCHAR(200),
+  action_taken        TEXT,
+  remarks             TEXT,
+  attachment_data     TEXT,
+  attachment_name     VARCHAR(200),
+  status              VARCHAR(20) NOT NULL DEFAULT 'Open', -- Open, Closed
+  created_by          VARCHAR(100),
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+  closed_by           VARCHAR(100),
+  closed_at           TIMESTAMPTZ,
+  history             JSONB NOT NULL DEFAULT '[]'
+);
+CREATE INDEX IF NOT EXISTS idx_mistake_dept ON mistake_register(department);
+CREATE INDEX IF NOT EXISTS idx_mistake_project ON mistake_register(project_id);
+CREATE INDEX IF NOT EXISTS idx_mistake_status ON mistake_register(status);

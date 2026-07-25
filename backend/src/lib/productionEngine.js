@@ -249,7 +249,7 @@ async function processQcDecision(lineId, { stageName, approveQty, rejectQty, dis
 
 // Operator submits a completed quantity at a stage — moves it from "pending"
 // into "awaiting QC" (qc_queue). Mirrors the frontend's submitStageEntry().
-async function submitStageEntry(lineId, { stageName, qty, operator, shift, remark }) {
+async function submitStageEntry(lineId, { stageName, qty, operator, shift, remark, assBatchNos, adhesiveBatchNo, adhesiveExpiryDate }) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -264,14 +264,21 @@ async function submitStageEntry(lineId, { stageName, qty, operator, shift, remar
 
     sd.completed += qty;
     sd.qc_queue += qty;
-    sd.history.push({
+    const historyEntry = {
       ts: new Date().toISOString(),
       ws: stageName,
       operator,
       shift,
       qty,
       action: `${qty} completed and sent to QC${remark ? ' | ' + remark : ''}`,
-    });
+    };
+    // Optional, stage-specific traceability fields — only attached to the
+    // history entry when actually provided, so stages that don't use them
+    // (which is most stages) keep exactly the same history shape as before.
+    if (Array.isArray(assBatchNos) && assBatchNos.length) historyEntry.assBatchNos = assBatchNos;
+    if (adhesiveBatchNo) historyEntry.adhesiveBatchNo = adhesiveBatchNo;
+    if (adhesiveExpiryDate) historyEntry.adhesiveExpiryDate = adhesiveExpiryDate;
+    sd.history.push(historyEntry);
 
     await client.query('UPDATE bom_lines SET stage_data = $1 WHERE line_id = $2', [JSON.stringify(line.stage_data), lineId]);
     await client.query('COMMIT');

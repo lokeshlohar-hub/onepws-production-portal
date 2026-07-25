@@ -432,6 +432,8 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
     <div class="nav-item" data-module="reports" onclick="nav('reports',this)"><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M6 2a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V4a2 2 0 00-2-2H6zm1 2a1 1 0 000 2h6a1 1 0 100-2H7zm6 7a1 1 0 011 1v3a1 1 0 11-2 0v-3a1 1 0 011-1zm-3 3a1 1 0 01-2 0v-3a1 1 0 012 0v3zm-4-3a1 1 0 012 0v3a1 1 0 01-2 0v-3z" clip-rule="evenodd"/></svg>Reports & Export</div>
     <div class="nav-item" data-module="audit" onclick="nav('audit',this)"><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 1.944A11.954 11.954 0 012.166 5C2.056 5.649 2 6.319 2 7c0 5.225 3.34 9.67 8 11.317C14.66 16.67 18 12.225 18 7c0-.682-.057-1.35-.166-2.001A11.954 11.954 0 0110 1.944zM11 14a1 1 0 11-2 0 1 1 0 012 0zm0-7a1 1 0 10-2 0v3a1 1 0 102 0V7z" clip-rule="evenodd"/></svg>Audit Trail</div>
     <div class="nav-item" data-module="dms" onclick="nav('dms',this)"><svg viewBox="0 0 20 20" fill="currentColor"><path d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z"/></svg>Document Library</div>
+    <div class="nav-item" data-module="todo" onclick="nav('todo',this)"><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 6a1 1 0 011-1h6a1 1 0 110 2H4a1 1 0 01-1-1zm0 6a1 1 0 011-1h6a1 1 0 110 2H4a1 1 0 01-1-1zm13.293-7.707a1 1 0 010 1.414l-3 3a1 1 0 01-1.414 0l-1.5-1.5a1 1 0 111.414-1.414l.793.793 2.293-2.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>To-Do List<span class="nav-badge" id="todoBadge" style="display:none">0</span></div>
+    <div class="nav-item" data-module="mistakes" onclick="nav('mistakes',this)"><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-.25-5.25a.75.75 0 00-1.5 0v2.5a.75.75 0 001.5 0v-2.5z" clip-rule="evenodd"/></svg>Mistake Register<span class="nav-badge" id="mistakeBadge" style="display:none">0</span></div>
   </div>
   <div class="sidebar-section">
     <div class="sidebar-section-label">System</div>
@@ -2506,6 +2508,70 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
   </div>
 </div>
 
+<!-- TO-DO LIST PAGE -->
+<div class="page" id="page-todo">
+  <div class="card mb-4">
+    <div class="card-header">
+      <div><div class="card-title">📝 To-Do List</div><div class="text-xs text-muted" style="margin-top:2px">Track pending activities, assign responsibility, and mark tasks complete</div></div>
+      <button class="btn btn-primary btn-sm" data-perm-action="todo..create" onclick="openTodoModal(null)">+ Add Task</button>
+    </div>
+    <div class="card-body">
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px">
+        <div class="card" style="padding:12px;text-align:center"><div class="text-xs text-muted">Pending</div><div class="text-lg fw-600" id="todoCountPending" style="font-size:22px;color:var(--accent)">0</div></div>
+        <div class="card" style="padding:12px;text-align:center"><div class="text-xs text-muted">In Progress</div><div class="text-lg fw-600" id="todoCountProgress" style="font-size:22px;color:#d97706">0</div></div>
+        <div class="card" style="padding:12px;text-align:center"><div class="text-xs text-muted">Overdue</div><div class="text-lg fw-600" id="todoCountOverdue" style="font-size:22px;color:var(--red)">0</div></div>
+        <div class="card" style="padding:12px;text-align:center"><div class="text-xs text-muted">Completed</div><div class="text-lg fw-600" id="todoCountCompleted" style="font-size:22px;color:var(--green)">0</div></div>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
+        <label class="text-xs text-muted">Filter:</label>
+        <select class="form-select" id="todoStatusFilter" style="width:auto" onchange="renderTodoList()">
+          <option value="all">All (except Completed)</option>
+          <option value="Pending">Pending</option>
+          <option value="In Progress">In Progress</option>
+          <option value="Overdue">Overdue</option>
+          <option value="Completed">Completed</option>
+          <option value="everything">Everything</option>
+        </select>
+      </div>
+      <table>
+        <thead><tr><th>Task / Activity</th><th>Assigned To</th><th>Department</th><th>Due Date</th><th>Status</th><th>Remarks</th><th style="width:190px">Actions</th></tr></thead>
+        <tbody id="todoBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- MISTAKE REGISTER PAGE -->
+<div class="page" id="page-mistakes">
+  <div class="card mb-4">
+    <div class="card-header">
+      <div><div class="card-title">⚠️ Mistake Register</div><div class="text-xs text-muted" style="margin-top:2px">Record mistakes/issues for your own or any other department, with full traceability</div></div>
+      <button class="btn btn-primary btn-sm" data-perm-action="mistakes..create" onclick="openMistakeModal(null)">+ Record Mistake</button>
+    </div>
+    <div class="card-body">
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px">
+        <div class="card" style="padding:12px;text-align:center"><div class="text-xs text-muted">Open</div><div class="text-lg fw-600" id="mistakeCountOpen" style="font-size:22px;color:var(--red)">0</div></div>
+        <div class="card" style="padding:12px;text-align:center"><div class="text-xs text-muted">Closed</div><div class="text-lg fw-600" id="mistakeCountClosed" style="font-size:22px;color:var(--green)">0</div></div>
+        <div class="card" style="padding:12px;text-align:center"><div class="text-xs text-muted">Total Recorded</div><div class="text-lg fw-600" id="mistakeCountTotal" style="font-size:22px;color:var(--accent)">0</div></div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:end">
+        <div><label class="text-xs text-muted d-block">Department</label><select class="form-select" id="mistakeFilterDept" style="width:150px" onchange="renderMistakeRegister()"><option value="">All</option></select></div>
+        <div><label class="text-xs text-muted d-block">Status</label><select class="form-select" id="mistakeFilterStatus" style="width:120px" onchange="renderMistakeRegister()"><option value="">All</option><option>Open</option><option>Closed</option></select></div>
+        <div><label class="text-xs text-muted d-block">Project No.</label><input type="text" class="form-input" id="mistakeFilterProject" style="width:140px" placeholder="Search project" oninput="renderMistakeRegister()"></div>
+        <div><label class="text-xs text-muted d-block">Process</label><input type="text" class="form-input" id="mistakeFilterProcess" style="width:140px" placeholder="Search process" oninput="renderMistakeRegister()"></div>
+        <div><label class="text-xs text-muted d-block">Responsible Person</label><input type="text" class="form-input" id="mistakeFilterPerson" style="width:150px" placeholder="Search person" oninput="renderMistakeRegister()"></div>
+        <div><label class="text-xs text-muted d-block">From</label><input type="date" class="form-input" id="mistakeFilterFrom" style="width:140px" onchange="renderMistakeRegister()"></div>
+        <div><label class="text-xs text-muted d-block">To</label><input type="date" class="form-input" id="mistakeFilterTo" style="width:140px" onchange="renderMistakeRegister()"></div>
+        <button class="btn btn-outline btn-sm" onclick="clearMistakeFilters()">Clear Filters</button>
+      </div>
+      <table>
+        <thead><tr><th>Date</th><th>Description</th><th>Project No.</th><th>Department</th><th>Responsible Person</th><th>Process</th><th>Status</th><th style="width:170px">Actions</th></tr></thead>
+        <tbody id="mistakeBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
 <!-- ADMIN PAGE -->
 <div class="page" id="page-admin">
   <div class="admin-grid">
@@ -3440,6 +3506,83 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
   </div>
 </div>
 
+<!-- ADD/EDIT TO-DO TASK MODAL -->
+<div class="modal-overlay" id="todoModal">
+  <div class="modal">
+    <div class="modal-header"><div class="modal-title" id="todoModalTitle">📝 New Task</div><button class="modal-close" onclick="closeMod('todoModal')">×</button></div>
+    <div class="modal-body">
+      <input type="hidden" id="todo_id">
+      <div class="form-group"><label class="form-label">Task / Activity <span class="req">*</span></label><textarea class="form-textarea" id="todo_task" style="height:55px" placeholder="Describe the task..."></textarea></div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Assigned To (Person)</label><input type="text" class="form-input" id="todo_assigned" placeholder="Responsible person's name"></div>
+        <div class="form-group"><label class="form-label">Department</label><select class="form-select" id="todo_department"><option value="">— Select Department —</option></select></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Due Date</label><input type="date" class="form-input" id="todo_due"></div>
+        <div class="form-group"><label class="form-label">Status</label><select class="form-select" id="todo_status"><option>Pending</option><option>In Progress</option><option>Completed</option></select></div>
+      </div>
+      <div class="form-group" style="margin-bottom:0"><label class="form-label">Remarks</label><textarea class="form-textarea" id="todo_remarks" style="height:45px" placeholder="Optional notes..."></textarea></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeMod('todoModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveTodo()">💾 Save Task</button>
+    </div>
+  </div>
+</div>
+
+<!-- ADD/EDIT MISTAKE MODAL -->
+<div class="modal-overlay" id="mistakeModal">
+  <div class="modal" style="max-width:640px">
+    <div class="modal-header"><div class="modal-title" id="mistakeModalTitle">⚠️ Record Mistake / Issue</div><button class="modal-close" onclick="closeMod('mistakeModal')">×</button></div>
+    <div class="modal-body">
+      <input type="hidden" id="mistake_id">
+      <div class="form-group"><label class="form-label">Mistake / Issue Description <span class="req">*</span></label><textarea class="form-textarea" id="mistake_description" style="height:55px" placeholder="Describe what happened..."></textarea></div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Date of Mistake <span class="req">*</span></label><input type="date" class="form-input" id="mistake_date"></div>
+        <div class="form-group"><label class="form-label">Related Project No. <span class="text-xs text-muted">(optional)</span></label><select class="form-select" id="mistake_project"><option value="">— None —</option></select></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Responsible Department <span class="req">*</span></label><select class="form-select" id="mistake_department"><option value="">— Select Department —</option></select></div>
+        <div class="form-group"><label class="form-label">Responsible Person <span class="text-xs text-muted">(if required)</span></label><input type="text" class="form-input" id="mistake_person" placeholder="Name (optional)"></div>
+      </div>
+      <div class="form-group"><label class="form-label">Process <span class="text-xs text-muted">(optional — e.g. Cutting, Dispatch, Purchase Order)</span></label><input type="text" class="form-input" id="mistake_process" placeholder="Related process/activity"></div>
+      <div class="form-group"><label class="form-label">Immediate Correction / Action Taken</label><textarea class="form-textarea" id="mistake_action" style="height:45px" placeholder="What was done to correct this..."></textarea></div>
+      <div class="form-group"><label class="form-label">Remarks</label><textarea class="form-textarea" id="mistake_remarks" style="height:40px"></textarea></div>
+      <div class="form-group" style="margin-bottom:0">
+        <label class="form-label">Photo / Document Attachment <span class="text-xs text-muted">(optional)</span></label>
+        <div style="display:flex;align-items:center;gap:10px">
+          <button type="button" class="qc-photo-icon-btn" onclick="document.getElementById('mistake_photo_capture').click()" title="Capture Photo" aria-label="Capture Photo">📷</button>
+          <button type="button" class="qc-photo-icon-btn" onclick="document.getElementById('mistake_photo_upload').click()" title="Upload Photo" aria-label="Upload Photo">🖼️</button>
+          <input type="file" accept="image/*" capture="environment" id="mistake_photo_capture" style="display:none" onchange="onMistakePhotoSelected(this)">
+          <input type="file" accept="image/*" id="mistake_photo_upload" style="display:none" onchange="onMistakePhotoSelected(this)">
+          <span id="mistake_photo_status" class="text-xs text-muted"></span>
+        </div>
+        <div id="mistake_photo_preview_wrap" style="display:none;margin-top:8px;position:relative;width:fit-content">
+          <img id="mistake_photo_preview" style="max-height:90px;max-width:160px;border-radius:6px;border:1.5px solid var(--border2);display:block">
+          <button type="button" onclick="clearMistakePhoto()" title="Remove photo" style="position:absolute;top:-8px;right:-8px;width:20px;height:20px;border-radius:50%;background:var(--red);color:#fff;border:none;cursor:pointer;font-size:11px;line-height:1">×</button>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeMod('mistakeModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveMistake()">💾 Save Record</button>
+    </div>
+  </div>
+</div>
+
+<!-- MISTAKE DETAIL / HISTORY VIEW MODAL -->
+<div class="modal-overlay" id="mistakeDetailModal">
+  <div class="modal" style="max-width:640px">
+    <div class="modal-header"><div class="modal-title">🔍 Mistake Record Detail</div><button class="modal-close" onclick="closeMod('mistakeDetailModal')">×</button></div>
+    <div class="modal-body">
+      <div id="mistakeDetailBody" style="font-size:13px"></div>
+    </div>
+    <div class="modal-footer" id="mistakeDetailFooter">
+      <button class="btn btn-outline" onclick="closeMod('mistakeDetailModal')">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- TRACEABILITY DETAIL VIEW MODAL -->
 <div class="modal-overlay" id="traceabilityDetailModal">
   <div class="modal">
@@ -3849,6 +3992,8 @@ const DB = {
   stageLog:[],
   rejectLog:[],
   handoverLog:[],
+  todos:[],
+  mistakes:[],
   auditLog:[],
   notifications:[],
   dailyCap:{},
@@ -4094,6 +4239,30 @@ function apiLoadHandoverLog() {
 }
 function apiCreateHandover(payload) {
   return apiRequest('/handover-log', { method: 'POST', body: JSON.stringify(payload) });
+}
+function apiLoadTodos() {
+  return apiRequest('/todo-list', { method: 'GET' });
+}
+function apiCreateTodo(payload) {
+  return apiRequest('/todo-list', { method: 'POST', body: JSON.stringify(payload) });
+}
+function apiUpdateTodo(id, payload) {
+  return apiRequest('/todo-list/' + encodeURIComponent(id), { method: 'PUT', body: JSON.stringify(payload) });
+}
+function apiDeleteTodo(id) {
+  return apiRequest('/todo-list/' + encodeURIComponent(id), { method: 'DELETE' });
+}
+function apiLoadMistakes() {
+  return apiRequest('/mistake-register', { method: 'GET' });
+}
+function apiCreateMistake(payload) {
+  return apiRequest('/mistake-register', { method: 'POST', body: JSON.stringify(payload) });
+}
+function apiUpdateMistake(id, payload) {
+  return apiRequest('/mistake-register/' + encodeURIComponent(id), { method: 'PUT', body: JSON.stringify(payload) });
+}
+function apiDeleteMistake(id) {
+  return apiRequest('/mistake-register/' + encodeURIComponent(id), { method: 'DELETE' });
 }
 function apiLoadCalibrationInstruments() {
   return apiRequest('/calibration-instruments', { method: 'GET' });
@@ -4492,6 +4661,22 @@ async function loadHandoverLogFromServer() {
     DB.handoverLog = resp.handoverLog || [];
   } catch (err) {
     toast('Could not load the saved handover notification history from the server: ' + err.message, '⚠');
+  }
+}
+async function loadTodosFromServer() {
+  try {
+    const resp = await apiLoadTodos();
+    DB.todos = resp.todos || [];
+  } catch (err) {
+    toast('Could not load the saved To-Do List from the server: ' + err.message, '⚠');
+  }
+}
+async function loadMistakesFromServer() {
+  try {
+    const resp = await apiLoadMistakes();
+    DB.mistakes = resp.mistakes || [];
+  } catch (err) {
+    toast('Could not load the saved Mistake Register from the server: ' + err.message, '⚠');
   }
 }
 
@@ -5235,6 +5420,8 @@ const PERMISSION_MODULES = [
   {key:'reports',      label:'Reports & Export',               actions:['view','export','print','download']},
   {key:'audit',        label:'Audit Trail',                    actions:['view']},
   {key:'dms',          label:'Document Library',                actions:['view','download','print']},
+  {key:'todo',         label:'To-Do List',                     actions:['view','create','edit','delete']},
+  {key:'mistakes',     label:'Mistake Register',                actions:['view','create','edit','delete','approve']},
   {key:'admin',        label:'Admin Panel',                    actions:['view']}
 ];
 const ALL_PERM_ACTIONS = ['view','create','edit','delete','approve','export','print','download'];
@@ -5247,14 +5434,14 @@ function noPerm(){ return {}; }
 // freely override any of this afterward via the permission matrix; it's just a
 // sensible starting point so a newly created Admin account isn't empty.
 const DEPARTMENT_DEFAULT_MODULES = {
-  'Production':  {tracker:{view:true,create:true,edit:true,export:true,print:true}, newproject:'full', stageupdate:'full', capacity:{daily:'full',machine:'full',oee:'full',blocking:'full',planning:'full',summary:'full',toolcons:'view'}, dashboard:'view', analytics:'view'},
-  'Quality':     {quality:'full', dimensional:'full', calibration:{schedule:'view', entry:'full', history:'view', analytics:'view'}, stageupdate:'full', dashboard:'view', analytics:'view', tracker:'view'},
-  'Maintenance': {maintenance:'full', calibration:{schedule:'view', entry:'full', history:'view', analytics:'view'}, capacity:{toolcons:'full'}, dashboard:'view', analytics:'view'},
-  'Planning':    {capacity:'full', tracker:{view:true,create:true,edit:true,export:true,print:true}, reports:{view:true,export:true}, dashboard:'view', analytics:'view'},
-  'Store':       {dms:'full', maintenance:{toolinv:'view'}, reports:{view:true,export:true}, dashboard:'view'},
-  'Purchase':    {maintenance:{toolinv:'full'}, reports:{view:true,export:true}, dashboard:'view'},
-  'HR':          {dashboard:'view', reports:{view:true}},
-  'Other':       {dashboard:'view'}
+  'Production':  {tracker:{view:true,create:true,edit:true,export:true,print:true}, newproject:'full', stageupdate:'full', capacity:{daily:'full',machine:'full',oee:'full',blocking:'full',planning:'full',summary:'full',toolcons:'view'}, dashboard:'view', analytics:'view', todo:'full', mistakes:'full'},
+  'Quality':     {quality:'full', dimensional:'full', calibration:{schedule:'view', entry:'full', history:'view', analytics:'view'}, stageupdate:'full', dashboard:'view', analytics:'view', tracker:'view', todo:'full', mistakes:'full'},
+  'Maintenance': {maintenance:'full', calibration:{schedule:'view', entry:'full', history:'view', analytics:'view'}, capacity:{toolcons:'full'}, dashboard:'view', analytics:'view', todo:'full', mistakes:'full'},
+  'Planning':    {capacity:'full', tracker:{view:true,create:true,edit:true,export:true,print:true}, reports:{view:true,export:true}, dashboard:'view', analytics:'view', todo:'full', mistakes:'full'},
+  'Store':       {dms:'full', maintenance:{toolinv:'view'}, reports:{view:true,export:true}, dashboard:'view', todo:'full', mistakes:'full'},
+  'Purchase':    {maintenance:{toolinv:'full'}, reports:{view:true,export:true}, dashboard:'view', todo:'full', mistakes:'full'},
+  'HR':          {dashboard:'view', reports:{view:true}, todo:'full', mistakes:'full'},
+  'Other':       {dashboard:'view', todo:'full', mistakes:'full'}
 };
 
 // Builds a full permissions object (every module + sub present, defaulting to
@@ -5366,6 +5553,8 @@ async function attemptLogin(btn){
     await loadUsersFromServer();
     await loadRejectLogFromServer();
     await loadHandoverLogFromServer();
+    await loadTodosFromServer();
+    await loadMistakesFromServer();
 
     onLoginSuccess();
   } catch(err){
@@ -5411,6 +5600,8 @@ async function restoreSession(){
     await loadUsersFromServer();
     await loadRejectLogFromServer();
     await loadHandoverLogFromServer();
+    await loadTodosFromServer();
+    await loadMistakesFromServer();
     onLoginSuccess(true);
   } catch(err){
     try{ localStorage.removeItem('onepws_token'); }catch(e){}
@@ -5846,7 +6037,7 @@ async function savePermMatrix(){
   if(CURRENT_USER && CURRENT_USER.id===u.id) applyPermissionsToUI();
 }
 
-const PAGE_TITLES={'dashboard':'Production Dashboard','analytics':'Analytics & MIS Reporting','tracker':'Master Project Tracker','newproject':'New Project Entry','stageupdate':'Stage-wise Production Updates','capacity':'Capacity Planning & Daily Entry','reports':'Reports & Data Export','audit':'ISO Audit Trail','admin':'Master Admin Panel','quality':'Quality Control & Rejection Log','maintenance':'Maintenance Management — Breakdown & Technician Tracking','calibration':'Calibration Management — Production, Quality & Maintenance','dms':'Document Management System — Controlled Library'};
+const PAGE_TITLES={'dashboard':'Production Dashboard','analytics':'Analytics & MIS Reporting','tracker':'Master Project Tracker','newproject':'New Project Entry','stageupdate':'Stage-wise Production Updates','capacity':'Capacity Planning & Daily Entry','reports':'Reports & Data Export','audit':'ISO Audit Trail','admin':'Master Admin Panel','quality':'Quality Control & Rejection Log','maintenance':'Maintenance Management — Breakdown & Technician Tracking','calibration':'Calibration Management — Production, Quality & Maintenance','dms':'Document Management System — Controlled Library','todo':'To-Do List','mistakes':'Mistake Register'};
 
 function nav(pg,el){
   if(!hasPermission(pg, null, 'view')){
@@ -5872,6 +6063,8 @@ function nav(pg,el){
   if(pg==='admin')renderAdmin('users',null);
   if(pg==='newproject')initNewProj();
   if(pg==='dms')initDMS();
+  if(pg==='todo')renderTodoList();
+  if(pg==='mistakes')renderMistakeRegister();
 }
 
 // ------ FY DROPDOWN ------
@@ -15084,6 +15277,371 @@ function exportOverrideCSV(){
 }
 
 // ------ AUDIT ------
+// ------ TO-DO LIST MODULE ------
+// "Overdue" is never a status the user sets directly — it's computed here
+// from the due date, so it's always accurate without needing anything to
+// actively flip it. The underlying stored status stays Pending/In
+// Progress/Completed; this is purely a display-time derivation.
+function computeTodoDisplayStatus(t){
+  if(t.status==='Completed') return 'Completed';
+  if(t.dueDate){
+    const today=new Date().toISOString().split('T')[0];
+    if(dateOnly(t.dueDate) < today) return 'Overdue';
+  }
+  return t.status||'Pending';
+}
+function todoStatusBadge(disp){
+  const map={Pending:'badge-hold', 'In Progress':'badge-running', Overdue:'badge-delayed', Completed:'badge-complete'};
+  return '<span class="badge '+(map[disp]||'badge-hold')+'">'+disp+'</span>';
+}
+
+function renderTodoList(){
+  const tbody=document.getElementById('todoBody'); if(!tbody) return;
+  const deptSel=document.getElementById('todo_department');
+  if(deptSel && deptSel.options.length<=1){
+    deptSel.innerHTML='<option value="">— Select Department —</option>'+M.dmsOrigins.map(d=>'<option>'+d+'</option>').join('');
+  }
+  const filter=document.getElementById('todoStatusFilter')?.value||'all';
+  let rows=DB.todos.map(t=>({...t, dispStatus:computeTodoDisplayStatus(t)}));
+  if(filter==='all') rows=rows.filter(t=>t.dispStatus!=='Completed');
+  else if(filter!=='everything') rows=rows.filter(t=>t.dispStatus===filter);
+  rows.sort((a,c)=>{
+    // Overdue and Pending/In Progress first (by due date, soonest first), Completed last
+    if((a.dispStatus==='Completed')!==(c.dispStatus==='Completed')) return a.dispStatus==='Completed'?1:-1;
+    return (a.dueDate||'9999').localeCompare(c.dueDate||'9999');
+  });
+
+  document.getElementById('todoCountPending').textContent = DB.todos.filter(t=>computeTodoDisplayStatus(t)==='Pending').length;
+  document.getElementById('todoCountProgress').textContent = DB.todos.filter(t=>computeTodoDisplayStatus(t)==='In Progress').length;
+  document.getElementById('todoCountOverdue').textContent = DB.todos.filter(t=>computeTodoDisplayStatus(t)==='Overdue').length;
+  document.getElementById('todoCountCompleted').textContent = DB.todos.filter(t=>computeTodoDisplayStatus(t)==='Completed').length;
+
+  const canEdit=hasPermission('todo',null,'edit'), canDelete=hasPermission('todo',null,'delete');
+  tbody.innerHTML = rows.length ? rows.map(t=>{
+    const actions=[];
+    if(t.dispStatus!=='Completed' && canEdit) actions.push('<button class="btn btn-outline btn-sm" onclick="markTodoComplete(\''+t.id+'\')">✓ Complete</button>');
+    if(canEdit) actions.push('<button class="btn btn-outline btn-sm" onclick="openTodoModal(\''+t.id+'\')">✏ Edit</button>');
+    if(canDelete) actions.push('<button class="btn btn-danger btn-sm" onclick="deleteTodoTask(\''+t.id+'\')">🗑</button>');
+    return '<tr><td class="fw-600">'+t.task+'</td><td class="text-xs">'+(t.assignedTo||'—')+'</td><td class="text-xs">'+(t.department||'—')+'</td>'
+      +'<td class="font-mono text-sm">'+(dateOnly(t.dueDate)||'—')+'</td><td>'+todoStatusBadge(t.dispStatus)+'</td>'
+      +'<td class="text-xs text-muted" style="max-width:160px;overflow:hidden;text-overflow:ellipsis">'+(t.remarks||'—')+'</td>'
+      +'<td style="display:flex;gap:4px;flex-wrap:wrap">'+(actions.join('')||'<span class="text-muted">—</span>')+'</td></tr>';
+  }).join('') : '<tr><td colspan="7" class="text-sm text-muted" style="padding:14px;text-align:center">No tasks'+(filter!=='everything'&&filter!=='all'?' with this status':'')+'.</td></tr>';
+}
+
+function openTodoModal(id){
+  const t = id ? DB.todos.find(x=>x.id===id) : null;
+  document.getElementById('todo_id').value = id||'';
+  document.getElementById('todo_task').value = t?.task||'';
+  document.getElementById('todo_assigned').value = t?.assignedTo||'';
+  const deptSel=document.getElementById('todo_department');
+  if(deptSel.options.length<=1) deptSel.innerHTML='<option value="">— Select Department —</option>'+M.dmsOrigins.map(d=>'<option>'+d+'</option>').join('');
+  deptSel.value = t?.department||'';
+  document.getElementById('todo_due').value = dateOnly(t?.dueDate)||'';
+  document.getElementById('todo_status').value = t?.status||'Pending';
+  document.getElementById('todo_remarks').value = t?.remarks||'';
+  document.getElementById('todoModalTitle').textContent = t ? '✏ Edit Task' : '📝 New Task';
+  document.getElementById('todoModal').classList.add('open');
+}
+
+async function saveTodo(){
+  const id=document.getElementById('todo_id').value;
+  const task=document.getElementById('todo_task').value.trim();
+  if(!task){ toast('Enter the task/activity description.','⚠'); return; }
+  const payload={
+    task, assignedTo:document.getElementById('todo_assigned').value.trim(),
+    department:document.getElementById('todo_department').value,
+    dueDate:document.getElementById('todo_due').value||null,
+    status:document.getElementById('todo_status').value,
+    remarks:document.getElementById('todo_remarks').value.trim(),
+  };
+  const actor=CURRENT_USER?CURRENT_USER.fullName:'Unknown';
+  toast('Saving to server…','⏳');
+  try{
+    if(id){
+      const resp=await apiUpdateTodo(id,{...payload, updatedBy:actor});
+      const idx=DB.todos.findIndex(x=>x.id===id);
+      if(idx>=0) DB.todos[idx]=resp.todo;
+      toast('Task updated.','✓');
+    } else {
+      const resp=await apiCreateTodo({...payload, createdBy:actor});
+      DB.todos.unshift(resp.todo);
+      toast('Task added.','✓');
+    }
+  }catch(err){
+    toast('Could not save this task to the server: '+err.message,'⚠');
+    return;
+  }
+  closeMod('todoModal');
+  renderTodoList();
+}
+
+async function markTodoComplete(id){
+  const t=DB.todos.find(x=>x.id===id); if(!t) return;
+  const actor=CURRENT_USER?CURRENT_USER.fullName:'Unknown';
+  toast('Saving to server…','⏳');
+  try{
+    const resp=await apiUpdateTodo(id,{status:'Completed', updatedBy:actor});
+    const idx=DB.todos.findIndex(x=>x.id===id);
+    if(idx>=0) DB.todos[idx]=resp.todo;
+  }catch(err){
+    toast('Could not mark this task complete: '+err.message,'⚠');
+    return;
+  }
+  toast('Task marked complete.','✓');
+  renderTodoList();
+}
+
+async function deleteTodoTask(id){
+  const t=DB.todos.find(x=>x.id===id); if(!t) return;
+  if(!confirm('Delete task "'+t.task+'"? This cannot be undone.')) return;
+  toast('Deleting from server…','⏳');
+  try{
+    await apiDeleteTodo(id);
+  }catch(err){
+    toast('Could not delete this task: '+err.message,'⚠');
+    return;
+  }
+  DB.todos = DB.todos.filter(x=>x.id!==id);
+  toast('Task deleted.','✓');
+  renderTodoList();
+}
+
+// ------ MISTAKE REGISTER MODULE ------
+let _mistakePhotoData = null;
+
+function onMistakePhotoSelected(inputEl){
+  const file = inputEl.files && inputEl.files[0];
+  inputEl.value = '';
+  if(!file) return;
+  if(!file.type.startsWith('image/')){ toast('Please choose an image file.','⚠'); return; }
+  if(file.size > 15*1024*1024){ toast('That image is quite large — please choose one under 15MB.','⚠'); return; }
+  const statusEl = document.getElementById('mistake_photo_status');
+  if(statusEl) statusEl.textContent = 'Processing…';
+  const reader = new FileReader();
+  reader.onload = function(e){
+    const img = new Image();
+    img.onload = function(){
+      const maxDim = 900;
+      let w = img.width, h = img.height;
+      if(w > maxDim || h > maxDim){ const scale = maxDim / Math.max(w,h); w = Math.round(w*scale); h = Math.round(h*scale); }
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      _mistakePhotoData = canvas.toDataURL('image/jpeg', 0.7);
+      const previewImg = document.getElementById('mistake_photo_preview');
+      const previewWrap = document.getElementById('mistake_photo_preview_wrap');
+      if(previewImg) previewImg.src = _mistakePhotoData;
+      if(previewWrap) previewWrap.style.display = 'block';
+      if(statusEl) statusEl.textContent = 'Photo attached';
+    };
+    img.onerror = function(){ toast('Could not read that image — please try a different file.','⚠'); if(statusEl) statusEl.textContent=''; };
+    img.src = e.target.result;
+  };
+  reader.onerror = function(){ toast('Could not read that file.','⚠'); if(statusEl) statusEl.textContent=''; };
+  reader.readAsDataURL(file);
+}
+function clearMistakePhoto(){
+  _mistakePhotoData = null;
+  const previewWrap = document.getElementById('mistake_photo_preview_wrap');
+  const statusEl = document.getElementById('mistake_photo_status');
+  if(previewWrap) previewWrap.style.display = 'none';
+  if(statusEl) statusEl.textContent = '';
+}
+
+function clearMistakeFilters(){
+  ['mistakeFilterDept','mistakeFilterStatus','mistakeFilterProject','mistakeFilterProcess','mistakeFilterPerson','mistakeFilterFrom','mistakeFilterTo'].forEach(id=>{
+    const el=document.getElementById(id); if(el) el.value='';
+  });
+  renderMistakeRegister();
+}
+
+function renderMistakeRegister(){
+  const tbody=document.getElementById('mistakeBody'); if(!tbody) return;
+  const deptSel=document.getElementById('mistakeFilterDept');
+  if(deptSel && deptSel.options.length<=1) deptSel.innerHTML='<option value="">All</option>'+M.dmsOrigins.map(d=>'<option>'+d+'</option>').join('');
+
+  const fDept=document.getElementById('mistakeFilterDept')?.value||'';
+  const fStatus=document.getElementById('mistakeFilterStatus')?.value||'';
+  const fProject=(document.getElementById('mistakeFilterProject')?.value||'').toLowerCase();
+  const fProcess=(document.getElementById('mistakeFilterProcess')?.value||'').toLowerCase();
+  const fPerson=(document.getElementById('mistakeFilterPerson')?.value||'').toLowerCase();
+  const fFrom=document.getElementById('mistakeFilterFrom')?.value||'';
+  const fTo=document.getElementById('mistakeFilterTo')?.value||'';
+
+  let rows=DB.mistakes.filter(m=>{
+    if(fDept && m.department!==fDept) return false;
+    if(fStatus && m.status!==fStatus) return false;
+    if(fProject && !(m.proj||'').toLowerCase().includes(fProject)) return false;
+    if(fProcess && !(m.process||'').toLowerCase().includes(fProcess)) return false;
+    if(fPerson && !(m.responsiblePerson||'').toLowerCase().includes(fPerson)) return false;
+    const d=dateOnly(m.mistakeDate);
+    if(fFrom && d && d<fFrom) return false;
+    if(fTo && d && d>fTo) return false;
+    return true;
+  });
+  rows.sort((a,c)=>(dateOnly(c.mistakeDate)||'').localeCompare(dateOnly(a.mistakeDate)||''));
+  window._mistakeRenderRows = rows;
+
+  document.getElementById('mistakeCountOpen').textContent = DB.mistakes.filter(m=>m.status==='Open').length;
+  document.getElementById('mistakeCountClosed').textContent = DB.mistakes.filter(m=>m.status==='Closed').length;
+  document.getElementById('mistakeCountTotal').textContent = DB.mistakes.length;
+
+  const canEdit=hasPermission('mistakes',null,'edit'), canDelete=hasPermission('mistakes',null,'delete'), canClose=hasPermission('mistakes',null,'approve');
+  tbody.innerHTML = rows.length ? rows.map((m,i)=>{
+    const actions=['<button class="btn btn-outline btn-sm" onclick="viewMistakeDetail(\''+m.id+'\')">🔍 View</button>'];
+    if(canEdit) actions.push('<button class="btn btn-outline btn-sm" onclick="openMistakeModal(\''+m.id+'\')">✏ Edit</button>');
+    if(canDelete) actions.push('<button class="btn btn-danger btn-sm" onclick="deleteMistakeRecord(\''+m.id+'\')">🗑</button>');
+    return '<tr><td class="font-mono text-sm">'+(dateOnly(m.mistakeDate)||'—')+'</td>'
+      +'<td class="text-sm" style="max-width:220px;overflow:hidden;text-overflow:ellipsis">'+m.description+(m.attachmentData?' 📎':'')+'</td>'
+      +'<td class="text-xs fw-600">'+(m.proj||'—')+'</td><td class="text-xs">'+m.department+'</td>'
+      +'<td class="text-xs">'+(m.responsiblePerson||'—')+'</td><td class="text-xs">'+(m.process||'—')+'</td>'
+      +'<td><span class="badge '+(m.status==='Closed'?'badge-complete':'badge-delayed')+'">'+m.status+'</span></td>'
+      +'<td style="display:flex;gap:4px;flex-wrap:wrap">'+actions.join('')+'</td></tr>';
+  }).join('') : '<tr><td colspan="8" class="text-sm text-muted" style="padding:14px;text-align:center">No mistakes recorded'+(fDept||fStatus||fProject||fProcess||fPerson||fFrom||fTo?' matching these filters':' yet')+'.</td></tr>';
+}
+
+function openMistakeModal(id){
+  const m = id ? DB.mistakes.find(x=>x.id===id) : null;
+  document.getElementById('mistake_id').value = id||'';
+  document.getElementById('mistake_description').value = m?.description||'';
+  document.getElementById('mistake_date').value = dateOnly(m?.mistakeDate)||new Date().toISOString().split('T')[0];
+  const projSel=document.getElementById('mistake_project');
+  if(projSel.options.length<=1) projSel.innerHTML='<option value="">— None —</option>'+DB.projects.map(p=>'<option value="'+p.id+'">'+p.sap+' — '+p.customer+'</option>').join('');
+  projSel.value = m?.projectId||'';
+  const deptSel=document.getElementById('mistake_department');
+  if(deptSel.options.length<=1) deptSel.innerHTML='<option value="">— Select Department —</option>'+M.dmsOrigins.map(d=>'<option>'+d+'</option>').join('');
+  deptSel.value = m?.department||'';
+  document.getElementById('mistake_person').value = m?.responsiblePerson||'';
+  document.getElementById('mistake_process').value = m?.process||'';
+  document.getElementById('mistake_action').value = m?.actionTaken||'';
+  document.getElementById('mistake_remarks').value = m?.remarks||'';
+  _mistakePhotoData = m?.attachmentData || null;
+  const previewWrap=document.getElementById('mistake_photo_preview_wrap'), previewImg=document.getElementById('mistake_photo_preview'), statusEl=document.getElementById('mistake_photo_status');
+  if(_mistakePhotoData){ previewImg.src=_mistakePhotoData; previewWrap.style.display='block'; statusEl.textContent='Photo attached'; }
+  else { previewWrap.style.display='none'; statusEl.textContent=''; }
+  document.getElementById('mistakeModalTitle').textContent = m ? '✏ Edit Mistake Record' : '⚠️ Record Mistake / Issue';
+  document.getElementById('mistakeModal').classList.add('open');
+}
+
+async function saveMistake(){
+  const id=document.getElementById('mistake_id').value;
+  const description=document.getElementById('mistake_description').value.trim();
+  const department=document.getElementById('mistake_department').value;
+  if(!description){ toast('Enter the mistake/issue description.','⚠'); return; }
+  if(!department){ toast('Select the responsible department.','⚠'); return; }
+  const projectId=document.getElementById('mistake_project').value;
+  const proj=projectId ? (DB.projects.find(p=>p.id===projectId)?.sap||'') : '';
+  const payload={
+    description, mistakeDate:document.getElementById('mistake_date').value||null,
+    projectId:projectId||null, proj,
+    department, responsiblePerson:document.getElementById('mistake_person').value.trim(),
+    process:document.getElementById('mistake_process').value.trim(),
+    actionTaken:document.getElementById('mistake_action').value.trim(),
+    remarks:document.getElementById('mistake_remarks').value.trim(),
+    attachmentData:_mistakePhotoData||null,
+  };
+  const actor=CURRENT_USER?CURRENT_USER.fullName:'Unknown';
+  toast('Saving to server…','⏳');
+  try{
+    if(id){
+      const resp=await apiUpdateMistake(id,{...payload, updatedBy:actor});
+      const idx=DB.mistakes.findIndex(x=>x.id===id);
+      if(idx>=0) DB.mistakes[idx]=resp.mistake;
+      toast('Mistake record updated.','✓');
+    } else {
+      const resp=await apiCreateMistake({...payload, createdBy:actor});
+      DB.mistakes.unshift(resp.mistake);
+      toast('Mistake recorded.','✓');
+    }
+  }catch(err){
+    toast('Could not save this record to the server: '+err.message,'⚠');
+    return;
+  }
+  closeMod('mistakeModal');
+  renderMistakeRegister();
+}
+
+function viewMistakeDetail(id){
+  const m=DB.mistakes.find(x=>x.id===id); if(!m) return;
+  const lines=[];
+  lines.push('<div class="text-muted">Description</div><div class="fw-600">'+m.description+'</div>');
+  lines.push('<div class="text-muted">Date of Mistake</div><div class="fw-600">'+(dateOnly(m.mistakeDate)||'—')+'</div>');
+  lines.push('<div class="text-muted">Related Project</div><div class="fw-600">'+(m.proj||'—')+'</div>');
+  lines.push('<div class="text-muted">Department</div><div class="fw-600">'+m.department+'</div>');
+  lines.push('<div class="text-muted">Responsible Person</div><div class="fw-600">'+(m.responsiblePerson||'—')+'</div>');
+  lines.push('<div class="text-muted">Process</div><div class="fw-600">'+(m.process||'—')+'</div>');
+  lines.push('<div class="text-muted">Action Taken</div><div class="fw-600">'+(m.actionTaken||'—')+'</div>');
+  lines.push('<div class="text-muted">Remarks</div><div class="fw-600">'+(m.remarks||'—')+'</div>');
+  lines.push('<div class="text-muted">Status</div><div class="fw-600">'+m.status+'</div>');
+  lines.push('<div class="text-muted">Created By</div><div class="fw-600">'+(m.createdBy||'—')+' on '+(m.createdAt?String(m.createdAt).slice(0,16).replace('T',' '):'—')+'</div>');
+  if(m.status==='Closed') lines.push('<div class="text-muted">Closed By</div><div class="fw-600">'+(m.closedBy||'—')+' on '+(m.closedAt?String(m.closedAt).slice(0,16).replace('T',' '):'—')+'</div>');
+  let html='<div style="display:grid;grid-template-columns:160px 1fr;row-gap:8px">'+lines.join('')+'</div>';
+  if(m.attachmentData) html+='<div style="margin-top:14px"><div class="text-muted text-xs" style="margin-bottom:6px">Attachment</div><img src="'+m.attachmentData+'" style="max-width:100%;max-height:300px;border-radius:8px;border:1px solid var(--border2);cursor:zoom-in" onclick="window.open(this.src,\'_blank\')"></div>';
+  if(m.history && m.history.length){
+    html+='<div style="margin-top:14px"><div class="text-muted text-xs" style="margin-bottom:6px">History</div>'
+      +m.history.map(h=>'<div class="text-xs" style="padding:3px 0;border-bottom:1px solid var(--border2)">'+String(h.ts||'').slice(0,16).replace('T',' ')+' — <b>'+h.action+'</b> by '+h.user+(h.from?' ('+h.from+' → '+h.to+')':'')+'</div>').join('')
+      +'</div>';
+  }
+  document.getElementById('mistakeDetailBody').innerHTML=html;
+
+  const canClose=hasPermission('mistakes',null,'approve');
+  const footer=document.getElementById('mistakeDetailFooter');
+  let footerHtml='<button class="btn btn-outline" onclick="closeMod(\'mistakeDetailModal\')">Close</button>';
+  if(canClose){
+    if(m.status==='Open') footerHtml='<button class="btn btn-outline" onclick="closeMod(\'mistakeDetailModal\')">Cancel</button><button class="btn btn-primary" onclick="closeMistakeRecord(\''+m.id+'\')">✓ Mark Closed</button>';
+    else footerHtml='<button class="btn btn-outline" onclick="closeMod(\'mistakeDetailModal\')">Cancel</button><button class="btn btn-outline" onclick="reopenMistakeRecord(\''+m.id+'\')">↺ Reopen</button>';
+  }
+  footer.innerHTML=footerHtml;
+  document.getElementById('mistakeDetailModal').classList.add('open');
+}
+
+async function closeMistakeRecord(id){
+  const actor=CURRENT_USER?CURRENT_USER.fullName:'Unknown';
+  toast('Saving to server…','⏳');
+  try{
+    const resp=await apiUpdateMistake(id,{status:'Closed', updatedBy:actor});
+    const idx=DB.mistakes.findIndex(x=>x.id===id);
+    if(idx>=0) DB.mistakes[idx]=resp.mistake;
+  }catch(err){
+    toast('Could not close this record: '+err.message,'⚠');
+    return;
+  }
+  toast('Mistake record closed.','✓');
+  closeMod('mistakeDetailModal');
+  renderMistakeRegister();
+}
+async function reopenMistakeRecord(id){
+  const actor=CURRENT_USER?CURRENT_USER.fullName:'Unknown';
+  toast('Saving to server…','⏳');
+  try{
+    const resp=await apiUpdateMistake(id,{status:'Open', updatedBy:actor});
+    const idx=DB.mistakes.findIndex(x=>x.id===id);
+    if(idx>=0) DB.mistakes[idx]=resp.mistake;
+  }catch(err){
+    toast('Could not reopen this record: '+err.message,'⚠');
+    return;
+  }
+  toast('Mistake record reopened.','✓');
+  closeMod('mistakeDetailModal');
+  renderMistakeRegister();
+}
+
+async function deleteMistakeRecord(id){
+  const m=DB.mistakes.find(x=>x.id===id); if(!m) return;
+  if(!confirm('Delete this mistake record permanently? This cannot be undone.')) return;
+  toast('Deleting from server…','⏳');
+  try{
+    await apiDeleteMistake(id);
+  }catch(err){
+    toast('Could not delete this record: '+err.message,'⚠');
+    return;
+  }
+  DB.mistakes = DB.mistakes.filter(x=>x.id!==id);
+  toast('Mistake record deleted.','✓');
+  renderMistakeRegister();
+}
+
 function renderAudit(){
   const f=document.getElementById('auditFilter')?.value||'all',d=f==='all'?DB.auditLog:DB.auditLog.filter(l=>l.action===f);
   document.getElementById('auditBody').innerHTML=d.map(l=>'<tr><td class="log-td">'+l.ts+'</td><td>'+l.user+'</td><td><span class="badge badge-'+(l.action==='Create'?'running':l.action==='Delete'?'delayed':'planning')+'">'+l.action+'</span></td><td>'+l.module+'</td><td class="font-mono fw-600">'+l.entity+'</td><td>'+l.field+'</td><td class="text-muted">'+(l.old||'—')+'</td><td class="fw-600">'+(l.nw||'—')+'</td><td class="log-td">'+(l.ip||'—')+'</td></tr>').join('');

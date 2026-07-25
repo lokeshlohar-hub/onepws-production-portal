@@ -11,6 +11,8 @@ const toolsRoutes = require('./routes/tools');
 const capacityRoutes = require('./routes/capacity');
 const adminConfigRoutes = require('./routes/adminConfig');
 const handoverRoutes = require('./routes/handover');
+const todoRoutes = require('./routes/todo');
+const mistakeRegisterRoutes = require('./routes/mistakeRegister');
 
 const app = express();
 app.use(cors());
@@ -21,7 +23,7 @@ app.use(express.json());
 // running the code you think it's running — this exists specifically because
 // "is the deployment actually up to date" has been the real cause behind more
 // than one reported bug that looked like an application issue.
-const BACKEND_VERSION = '2026-07-27.1-bom-edit-always-available';
+const BACKEND_VERSION = '2026-07-29.1-todo-mistake-register';
 app.get('/api/health', (req, res) => res.json({
   ok: true,
   service: 'onepws-backend',
@@ -49,6 +51,14 @@ app.get('/api/health', (req, res) => res.json({
     'DELETE /api/auth/users/:id': true,
     'GET /api/handover-log': true,
     'POST /api/handover-log': true,
+    'GET /api/todo-list': true,
+    'POST /api/todo-list': true,
+    'PUT /api/todo-list/:id': true,
+    'DELETE /api/todo-list/:id': true,
+    'GET /api/mistake-register': true,
+    'POST /api/mistake-register': true,
+    'PUT /api/mistake-register/:id': true,
+    'DELETE /api/mistake-register/:id': true,
   }
 }));
 
@@ -61,6 +71,8 @@ app.use('/api/tool-inventory', toolsRoutes);
 app.use('/api/daily-capacity', capacityRoutes);
 app.use('/api/admin-config', adminConfigRoutes);
 app.use('/api/handover-log', handoverRoutes);
+app.use('/api/todo-list', todoRoutes);
+app.use('/api/mistake-register', mistakeRegisterRoutes);
 
 // Central error handler — keeps unexpected exceptions from crashing the
 // process and always returns JSON instead of an HTML error page.

@@ -1084,7 +1084,7 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
         <div class="card">
           <div class="card-header"><div class="card-title">📋 Component Stage History</div></div>
           <div class="card-body" style="padding:8px 12px">
-            <table style="font-size:11px"><thead><tr><th>Timestamp</th><th>Stage</th><th>WS</th><th>Operator</th><th>Done</th><th>Shift</th><th>Action</th></tr></thead><tbody id="compHistLog"></tbody></table>
+            <table style="font-size:11px"><thead><tr><th>Timestamp</th><th>Stage</th><th>WS</th><th>Operator</th><th>Done</th><th>Shift</th><th>Action</th><th>Traceability</th></tr></thead><tbody id="compHistLog"></tbody></table>
           </div>
         </div>
         <div class="card">
@@ -3436,6 +3436,19 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeMod('handoverNotifyModal')">Cancel</button>
       <button class="btn btn-primary" onclick="sendHandoverNotification()">📧 Send Handover Notification</button>
+    </div>
+  </div>
+</div>
+
+<!-- TRACEABILITY DETAIL VIEW MODAL -->
+<div class="modal-overlay" id="traceabilityDetailModal">
+  <div class="modal">
+    <div class="modal-header"><div class="modal-title">🏷️ Traceability Detail</div><button class="modal-close" onclick="closeMod('traceabilityDetailModal')">×</button></div>
+    <div class="modal-body">
+      <div id="traceabilityDetailBody" style="font-size:13px"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeMod('traceabilityDetailModal')">Close</button>
     </div>
   </div>
 </div>
@@ -7683,6 +7696,20 @@ const SAW_STAGES = new Set([
 // stage sits right before these.
 const QC_GATE_STAGES = new Set(['In-Process QC','Final QC']);
 
+// Stages where the optional A.S.S. Physical Batch No. traceability field
+// applies. Includes both this app's default seed names (Cutting, CNC
+// Machining) and the plainer names admins commonly rename process groups to
+// (Beam Saw, CNC) — matched case-insensitively against whatever the actual
+// current stage name is, so a rename in Process Groups admin doesn't
+// silently break this.
+const ASS_BATCH_STAGE_NAMES = new Set(['beam saw','cnc','cutting','cnc machining']);
+// Stage where the optional Adhesive Physical Batch No. / Adhesive Expiry
+// Date traceability fields apply.
+const ADHESIVE_STAGE_NAMES = new Set(['a.s.s. fabrication']);
+
+function stageWantsAssBatch(st){ return ASS_BATCH_STAGE_NAMES.has(String(st||'').trim().toLowerCase()); }
+function stageWantsAdhesive(st){ return ADHESIVE_STAGE_NAMES.has(String(st||'').trim().toLowerCase()); }
+
 // Returns the name of the last actual production stage in a component's
 // routing sequence (skipping trailing QC gate entries), or null if the
 // route is empty or has no non-QC stage at all.
@@ -8161,18 +8188,50 @@ function renderComponentHistory(){
     (b.stageData[st].history||[]).forEach(h=>rows.push(Object.assign({stage:st},h)));
   });
   rows.sort((a,c)=>(c.ts||'').localeCompare(a.ts||''));
-  document.getElementById('compHistLog').innerHTML = rows.length ? rows.slice(0,20).map(h=>{
+  window._compHistoryRenderRows = rows;
+  document.getElementById('compHistLog').innerHTML = rows.length ? rows.slice(0,20).map((h,i)=>{
     const shiftBadge = h.shift==='night'
       ? '<span class="shift-badge-night">🌙 Night</span>'
       : h.shift==='day'||h.action?.includes('Completed')
         ? '<span class="shift-badge-day">☀️ Day</span>'
         : '';
+    const hasTrace = (h.assBatchNos&&h.assBatchNos.length) || h.adhesiveBatchNo || h.adhesiveExpiryDate;
     return '<tr><td class="log-td">'+h.ts+'</td><td class="fw-600">'+h.stage+'</td><td class="text-xs text-muted">'+(h.ws||'—')+'</td>'
       +'<td style="color:var(--accent);font-weight:600">'+(h.operator||'—')+'</td>'
       +'<td class="font-mono">'+(h.qty!=null?h.qty:'—')+'</td>'
       +'<td>'+shiftBadge+'</td>'
-      +'<td class="text-xs">'+(h.action||'—')+'</td></tr>';
-  }).join('') : '<tr><td colspan="7" class="text-sm text-muted" style="padding:10px">No stage activity recorded yet for this component.</td></tr>';
+      +'<td class="text-xs">'+(h.action||'—')+'</td>'
+      +'<td>'+(hasTrace?'<button type="button" onclick="viewTraceabilityAt(\'_compHistoryRenderRows\','+i+')" title="View traceability details" style="border:none;background:transparent;cursor:pointer;font-size:15px;line-height:1">🏷️</button>':'<span class="text-muted">—</span>')+'</td></tr>';
+  }).join('') : '<tr><td colspan="8" class="text-sm text-muted" style="padding:10px">No stage activity recorded yet for this component.</td></tr>';
+}
+
+// Opens the traceability detail modal for a history row, by index into the
+// named module-level rows array — the render function above stores its own
+// rows there right before building HTML, matching the safe pattern used for
+// the Quality Log photo viewer.
+function viewTraceabilityAt(varName, idx){
+  const list = window[varName];
+  const h = list && list[idx];
+  if(!h) return;
+  const b = CUR_BOM_LINE, p = CUR_PROJ;
+  const lines = [];
+  lines.push('<div class="text-muted">Project</div><div class="fw-600">'+(p?p.sap:'—')+'</div>');
+  lines.push('<div class="text-muted">Component</div><div class="fw-600">'+(b?b.item:'—')+'</div>');
+  lines.push('<div class="text-muted">Stage</div><div class="fw-600">'+h.stage+'</div>');
+  lines.push('<div class="text-muted">Entry Date</div><div class="fw-600">'+(h.date||dateOnly(h.ts)||'—')+'</div>');
+  lines.push('<div class="text-muted">Operator</div><div class="fw-600">'+(h.operator||'—')+'</div>');
+  lines.push('<div class="text-muted">Qty</div><div class="fw-600">'+(h.qty!=null?h.qty:'—')+'</div>');
+  if(h.assBatchNos && h.assBatchNos.length){
+    lines.push('<div class="text-muted">Physical Batch No.</div><div class="fw-600">'+h.assBatchNos.join(', ')+'</div>');
+  }
+  if(h.adhesiveBatchNo){
+    lines.push('<div class="text-muted">Adhesive Physical Batch No.</div><div class="fw-600">'+h.adhesiveBatchNo+'</div>');
+  }
+  if(h.adhesiveExpiryDate){
+    lines.push('<div class="text-muted">Adhesive Expiry Date</div><div class="fw-600">'+dateOnly(h.adhesiveExpiryDate)+'</div>');
+  }
+  document.getElementById('traceabilityDetailBody').innerHTML = '<div style="display:grid;grid-template-columns:180px 1fr;row-gap:8px">'+lines.join('')+'</div>';
+  document.getElementById('traceabilityDetailModal').classList.add('open');
 }
 
 function renderComponentHandoverHistory(){
@@ -8298,6 +8357,21 @@ function renderStageEntryForm(){
       +'</div>'
     : '';
 
+  // Optional, stage-specific traceability fields — only for the exact
+  // stages named below, never for any other stage. Reset fresh each time
+  // this form renders so a previous entry's batches never carry over.
+  _stageEntryAssBatches = [];
+  const assBatchBlock = stageWantsAssBatch(st)
+    ? '<div class="form-group"><label class="form-label">Physical Batch No. <span class="text-xs text-muted">(optional — add one entry per physical batch if this quantity spans more than one)</span></label>'
+      + '<div style="display:flex;gap:8px;margin-bottom:6px"><input type="text" class="form-input" id="ce_ass_batch_input" placeholder="Enter batch number" style="flex:1" onkeydown="if(event.key===\'Enter\'){event.preventDefault();addAssBatch();}">'
+      + '<button type="button" class="btn btn-outline btn-sm" onclick="addAssBatch()">+ Add Batch</button></div>'
+      + '<div id="ce_ass_batch_list"></div></div>'
+    : '';
+  const adhesiveBlock = stageWantsAdhesive(st)
+    ? '<div class="form-row"><div class="form-group"><label class="form-label">Adhesive Physical Batch No. <span class="text-xs text-muted">(optional)</span></label><input type="text" class="form-input" id="ce_adhesive_batch" placeholder="Adhesive batch number"></div>'
+      + '<div class="form-group"><label class="form-label">Adhesive Expiry Date <span class="text-xs text-muted">(optional)</span></label><input type="date" class="form-input" id="ce_adhesive_expiry"></div></div>'
+    : '';
+
   document.getElementById('stageEntryFormBody').innerHTML=ctxBanner+shiftSelector+shiftSummary
     +'<div class="form-grid">'
     +'<div class="form-row">'+machineFieldHTML
@@ -8307,8 +8381,32 @@ function renderStageEntryForm(){
     +'<div class="form-group"><label class="form-label">Completed Qty <span class="req">*</span> <span class="text-xs text-muted">('+unit+')</span></label>'
     +'<input type="number" class="form-input" id="ce_qty" min="1" max="'+pend+'" placeholder="Max '+pend+' '+unit.toLowerCase()+'">'
     +'<span class="form-hint">'+unit+' basis. Max: '+pend+'. Partial entries allowed.</span></div>'
+    +assBatchBlock+adhesiveBlock
     +'<div class="form-group"><label class="form-label">Remarks</label><textarea class="form-textarea" id="ce_remark" style="height:50px"></textarea></div>'
     +'</div><div style="display:flex;gap:8px;margin-top:12px"><button class="btn btn-primary" onclick="submitStageEntry(this)">&#10003; Submit to QC Queue</button></div>';
+  if(stageWantsAssBatch(st)) renderAssBatchList();
+}
+
+// ------ Optional traceability field helpers ------
+let _stageEntryAssBatches = [];
+function addAssBatch(){
+  const input = document.getElementById('ce_ass_batch_input');
+  const val = input?.value.trim();
+  if(!val) return;
+  _stageEntryAssBatches.push(val);
+  input.value='';
+  renderAssBatchList();
+}
+function removeAssBatch(idx){
+  _stageEntryAssBatches.splice(idx,1);
+  renderAssBatchList();
+}
+function renderAssBatchList(){
+  const el = document.getElementById('ce_ass_batch_list');
+  if(!el) return;
+  el.innerHTML = _stageEntryAssBatches.length
+    ? _stageEntryAssBatches.map((batch,i)=>'<span class="badge" style="background:var(--surface2);color:var(--text-primary);margin:2px 4px 2px 0;display:inline-flex;align-items:center;gap:6px">'+batch+' <button type="button" onclick="removeAssBatch('+i+')" style="border:none;background:transparent;cursor:pointer;color:var(--red);font-size:12px;line-height:1;padding:0">×</button></span>').join('')
+    : '<span class="text-xs text-muted">No batch numbers added yet.</span>';
 }
 
 // When the operator picks a specific machine from a multi-machine process
@@ -8356,6 +8454,11 @@ async function submitStageEntry(btn){
   const pend=pendingQty(b,st);
   const unit=stageUnit(b,st);
   const chosenWsId=document.getElementById('ce_machine')?.value||'';
+  // Optional, stage-specific traceability — only ever read/sent for the
+  // exact stages that show these fields; every other stage is unaffected.
+  const assBatchNos = stageWantsAssBatch(st) ? _stageEntryAssBatches.slice() : undefined;
+  const adhesiveBatchNo = stageWantsAdhesive(st) ? (document.getElementById('ce_adhesive_batch')?.value.trim()||'') : '';
+  const adhesiveExpiryDate = stageWantsAdhesive(st) ? (document.getElementById('ce_adhesive_expiry')?.value||'') : '';
 
   if(!operator){toast('Please select the operator who performed this work.','⚠');return;}
   if(!qty||qty<=0){toast('Enter a valid completed quantity.','⚠');return;}
@@ -8366,7 +8469,7 @@ async function submitStageEntry(btn){
   const originalBtnText = btn ? btn.textContent : '';
   if(btn){ btn.disabled=true; btn.textContent='Saving to server…'; }
   try{
-    await apiSubmitStageEntry(b.lineId, { stage:st, qty, operator, shift, remark });
+    await apiSubmitStageEntry(b.lineId, { stage:st, qty, operator, shift, remark, assBatchNos, adhesiveBatchNo, adhesiveExpiryDate });
   } catch(err){
     toast('Could not save this entry to the server: '+err.message,'⚠');
     if(btn){ btn.disabled=false; btn.textContent=originalBtnText||'✓ Submit to QC Queue'; }
@@ -8385,10 +8488,14 @@ async function submitStageEntry(btn){
   // Record completion and push to QC queue
   sd.completed += qty;
   sd.qcQueue += qty;
-  sd.history.push({
+  const historyEntry = {
     ts, date, ws:wsLabel, wsId:chosenWsId||undefined, operator, qty, shift, shiftLabel,
     action:'Completed '+qty+' '+unit+' ['+shiftLabel+'] → sent to QC'+(remark?' | '+remark:'')
-  });
+  };
+  if(assBatchNos && assBatchNos.length) historyEntry.assBatchNos = assBatchNos;
+  if(adhesiveBatchNo) historyEntry.adhesiveBatchNo = adhesiveBatchNo;
+  if(adhesiveExpiryDate) historyEntry.adhesiveExpiryDate = adhesiveExpiryDate;
+  sd.history.push(historyEntry);
 
   // Shift log — global record for analytics
   DB.shiftLog.unshift({

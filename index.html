@@ -9716,6 +9716,35 @@ function renderSegmentOverviewCard(p, seg){
   +'</div>';
 }
 
+// Builds one segment's BOM section for the Project Details BOM tab — same
+// columns, same per-row calculations (done/pending/current stage/rework
+// badge) as the original combined table, just filtered to this segment's
+// own components and wrapped in a themed header for quick identification.
+function renderSegmentBOMSection(p, seg){
+  const isWood = seg==='wood';
+  const rows = (p.bom||[]).filter(b=>b.seg===seg);
+  const icon = isWood ? '🌳' : '🏗️';
+  const label = isWood ? 'Wood Production BOM' : 'Aluminum Extrusion BOM';
+  const headerBg = isWood ? 'var(--green-light)' : 'var(--accent-light)';
+  const headerColor = isWood ? 'var(--green)' : 'var(--accent)';
+
+  const bodyHtml = rows.map((b,i)=>{
+    ensureBomLineStructure(b);
+    const lastStage=b.route[b.route.length-1];
+    const done=lastStage?(b.stageData[lastStage]?.qcApproved||0):0;
+    const pend=b.qty-done;
+    const curStage=b.route.find(st=>pendingQty(b,st)>0||b.stageData[st].qcQueue>0)||(pend<=0?'Complete':b.route[0]||'—');
+    const typeCell=b.isRework?'<span class="badge" style="background:#fef3c7;color:#92400e;font-size:9px" title="Auto-created after rejection at '+(b.reworkSourceStage||'—')+' on '+(b.reworkDate||'—')+' — '+(b.reworkReason||'')+'">&#128260; Rework</span>':'<span class="text-xs text-muted">Original</span>';
+    return '<tr><td>'+(i+1)+'</td><td class="fw-600">'+b.item+'</td><td>'+typeCell+'</td><td class="font-mono">'+(b.l||'—')+'</td><td class="font-mono">'+(b.w||'—')+'</td><td class="font-mono">'+(b.t||'—')+'</td><td>'+b.uom+'</td><td class="fw-600">'+b.qty+'</td><td class="text-xs">'+(b.colorFinish||'—')+'</td><td>'+((b.specialChars||[]).length?b.specialChars.map(c=>'<span class="char-chip">'+c+'</span>').join(''):'<span class="text-xs text-muted">—</span>')+'</td><td class="text-success fw-600">'+done+'</td><td class="'+(pend>0?'text-danger fw-600':'text-muted')+'">'+pend+'</td><td class="text-xs">'+curStage+'</td></tr>';
+  }).join('');
+
+  return '<div style="margin-bottom:18px;border:1.5px solid '+headerColor+';border-radius:10px;overflow:hidden">'
+    +'<div style="background:'+headerBg+';color:'+headerColor+';padding:9px 14px;font-weight:700;font-size:13px">'+icon+' '+label+'</div>'
+    +'<table style="margin:0"><thead><tr><th>#</th><th>Component</th><th>Type</th><th>L</th><th>W</th><th>T</th><th>UOM</th><th>Qty</th><th>Color / Finish</th><th>Special Characteristics</th><th>Fully Cleared</th><th>Pending</th><th>Current Stage</th></tr></thead>'
+    +'<tbody>'+(bodyHtml||'<tr><td colspan="13" class="text-sm text-muted" style="padding:12px;text-align:center">No components in this segment.</td></tr>')+'</tbody></table>'
+  +'</div>';
+}
+
 function openProj(id){
   const p=DB.projects.find(x=>x.id===id);if(!p)return;
   _projModalId=id;
@@ -9726,7 +9755,9 @@ function openProj(id){
       +(p.hasExt?renderSegmentOverviewCard(p,'ext'):'')
     +'</div>'
     +'<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)"><div class="text-xs text-muted" style="margin-bottom:5px">Project Certification Requirement</div>'+certChipsHTML(p.certifications)+'</div>';
-  document.getElementById('pt-bom').innerHTML='<div style="display:flex;justify-content:flex-end;margin-bottom:8px"><button class="btn btn-outline btn-sm" onclick="openRouteCardPDF(\''+p.id+'\')">🖨 Route Card PDF</button></div><table><thead><tr><th>#</th><th>Component</th><th>Type</th><th>L</th><th>W</th><th>T</th><th>UOM</th><th>Qty</th><th>Color / Finish</th><th>Special Characteristics</th><th>Fully Cleared</th><th>Pending</th><th>Current Stage</th></tr></thead><tbody>'+p.bom.map((b,i)=>{ensureBomLineStructure(b);const lastStage=b.route[b.route.length-1];const done=lastStage?(b.stageData[lastStage]?.qcApproved||0):0;const pend=b.qty-done;const curStage=b.route.find(st=>pendingQty(b,st)>0||b.stageData[st].qcQueue>0)||(pend<=0?'Complete':b.route[0]||'—');const typeCell=b.isRework?'<span class="badge" style="background:#fef3c7;color:#92400e;font-size:9px" title="Auto-created after rejection at '+(b.reworkSourceStage||'—')+' on '+(b.reworkDate||'—')+' — '+(b.reworkReason||'')+'">&#128260; Rework</span>':'<span class="text-xs text-muted">Original</span>';return '<tr><td>'+(i+1)+'</td><td class="fw-600">'+b.item+'</td><td>'+typeCell+'</td><td class="font-mono">'+(b.l||'—')+'</td><td class="font-mono">'+(b.w||'—')+'</td><td class="font-mono">'+(b.t||'—')+'</td><td>'+b.uom+'</td><td class="fw-600">'+b.qty+'</td><td class="text-xs">'+(b.colorFinish||'—')+'</td><td>'+((b.specialChars||[]).length?b.specialChars.map(c=>'<span class="char-chip">'+c+'</span>').join(''):'<span class="text-xs text-muted">—</span>')+'</td><td class="text-success fw-600">'+done+'</td><td class="'+(pend>0?'text-danger fw-600':'text-muted')+'">'+pend+'</td><td class="text-xs">'+curStage+'</td></tr>';}).join('')+'</tbody></table>';
+  document.getElementById('pt-bom').innerHTML='<div style="display:flex;justify-content:flex-end;margin-bottom:8px"><button class="btn btn-outline btn-sm" onclick="openRouteCardPDF(\''+p.id+'\')">🖨 Route Card PDF</button></div>'
+    +(p.hasWood?renderSegmentBOMSection(p,'wood'):'')
+    +(p.hasExt?renderSegmentBOMSection(p,'ext'):'');
   document.getElementById('pt-docs').innerHTML=p.docs.length?p.docs.map(d=>'<div style="display:flex;align-items:center;gap:9px;padding:9px 12px;background:var(--surface2);border-radius:7px;border:1px solid var(--border);margin-bottom:6px"><span style="font-size:18px">'+(d.endsWith('.pdf')?'📄':'📊')+'</span><span class="text-sm fw-600">'+d+'</span><button class="btn btn-outline btn-sm" style="margin-left:auto" onclick="toast(\'Download simulated.\')">Download</button></div>').join(''):'<div class="text-muted text-sm">No documents attached.</div>';
   document.getElementById('pt-history').innerHTML='<table><thead><tr><th>Timestamp</th><th>User</th><th>Action</th><th>Stage</th><th>Old</th><th>New (incl. Operator)</th></tr></thead><tbody>'+(p.history||[]).map(h=>'<tr><td class="log-td">'+h.ts+'</td><td>'+h.u+'</td><td>'+h.act+'</td><td class="fw-600">'+h.f+'</td><td class="text-muted">'+(h.old||'—')+'</td><td class="fw-600" style="color:var(--accent)">'+(h.nw||'—')+'</td></tr>').join('')+'</tbody></table>';
   // Timeline tab

@@ -751,7 +751,7 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
           <th>Project No</th><th>Type</th><th>Category</th><th>Customer</th><th>PM</th>
           <th>Engineer</th><th>File Received</th><th>Planned Dispatch</th><th>Actual Date</th>
           <th>Extrusion</th><th>Wood</th>
-          <th>Delay</th><th>Current Stage</th><th>Progress</th><th>Color/Finish &amp; Characteristics</th><th>Certifications</th><th>Status</th><th>Actions</th>
+          <th>Delay</th><th>Current Stage</th><th>Progress</th><th>Status</th><th>Actions</th>
         </tr></thead>
         <tbody id="trackerBody"></tbody>
       </table>
@@ -7163,13 +7163,6 @@ function renderTracker(){
     const progHtml='<div style="display:flex;align-items:center;gap:5px;min-width:75px">'
       +'<div class="progress-bar" style="flex:1"><div class="progress-fill" style="width:'+p.progress+'%;background:'+(p.progress===100?'var(--green)':p.onHold?'var(--yellow)':'var(--accent)')+'"></div></div>'
       +'<span class="text-xs fw-600">'+p.progress+'%</span></div>';
-    // Color/Finish & Special Characteristics — aggregated across all BOM lines for this project
-    (p.bom||[]).forEach(ensureBomLineStructure);
-    const rowColors=[...new Set((p.bom||[]).map(b=>b.colorFinish).filter(Boolean))];
-    const rowChars=[...new Set((p.bom||[]).flatMap(b=>b.specialChars||[]))];
-    const traitsHtml=(rowColors.length||rowChars.length)
-      ? (rowColors.map(c=>'<span class="finish-chip">🎨 '+c+'</span>').join('')+rowChars.map(c=>'<span class="char-chip">'+c+'</span>').join(''))
-      : '<span class="text-xs text-muted">—</span>';
     // Status badge
     const statusBadge=cat==='completed'
       ?'<span class="badge-complete-status">✅ Completed</span>'
@@ -7193,8 +7186,6 @@ function renderTracker(){
       +'<td>'+dlyHtml+'</td>'
       +'<td class="text-sm">'+stg+'</td>'
       +'<td>'+progHtml+'</td>'
-      +'<td style="max-width:160px;white-space:normal">'+traitsHtml+'</td>'
-      +'<td style="max-width:150px;white-space:normal">'+certChipsHTML(p.certifications)+'</td>'
       +'<td>'+statusBadge+'</td>'
       +'<td><div style="display:flex;gap:3px;flex-wrap:wrap">'
         +'<button class="btn btn-outline btn-sm" data-action="view" data-pid="'+pid+'">View</button>'

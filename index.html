@@ -747,12 +747,19 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
   <div class="card" style="border-radius:0 0 var(--radius) var(--radius);border-top:2px solid var(--accent)">
     <div class="table-wrap">
       <table>
-        <thead><tr>
-          <th>Project No</th><th>Type</th><th>Category</th><th>Customer</th><th>PM</th>
-          <th>Engineer</th><th>File Received</th><th>Planned Dispatch</th><th>Actual Date</th>
-          <th>Extrusion</th><th>Wood</th>
-          <th>Delay</th><th>Current Stage</th><th>Progress</th><th>Status</th><th>Actions</th>
-        </tr></thead>
+        <thead>
+        <tr>
+          <th rowspan="2">Project No</th><th rowspan="2">Type</th><th rowspan="2">Category</th><th rowspan="2">Customer</th><th rowspan="2">PM</th>
+          <th rowspan="2">Engineer</th>
+          <th colspan="6" style="background:var(--green-light);color:var(--green);text-align:center;border-bottom:2px solid var(--green)">🌳 WOOD PRODUCTION</th>
+          <th colspan="6" style="background:var(--accent-light);color:var(--accent);text-align:center;border-bottom:2px solid var(--accent)">🏗 ALUMINIUM EXTRUSION</th>
+          <th rowspan="2">Status</th><th rowspan="2">Actions</th>
+        </tr>
+        <tr>
+          <th style="background:var(--green-light)">File Received</th><th style="background:var(--green-light)">Planned Dispatch</th><th style="background:var(--green-light)">Actual Dispatch</th><th style="background:var(--green-light)">Delay</th><th style="background:var(--green-light)">Progress</th><th style="background:var(--green-light)">Status</th>
+          <th style="background:var(--accent-light)">File Received</th><th style="background:var(--accent-light)">Planned Dispatch</th><th style="background:var(--accent-light)">Actual Dispatch</th><th style="background:var(--accent-light)">Delay</th><th style="background:var(--accent-light)">Progress</th><th style="background:var(--accent-light)">Status</th>
+        </tr>
+        </thead>
         <tbody id="trackerBody"></tbody>
       </table>
     </div>
@@ -7114,26 +7121,35 @@ function dateOnly(v){
   return String(v).split('T')[0];
 }
 
-// Compact color-coded segment badge for a Master Tracker table cell — same
-// underlying computations as the Overview cards (renderSegmentOverviewCard),
-// just condensed to fit a table row: icon+label+progress on line 1, stage on
-// line 2, planned dispatch + delay indicator on line 3.
-function renderTrackerSegmentBadge(p, seg){
+// Builds the 6 separate <td> cells (File Received, Planned Dispatch, Actual
+// Dispatch, Delay, Progress, Status) for one segment's group of columns in
+// the Master Tracker — themed green for Wood, blue for Extrusion. Returns
+// "N/A" placeholders across all 6 if the project doesn't have this segment,
+// so the grouped-column layout stays intact either way.
+function renderTrackerSegmentCells(p, seg){
+  const has = seg==='wood' ? p.hasWood : p.hasExt;
+  if(!has){
+    return '<td class="text-muted text-xs text-center" colspan="6">N/A — no '+(seg==='wood'?'Wood':'Extrusion')+' segment on this project</td>';
+  }
   const isWood = seg==='wood';
   const theme = isWood ? 'var(--green)' : 'var(--accent)';
-  const themeLight = isWood ? 'var(--green-light)' : 'var(--accent-light)';
-  const icon = isWood ? '🌳' : '🏗';
-  const label = isWood ? 'WOOD' : 'EXTRUSION';
+  const received = dateOnly(isWood ? p.recWood : p.recExt) || '—';
+  const planned = dateOnly(isWood ? p.planWood : p.planExt) || '—';
+  const actual = dateOnly(isWood ? p.actWood : p.actExt) || '—';
+  const dly = isWood ? p.dlyWood : p.dlyExt;
+  const dlyHtml = dly>0 ? '<span class="text-danger fw-600">+'+dly+'d</span>' : dly<0 ? '<span class="text-success fw-600">'+dly+'d early</span>' : '<span class="text-muted">—</span>';
   const progress = computeSegmentProgress(p, seg);
   const stage = computeSegmentCurrentStage(p, seg);
-  const planned = dateOnly(isWood ? p.planWood : p.planExt) || '—';
-  const dly = isWood ? p.dlyWood : p.dlyExt;
-  const dlyHtml = dly>0 ? '<span style="color:var(--red)">+'+dly+'d</span>' : dly<0 ? '<span style="color:var(--green)">'+dly+'d</span>' : '<span style="color:var(--green)">On Time</span>';
-  return '<div style="background:'+themeLight+';border-left:3px solid '+theme+';border-radius:6px;padding:5px 8px;font-size:10.5px;line-height:1.55;min-width:118px">'
-    +'<div style="font-weight:700;color:'+theme+';display:flex;justify-content:space-between;gap:6px"><span>'+icon+' '+label+'</span><span>'+progress+'%</span></div>'
-    +'<div class="text-muted" style="font-size:9.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:110px" title="'+stage+'">'+stage+'</div>'
-    +'<div style="display:flex;justify-content:space-between;gap:6px;font-size:9.5px"><span class="font-mono">'+planned+'</span>'+dlyHtml+'</div>'
-  +'</div>';
+  const statusVal = isWood ? p.woodSt : p.extSt;
+  const statusHtml = (statusVal||'').toLowerCase()==='complete'
+    ? '<span class="badge badge-complete">✅ Complete</span>'
+    : '<span class="badge" style="background:'+(isWood?'var(--green-light)':'var(--accent-light)')+';color:'+theme+'">🔵 '+stage+'</span>';
+  return '<td class="text-sm font-mono">'+received+'</td>'
+    +'<td class="text-sm font-mono">'+planned+'</td>'
+    +'<td class="text-sm font-mono">'+actual+'</td>'
+    +'<td>'+dlyHtml+'</td>'
+    +'<td><div style="display:flex;align-items:center;gap:5px;min-width:70px"><div class="progress-bar" style="flex:1"><div class="progress-fill" style="width:'+progress+'%;background:'+theme+'"></div></div><span class="text-xs fw-600" style="color:'+theme+'">'+progress+'%</span></div></td>'
+    +'<td style="white-space:nowrap">'+statusHtml+'</td>';
 }
 
 function renderTracker(){
@@ -7167,20 +7183,10 @@ function renderTracker(){
 
   const rows=d.map(p=>{
     const cat=getProjectStatusCat(p);
-    const extDly=p.dlyExt||0, woodDly=p.dlyWood||0;
-    const maxDly=Math.max(extDly,woodDly);
-    const stg=p.stages?.find(s=>s.s==='active')?.n||(p.progress===100?'Completed':'Planning');
-    const extBadge=p.hasExt ? renderTrackerSegmentBadge(p,'ext') : '<span class="text-muted text-xs">N/A</span>';
-    const woodBadge=p.hasWood ? renderTrackerSegmentBadge(p,'wood') : '<span class="text-muted text-xs">N/A</span>';
+    const woodCells=renderTrackerSegmentCells(p,'wood');
+    const extCells=renderTrackerSegmentCells(p,'ext');
     const pid=p.id;
     const hasOverride=DB.tatOverrideLog.some(o=>o.projId===p.id);
-    const dlyHtml=maxDly>0
-      ?'<span class="text-danger fw-600">+'+maxDly+'d</span>'+(hasOverride?'&nbsp;<span class="tat-override-badge">Override</span>':'')
-      :maxDly<0?'<span class="text-success fw-600">'+maxDly+'d early</span>'
-      :'<span class="text-muted">—</span>';
-    const progHtml='<div style="display:flex;align-items:center;gap:5px;min-width:75px">'
-      +'<div class="progress-bar" style="flex:1"><div class="progress-fill" style="width:'+p.progress+'%;background:'+(p.progress===100?'var(--green)':p.onHold?'var(--yellow)':'var(--accent)')+'"></div></div>'
-      +'<span class="text-xs fw-600">'+p.progress+'%</span></div>';
     // Status badge
     const statusBadge=cat==='completed'
       ?'<span class="badge-complete-status">✅ Completed</span>'
@@ -7196,14 +7202,8 @@ function renderTracker(){
       +'<td class="text-sm truncate" style="max-width:120px">'+p.customer+'</td>'
       +'<td class="text-sm">'+p.pm+'</td>'
       +'<td class="text-sm">'+p.eng+'</td>'
-      +'<td class="text-sm font-mono">'+(dateOnly(p.recWood||p.recExt)||'—')+'</td>'
-      +'<td class="text-sm font-mono">'+(dateOnly(p.planWood||p.planExt)||'—')+'</td>'
-      +'<td class="text-sm font-mono">'+(dateOnly(p.actWood||p.actExt)||'—')+'</td>'
-      +'<td>'+extBadge+'</td>'
-      +'<td>'+woodBadge+'</td>'
-      +'<td>'+dlyHtml+'</td>'
-      +'<td class="text-sm">'+stg+'</td>'
-      +'<td>'+progHtml+'</td>'
+      +woodCells
+      +extCells
       +'<td>'+statusBadge+'</td>'
       +'<td><div style="display:flex;gap:3px;flex-wrap:wrap">'
         +'<button class="btn btn-outline btn-sm" data-action="view" data-pid="'+pid+'">View</button>'

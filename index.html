@@ -7114,6 +7114,28 @@ function dateOnly(v){
   return String(v).split('T')[0];
 }
 
+// Compact color-coded segment badge for a Master Tracker table cell — same
+// underlying computations as the Overview cards (renderSegmentOverviewCard),
+// just condensed to fit a table row: icon+label+progress on line 1, stage on
+// line 2, planned dispatch + delay indicator on line 3.
+function renderTrackerSegmentBadge(p, seg){
+  const isWood = seg==='wood';
+  const theme = isWood ? 'var(--green)' : 'var(--accent)';
+  const themeLight = isWood ? 'var(--green-light)' : 'var(--accent-light)';
+  const icon = isWood ? '🌳' : '🏗';
+  const label = isWood ? 'WOOD' : 'EXTRUSION';
+  const progress = computeSegmentProgress(p, seg);
+  const stage = computeSegmentCurrentStage(p, seg);
+  const planned = dateOnly(isWood ? p.planWood : p.planExt) || '—';
+  const dly = isWood ? p.dlyWood : p.dlyExt;
+  const dlyHtml = dly>0 ? '<span style="color:var(--red)">+'+dly+'d</span>' : dly<0 ? '<span style="color:var(--green)">'+dly+'d</span>' : '<span style="color:var(--green)">On Time</span>';
+  return '<div style="background:'+themeLight+';border-left:3px solid '+theme+';border-radius:6px;padding:5px 8px;font-size:10.5px;line-height:1.55;min-width:118px">'
+    +'<div style="font-weight:700;color:'+theme+';display:flex;justify-content:space-between;gap:6px"><span>'+icon+' '+label+'</span><span>'+progress+'%</span></div>'
+    +'<div class="text-muted" style="font-size:9.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:110px" title="'+stage+'">'+stage+'</div>'
+    +'<div style="display:flex;justify-content:space-between;gap:6px;font-size:9.5px"><span class="font-mono">'+planned+'</span>'+dlyHtml+'</div>'
+  +'</div>';
+}
+
 function renderTracker(){
   const fy=getActiveFY();
   const q=(document.getElementById('trackerSearch')?.value||'').toLowerCase();
@@ -7148,12 +7170,8 @@ function renderTracker(){
     const extDly=p.dlyExt||0, woodDly=p.dlyWood||0;
     const maxDly=Math.max(extDly,woodDly);
     const stg=p.stages?.find(s=>s.s==='active')?.n||(p.progress===100?'Completed':'Planning');
-    const extBadge=p.hasExt
-      ?('<span class="badge '+(p.extSt?.toLowerCase()==='complete'?'badge-complete':p.extSt?.toLowerCase()==='running'?'badge-running':'badge-planning')+'">'+( p.extSt||'—')+'</span>')
-      :'<span class="text-muted text-xs">N/A</span>';
-    const woodBadge=p.hasWood
-      ?('<span class="badge '+(p.woodSt?.toLowerCase()==='complete'?'badge-complete':p.woodSt?.toLowerCase()==='running'?'badge-running':'badge-planning')+'">'+( p.woodSt||'—')+'</span>')
-      :'<span class="text-muted text-xs">N/A</span>';
+    const extBadge=p.hasExt ? renderTrackerSegmentBadge(p,'ext') : '<span class="text-muted text-xs">N/A</span>';
+    const woodBadge=p.hasWood ? renderTrackerSegmentBadge(p,'wood') : '<span class="text-muted text-xs">N/A</span>';
     const pid=p.id;
     const hasOverride=DB.tatOverrideLog.some(o=>o.projId===p.id);
     const dlyHtml=maxDly>0
@@ -9092,6 +9110,49 @@ function refreshProjectProgress(p){
   updatePendingBadge();
 }
 
+// ------ Segment-level (Wood/Extrusion) computation helpers ------
+// These are purely additive, read-only derivations built for the split
+// Wood/Extrusion presentation — they mirror the exact same underlying data
+// and calculation method refreshProjectProgress() already uses for the
+// combined p.progress, just scoped to one segment's own BOM lines. Nothing
+// here writes back to the project object or changes any existing field.
+function computeSegmentProgress(p, seg){
+  const bom=(p.bom||[]).filter(b=>b.seg===seg);
+  if(!bom.length) return 0;
+  let totalQty=0, totalDone=0;
+  bom.forEach(b=>{
+    ensureBomLineStructure(b);
+    totalQty += b.qty;
+    const lastStage=b.route[b.route.length-1];
+    totalDone += lastStage ? (b.stageData[lastStage]?.qcApproved||0) : 0;
+  });
+  return totalQty ? Math.round((totalDone/totalQty)*100) : 0;
+}
+function computeSegmentCurrentStage(p, seg){
+  const active=(p.stages||[]).find(s=>s.seg===seg && s.s==='active');
+  if(active) return active.n;
+  return computeSegmentProgress(p,seg)>=100 ? 'Completed' : 'Planning';
+}
+function computeSegmentTATStatus(p, seg){
+  const dly = seg==='wood' ? p.dlyWood : p.dlyExt;
+  if(dly==null) return {label:'—', cls:'text-muted'};
+  if(dly>0) return {label:'+'+dly+'d Delayed', cls:'text-danger'};
+  if(dly<0) return {label:dly+'d Early', cls:'text-success'};
+  return {label:'On Time', cls:'text-success'};
+}
+function computeSegmentQC(p, seg){
+  const bom=(p.bom||[]).filter(b=>b.seg===seg);
+  let approved=0, rejected=0, pending=0;
+  bom.forEach(b=>{
+    ensureBomLineStructure(b);
+    b.route.forEach(st=>{
+      const sd=b.stageData[st]; if(!sd) return;
+      approved+=sd.qcApproved||0; rejected+=sd.qcRejected||0; pending+=sd.qcQueue||0;
+    });
+  });
+  return {approved, rejected, pending};
+}
+
 function renderActLog(){
   const el=document.getElementById('actLog'); if(!el) return;
   const rows = CUR_PROJ ? DB.stageLog.filter(u=>u.proj===CUR_PROJ.sap) : DB.stageLog;
@@ -9609,11 +9670,61 @@ function machineLoadSummary(blocks, startDate, endDate){
 
 // ------ PROJECT DETAIL MODAL (read-only overview) ------
 let _projModalId=null; // tracks which project is currently open, so the "Update Stage" footer button can route to it
+// Builds one segment's themed overview card (🌳 green for Wood, 🏗 blue for
+// Extrusion) — used by openProj() below. Each card is entirely self-
+// contained with its own progress bar, stage, TAT, delay, and QC summary,
+// so the two segments never visually blend into one combined figure.
+function renderSegmentOverviewCard(p, seg){
+  const isWood = seg==='wood';
+  const icon = isWood ? '🌳' : '🏗';
+  const label = isWood ? 'Wood Production' : 'Aluminium Extrusion';
+  const themeColor = isWood ? 'var(--green)' : 'var(--accent)';
+  const themeLight = isWood ? 'var(--green-light)' : 'var(--accent-light)';
+  const received = dateOnly(isWood ? p.recWood : p.recExt);
+  const planned = dateOnly(isWood ? p.planWood : p.planExt);
+  const actual = dateOnly(isWood ? p.actWood : p.actExt);
+  const bomCount = (p.bom||[]).filter(b=>b.seg===seg).length;
+  const progress = computeSegmentProgress(p, seg);
+  const stage = computeSegmentCurrentStage(p, seg);
+  const tat = computeSegmentTATStatus(p, seg);
+  const qc = computeSegmentQC(p, seg);
+  const statusVal = isWood ? p.woodSt : p.extSt;
+  const statusBadge = (statusVal||'').toLowerCase()==='complete'
+    ? '<span class="badge badge-complete">✅ Complete</span>'
+    : (statusVal||'').toLowerCase()==='running'
+      ? '<span class="badge" style="background:'+themeLight+';color:'+themeColor+'">🔵 Running</span>'
+      : '<span class="badge badge-hold">Planning</span>';
+
+  const row=(label,val)=>'<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:12.5px"><span style="color:var(--text-muted)">'+label+'</span><span class="fw-600">'+val+'</span></div>';
+
+  return '<div class="card" style="border:1.5px solid '+themeColor+';border-radius:10px;overflow:hidden">'
+    +'<div style="background:'+themeLight+';padding:10px 14px;display:flex;align-items:center;justify-content:space-between">'
+      +'<div style="font-weight:700;color:'+themeColor+';font-size:14px">'+icon+' '+label+'</div>'+statusBadge
+    +'</div>'
+    +'<div style="padding:12px 14px">'
+      +'<div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><span class="text-xs text-muted">Production Progress</span><span class="fw-600" style="color:'+themeColor+'">'+progress+'%</span></div>'
+      +'<div class="progress-bar"><div class="progress-fill" style="width:'+progress+'%;background:'+themeColor+'"></div></div></div>'
+      +row('File Receiving Date', received||'—')
+      +row('Planned Dispatch', planned||'—')
+      +row('Actual Dispatch', actual||'—')
+      +row('Current Stage', stage)
+      +row('TAT Status', '<span class="'+tat.cls+'">'+tat.label+'</span>')
+      +row('Delay Status', (isWood?p.dlyWood:p.dlyExt) ? '<span class="'+((isWood?p.dlyWood:p.dlyExt)>0?'text-danger':'text-success')+'">'+((isWood?p.dlyWood:p.dlyExt)>0?'+':'')+(isWood?p.dlyWood:p.dlyExt)+'d</span>' : '<span class="text-success">On Time</span>')
+      +row('BOM Count', bomCount+' component(s)')
+      +row('QC Status', '<span class="text-success">✓ '+qc.approved+'</span>'+(qc.rejected?' · <span class="text-danger">⚠ '+qc.rejected+'</span>':'')+(qc.pending?' · <span class="text-muted">⏳ '+qc.pending+'</span>':''))
+    +'</div>'
+  +'</div>';
+}
+
 function openProj(id){
   const p=DB.projects.find(x=>x.id===id);if(!p)return;
   _projModalId=id;
   document.getElementById('projModalTitle').textContent=p.sap+' — '+p.customer;
-  document.getElementById('pt-overview').innerHTML='<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">'+['<div>'+['SAP No','Type','Category','Customer','PM','Engineer'].map((l,i)=>{const v=['<span class="font-mono fw-600">'+p.sap+'</span>','<span class="cat-badge cat-'+p.type.toLowerCase().replace("&","")+'">'+p.type+'</span>',p.cat,p.customer,p.pm,p.eng][i];return '<div style="display:flex;gap:8px;padding:4px 0;border-bottom:1px solid var(--border);font-size:12.5px"><span style="min-width:100px;color:var(--text-muted)">'+l+'</span><span class="fw-600">'+v+'</span></div>';}).join('')+'</div>','<div><div style="display:flex;gap:8px;padding:4px 0;border-bottom:1px solid var(--border);font-size:12.5px"><span style="min-width:100px;color:var(--text-muted)">Progress</span><span class="fw-600">'+p.progress+'%</span></div><div style="display:flex;gap:8px;padding:4px 0;border-bottom:1px solid var(--border);font-size:12.5px"><span style="min-width:100px;color:var(--text-muted)">Planned</span><span>'+(p.planWood||p.planExt||'—')+'</span></div><div style="display:flex;gap:8px;padding:4px 0;border-bottom:1px solid var(--border);font-size:12.5px"><span style="min-width:100px;color:var(--text-muted)">Actual</span><span>'+(p.actWood||p.actExt||'—')+'</span></div>'+(p.remarks?'<div class="mt-2 text-xs text-muted">Remarks: <span style="color:var(--text-primary)">'+p.remarks+'</span></div>':'')+'</div>'].join('')+'</div>'
+  document.getElementById('pt-overview').innerHTML='<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px">'+['<div>'+['SAP No','Type','Category','Customer','PM','Engineer'].map((l,i)=>{const v=['<span class="font-mono fw-600">'+p.sap+'</span>','<span class="cat-badge cat-'+p.type.toLowerCase().replace("&","")+'">'+p.type+'</span>',p.cat,p.customer,p.pm,p.eng][i];return '<div style="display:flex;gap:8px;padding:4px 0;border-bottom:1px solid var(--border);font-size:12.5px"><span style="min-width:100px;color:var(--text-muted)">'+l+'</span><span class="fw-600">'+v+'</span></div>';}).join('')+'</div>','<div>'+(p.remarks?'<div class="text-xs text-muted">Remarks: <span style="color:var(--text-primary)">'+p.remarks+'</span></div>':'<div class="text-xs text-muted">Overall progress and dispatch dates are now shown per-segment below, since Wood and Extrusion run independently.</div>')+'</div>'].join('')+'</div>'
+    +'<div style="display:grid;grid-template-columns:'+(p.hasWood&&p.hasExt?'1fr 1fr':'1fr')+';gap:14px">'
+      +(p.hasWood?renderSegmentOverviewCard(p,'wood'):'')
+      +(p.hasExt?renderSegmentOverviewCard(p,'ext'):'')
+    +'</div>'
     +'<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)"><div class="text-xs text-muted" style="margin-bottom:5px">Project Certification Requirement</div>'+certChipsHTML(p.certifications)+'</div>';
   document.getElementById('pt-bom').innerHTML='<div style="display:flex;justify-content:flex-end;margin-bottom:8px"><button class="btn btn-outline btn-sm" onclick="openRouteCardPDF(\''+p.id+'\')">🖨 Route Card PDF</button></div><table><thead><tr><th>#</th><th>Component</th><th>Type</th><th>L</th><th>W</th><th>T</th><th>UOM</th><th>Qty</th><th>Color / Finish</th><th>Special Characteristics</th><th>Fully Cleared</th><th>Pending</th><th>Current Stage</th></tr></thead><tbody>'+p.bom.map((b,i)=>{ensureBomLineStructure(b);const lastStage=b.route[b.route.length-1];const done=lastStage?(b.stageData[lastStage]?.qcApproved||0):0;const pend=b.qty-done;const curStage=b.route.find(st=>pendingQty(b,st)>0||b.stageData[st].qcQueue>0)||(pend<=0?'Complete':b.route[0]||'—');const typeCell=b.isRework?'<span class="badge" style="background:#fef3c7;color:#92400e;font-size:9px" title="Auto-created after rejection at '+(b.reworkSourceStage||'—')+' on '+(b.reworkDate||'—')+' — '+(b.reworkReason||'')+'">&#128260; Rework</span>':'<span class="text-xs text-muted">Original</span>';return '<tr><td>'+(i+1)+'</td><td class="fw-600">'+b.item+'</td><td>'+typeCell+'</td><td class="font-mono">'+(b.l||'—')+'</td><td class="font-mono">'+(b.w||'—')+'</td><td class="font-mono">'+(b.t||'—')+'</td><td>'+b.uom+'</td><td class="fw-600">'+b.qty+'</td><td class="text-xs">'+(b.colorFinish||'—')+'</td><td>'+((b.specialChars||[]).length?b.specialChars.map(c=>'<span class="char-chip">'+c+'</span>').join(''):'<span class="text-xs text-muted">—</span>')+'</td><td class="text-success fw-600">'+done+'</td><td class="'+(pend>0?'text-danger fw-600':'text-muted')+'">'+pend+'</td><td class="text-xs">'+curStage+'</td></tr>';}).join('')+'</tbody></table>';
   document.getElementById('pt-docs').innerHTML=p.docs.length?p.docs.map(d=>'<div style="display:flex;align-items:center;gap:9px;padding:9px 12px;background:var(--surface2);border-radius:7px;border:1px solid var(--border);margin-bottom:6px"><span style="font-size:18px">'+(d.endsWith('.pdf')?'📄':'📊')+'</span><span class="text-sm fw-600">'+d+'</span><button class="btn btn-outline btn-sm" style="margin-left:auto" onclick="toast(\'Download simulated.\')">Download</button></div>').join(''):'<div class="text-muted text-sm">No documents attached.</div>';

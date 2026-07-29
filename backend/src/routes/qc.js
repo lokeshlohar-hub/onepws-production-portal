@@ -91,6 +91,22 @@ router.post('/:lineId/qc-decision', requireRole('admin', 'superadmin'), async (r
   }
 });
 
+// POST /api/bom-lines/:lineId/mark-email-prompt-shown — flags a BOM line as
+// having had the auto-open Handover Notification modal shown or explicitly
+// skipped by the user. Once flagged, the frontend's auto-open trigger will
+// not re-fire on subsequent QC actions or page refreshes for this line —
+// the manual "Notify Handover" button in the component detail view is
+// unaffected and continues to work regardless of the flag. Idempotent: safe
+// to call even if the flag is already true.
+router.post('/:lineId/mark-email-prompt-shown', requireRole('admin', 'superadmin'), async (req, res) => {
+  const { rows } = await pool.query(
+    'UPDATE bom_lines SET email_prompt_shown = TRUE WHERE line_id = $1 RETURNING line_id',
+    [req.params.lineId]
+  );
+  if (!rows[0]) return res.status(404).json({ error: 'BOM line not found' });
+  res.json({ ok: true, lineId: rows[0].line_id });
+});
+
 // GET /api/reject-log — full reject/rework log, optionally filtered by project
 router.get('/qc/reject-log', async (req, res) => {
   const { projectId } = req.query;

@@ -334,3 +334,19 @@ CREATE TABLE IF NOT EXISTS mistake_register (
 CREATE INDEX IF NOT EXISTS idx_mistake_dept ON mistake_register(department);
 CREATE INDEX IF NOT EXISTS idx_mistake_project ON mistake_register(project_id);
 CREATE INDEX IF NOT EXISTS idx_mistake_status ON mistake_register(status);
+
+-- Handover Notification extensions — Phase 9. Two additions layered on top of
+-- the existing (Phase 7) handover system:
+-- (a) email_prompt_shown flag on bom_lines — the frontend now auto-opens the
+-- Handover Notification modal the first time a BOM line clears final-stage QC
+-- (rather than only via the manual "Notify Handover" button). This flag,
+-- flipped once the modal has been shown or explicitly skipped, prevents the
+-- auto-open from re-firing on every subsequent QC action or page refresh.
+-- The manual button in the component detail view remains available regardless
+-- of the flag, so re-notifying is always possible.
+-- (b) cc_emails on handover_log — the notification modal now supports
+-- multiple To recipients (via checkbox list) plus a separate Cc list, and
+-- both need to be part of the permanent audit trail for the same
+-- traceability reason the primary email column already exists.
+ALTER TABLE bom_lines    ADD COLUMN IF NOT EXISTS email_prompt_shown BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE handover_log ADD COLUMN IF NOT EXISTS cc_emails JSONB NOT NULL DEFAULT '[]';

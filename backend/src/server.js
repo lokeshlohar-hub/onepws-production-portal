@@ -23,7 +23,7 @@ app.use(express.json());
 // running the code you think it's running — this exists specifically because
 // "is the deployment actually up to date" has been the real cause behind more
 // than one reported bug that looked like an application issue.
-const BACKEND_VERSION = '2026-07-29.1-todo-mistake-register';
+const BACKEND_VERSION = '2026-07-29.2-handover-extensions';
 app.get('/api/health', (req, res) => res.json({
   ok: true,
   service: 'onepws-backend',
@@ -34,6 +34,7 @@ app.get('/api/health', (req, res) => res.json({
     'POST /api/bom-lines/:lineId/stage-entry': true,
     'POST /api/bom-lines/:lineId/qc-decision': true,
     'PUT /api/bom-lines/:lineId/reconcile-route': true,
+    'POST /api/bom-lines/:lineId/mark-email-prompt-shown': true,
     'GET /api/calibration-instruments': true,
     'POST /api/calibration-instruments/bulk': true,
     'GET /api/breakdown-log': true,
@@ -51,6 +52,7 @@ app.get('/api/health', (req, res) => res.json({
     'DELETE /api/auth/users/:id': true,
     'GET /api/handover-log': true,
     'POST /api/handover-log': true,
+    'GET /api/handover-log/address-history': true,
     'GET /api/todo-list': true,
     'POST /api/todo-list': true,
     'PUT /api/todo-list/:id': true,

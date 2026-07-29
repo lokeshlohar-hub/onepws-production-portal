@@ -8575,38 +8575,22 @@ async function openHandoverNotifyModal(autoOpened){
   document.getElementById('handoverCcNew').value = '';
 
   // Prefill Subject and Body — both editable by the sender before send.
-  // Body uses a plain-text structured layout (structured labels for the info
-  // block, one indented block per component) that reads as tabular even in
-  // proportional-font mail clients — since mailto: bodies are plain text,
-  // we can't use HTML tables here regardless of what the recipient's client
-  // supports, and column-space-aligned ASCII tables break the moment the
-  // client switches to a non-monospace font (which most do by default).
+  // The structured project/component details live in the portal preview
+  // (styled tables above), not the email body — the recipient's email
+  // client shows the plain-text body verbatim, and duplicating the same
+  // information as a plain-text block below the intro would just noise
+  // the message. The subject line already carries the project number and
+  // component name so the recipient can identify the notification at a
+  // glance; the sender can paste any additional details before send if
+  // this specific handover needs them.
   const d = window._handoverContext.details;
   document.getElementById('handoverSubject').value =
     'Handover Notification — '+d.projectNo+' — '+d.component+' ('+d.finalStage+' Complete)';
-  const bodyComponents = components.map(c=>
-      '  # '+c.sr+'. '+c.item+'\n'
-    + '    Color / Finish   : '+c.colorFinish+'\n'
-    + '    Size / Dimensions: '+c.size+'\n'
-    + '    Total Qty        : '+c.totalQty+'\n'
-    + '    Handover Qty     : '+c.handoverQty+'\n'
-    + '    Pending Qty      : '+c.pendingQty+'\n'
-    + '    Status           : '+c.status
-  ).join('\n\n');
   document.getElementById('handoverBody').value =
-      'FINAL-STAGE HANDOVER NOTIFICATION\n'
-    + '=================================\n\n'
-    + 'PROJECT INFORMATION\n'
-    + '  Project No     : '+(p.sap||'—')+'\n'
-    + '  Customer       : '+(p.customer||'—')+'\n'
-    + '  Final Stage    : '+finalStage+'\n\n'
-    + 'PRODUCTION INFORMATION\n'
-    + '  Manufacturing Segment : '+segment+'\n'
-    + '  Product Type          : '+(p.type||'—')+'\n'
-    + '  QC Status             : ✅ Approved\n\n'
-    + 'COMPONENTS READY FOR HANDOVER\n\n'
-    + bodyComponents+'\n\n'
-    + '— Sent from ONEPWS Production Control Portal';
+      'Dear Team,\n\n'
+    + 'The following material has successfully completed all required production stages and has been approved by Quality Control.\n\n'
+    + 'Kindly arrange to receive and hand over the material as per the details provided below.\n\n'
+    + 'This is an auto-generated notification from the ONEPWS Production Control Portal.';
   updateHandoverBodyCounter();
 
   // Auto-opened modals show "Skip — Don't notify for this line" and closing

@@ -4431,6 +4431,12 @@ function serverBomLineToLocal(row) {
     reworkDate: row.rework_date,
     reworkGeneration: row.rework_generation || 0,
     spawnedReworkLineIds: row.spawned_rework_line_ids || [],
+    // Auto-open Handover Notification trigger — Phase 9. Server-side flag,
+    // flipped to true once the auto-open modal has been shown or explicitly
+    // skipped for this line, so the trigger doesn't re-fire on subsequent
+    // QC actions or page refreshes. The manual "Notify Handover" button in
+    // the component detail view is unaffected by this flag.
+    emailPromptShown: !!row.email_prompt_shown,
   };
 }
 
@@ -7970,6 +7976,63 @@ function isHandoverReady(b){
   return !!(sd && sd.qcApproved > 0);
 }
 
+// Production Admin gate for the auto-open Handover Notification trigger.
+// Master Admin (superadmin) passes, mirroring the pattern used elsewhere
+// (hasPermission() in this file, requireRole() on the backend). The manual
+// "Notify Handover" button in the component detail view has no such gate
+// and remains available to anyone who can reach the component — so QC and
+// Maintenance admins can still notify handovers manually if needed; only
+// the automatic-on-QC-approve trigger is scoped to Production admins.
+function isProductionAdminUser(){
+  if(!CURRENT_USER) return false;
+  if(CURRENT_USER.role === 'superadmin') return true;
+  return CURRENT_USER.role === 'admin' && CURRENT_USER.department === 'Production';
+}
+
+// Auto-open trigger — invoked once from the QC-decision confirm handler
+// after processQcDecision() has locally reflected the server's state
+// changes and views have re-rendered. Only fires when: (a) the current
+// user is a Production admin (or Master Admin), (b) the BOM line has
+// cleared final-stage QC per isHandoverReady(), and (c) the auto-open
+// prompt hasn't already been shown or explicitly skipped for this line
+// (emailPromptShown flag). For rework lines, prompts a confirm() first
+// per the design.
+//
+// COMMIT 2 STATE: this function only console.log's what it would do next.
+// The actual modal open + skip-flag-set call is Commit 3 — split this way
+// so we can verify the trigger fires in the right conditions BEFORE
+// touching UI (which is much harder to test than console output).
+function checkAutoOpenHandover(p, b){
+  if(!p || !b) return;
+  if(!isProductionAdminUser()){
+    // Silent — a QC or Maintenance admin doing QC approvals is normal
+    // operation, and logging every one of their approvals would be noise.
+    return;
+  }
+  if(!isHandoverReady(b)) return;
+  if(b.emailPromptShown){
+    console.log('[Handover auto-trigger] Would fire, but prompt already shown for this line.',
+      {lineId:b.lineId, item:b.item, projectSap:p.sap});
+    return;
+  }
+  if(b.isRework){
+    const proceed = confirm(
+      'Component "'+b.item+'" ('+b.lineId+') has cleared final-stage QC.\n\n'+
+      'This is a rework line'+(b.reworkSourceStage?' (originally rejected at '+b.reworkSourceStage+')':'')+'.\n\n'+
+      'Generate handover notification draft?'
+    );
+    if(!proceed){
+      console.log('[Handover auto-trigger] Rework line, user declined confirm. In Commit 3 this would call mark-email-prompt-shown.',
+        {lineId:b.lineId, item:b.item});
+      return;
+    }
+  }
+  console.log('[Handover auto-trigger] Would open Handover Notification modal here in Commit 3.',
+    {lineId:b.lineId, item:b.item, isRework:!!b.isRework,
+     finalStage:getFinalProductionStage(b.route), projectSap:p.sap,
+     user:CURRENT_USER?CURRENT_USER.fullName:'(none)'});
+}
+
 function isBoardStage(stageName){
   return BOARD_STAGES.has(stageName);
 }
@@ -8989,6 +9052,12 @@ async function confirmQcDecision(btn){
   clearQcPhoto();
   closeMod('qcInspectModal');
   QC_INSPECT_CTX=null;
+  // Auto-open Handover Notification trigger — Phase 9. Placed after
+  // processQcDecision (which mutates b and re-renders) and after the QC
+  // modal has closed, so if the auto-open fires the user sees only the
+  // Handover modal, not two modals stacked. Skipped silently for QC and
+  // Maintenance admins — the gate lives inside checkAutoOpenHandover.
+  checkAutoOpenHandover(p, b);
 }
 
 function processQcDecision(p, b, stageName, approveQty, rejectQty, disposition, category, qcPerson, remarks, instrument, forcedReworkLineId, photoData){

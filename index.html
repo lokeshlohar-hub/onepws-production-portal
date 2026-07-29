@@ -8584,30 +8584,43 @@ async function openHandoverNotifyModal(autoOpened){
   // recipient's email become a hard requirement later, that's a switch
   // from mailto: to real email sending (SMTP/API), which is a separate
   // and larger project.
+  //
+  // Outlook-on-Windows quirk: the body of a mailto: URL is decoded as
+  // Windows-1252, not UTF-8, so UTF-8 characters like em-dashes and the ✅
+  // marker come out as mojibake ("â€"" and "âce…" respectively). The subject
+  // line and portal preview don't suffer this because they're rendered by
+  // separate code paths that handle UTF-8 correctly. So we build the body
+  // in pure ASCII from the start — hyphens instead of em-dashes, "x" instead
+  // of ×, and no ✅ marker (the "Approved" text alone conveys the same
+  // meaning) — while the preview above and the subject line keep their nice
+  // UTF-8 characters.
   const d = window._handoverContext.details;
   document.getElementById('handoverSubject').value =
     'Handover Notification — '+d.projectNo+' — '+d.component+' ('+d.finalStage+' Complete)';
-  const bodyComponents = components.map(c=>
-      '  # '+c.sr+'. '+c.item+'\n'
-    + '    Color / Finish   : '+c.colorFinish+'\n'
-    + '    Size / Dimensions: '+c.size+'\n'
-    + '    Total Qty        : '+c.totalQty+'\n'
-    + '    Handover Qty     : '+c.handoverQty+'\n'
-    + '    Pending Qty      : '+c.pendingQty+'\n'
-    + '    Status           : '+c.status
-  ).join('\n\n');
+  const asciiDash = '-';
+  const bodyComponents = components.map(c=>{
+    const asciiColorFinish = (c.colorFinish==='—') ? asciiDash : c.colorFinish;
+    const asciiSize        = String(c.size).replace(/—/g, asciiDash).replace(/×/g, 'x');
+    return   '  # '+c.sr+'. '+c.item+'\n'
+      + '    Color / Finish   : '+asciiColorFinish+'\n'
+      + '    Size / Dimensions: '+asciiSize+'\n'
+      + '    Total Qty        : '+c.totalQty+'\n'
+      + '    Handover Qty     : '+c.handoverQty+'\n'
+      + '    Pending Qty      : '+c.pendingQty+'\n'
+      + '    Status           : '+c.status;
+  }).join('\n\n');
   document.getElementById('handoverBody').value =
       'Dear Team,\n\n'
     + 'The following material has successfully completed all required production stages and has been approved by Quality Control.\n\n'
     + 'Kindly arrange to receive and hand over the material as per the details provided below.\n\n'
     + 'PROJECT INFORMATION\n'
-    + '  Project No     : '+(p.sap||'—')+'\n'
-    + '  Customer       : '+(p.customer||'—')+'\n'
+    + '  Project No     : '+(p.sap||asciiDash)+'\n'
+    + '  Customer       : '+(p.customer||asciiDash)+'\n'
     + '  Final Stage    : '+finalStage+'\n\n'
     + 'PRODUCTION INFORMATION\n'
     + '  Manufacturing Segment : '+segment+'\n'
-    + '  Product Type          : '+(p.type||'—')+'\n'
-    + '  QC Status             : ✅ Approved\n\n'
+    + '  Product Type          : '+(p.type||asciiDash)+'\n'
+    + '  QC Status             : Approved\n\n'
     + 'COMPONENTS READY FOR HANDOVER\n\n'
     + bodyComponents+'\n\n'
     + 'This is an auto-generated notification from the ONEPWS Production Control Portal.';

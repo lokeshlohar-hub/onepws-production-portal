@@ -3526,7 +3526,7 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
 
 <!-- FINAL-STAGE HANDOVER NOTIFICATION MODAL -->
 <div class="modal-overlay" id="handoverNotifyModal">
-  <div class="modal" style="max-width:720px">
+  <div class="modal" style="max-width:860px">
     <div class="modal-header">
       <div>
         <div class="modal-title">📧 Final-Stage Handover Notification</div>
@@ -8450,14 +8450,87 @@ async function openHandoverNotifyModal(autoOpened){
     }
   };
 
-  document.getElementById('handoverPreview').innerHTML =
-    '<div style="display:grid;grid-template-columns:140px 1fr;row-gap:6px">'
-    +['Project No','Customer','Product Type','Component','Completed Qty','Color / Finish','Size / Dimensions','Manufacturing Segment','Final Production Stage','QC Status']
-      .map((label,i)=>{
-        const val=[p.sap,p.customer,p.type,b.item,sd.qcApproved+' '+(b.uom||'PC'),b.colorFinish||'—',size,segment,finalStage,'✅ Approved'][i];
-        return '<div class="text-muted">'+label+'</div><div class="fw-600">'+val+'</div>';
-      }).join('')
-    +'</div>';
+  // Component rows for the preview table + email body. Structured as an
+  // array so the same layout naturally supports multiple components if the
+  // workflow later batches them — right now the auto-open trigger fires per
+  // BOM line and this array always has exactly one entry, but the rendering
+  // treats it as .map() over N so no code change is needed if that grows.
+  const components = [{
+    sr: 1,
+    item: b.item,
+    colorFinish: b.colorFinish || '—',
+    size,
+    totalQty: b.qty,
+    handoverQty: sd.qcApproved,
+    pendingQty: Math.max(0, (b.qty||0) - (sd.qcApproved||0)),
+    status: (sd.qcApproved >= b.qty) ? 'Complete' : 'Ready',
+  }];
+
+  // Portal preview — two bordered tables that mirror the target layout:
+  // (1) a 4-column key/value table pairing Project Information with
+  // Production Information side-by-side; (2) a Components Ready for
+  // Handover table with one row per component. Uses the app's existing
+  // CSS variables so it inherits theme colors and stays consistent with
+  // the rest of the portal's table styling.
+  const tdBase = 'padding:6px 10px;border-right:1px solid var(--border);border-bottom:1px solid var(--border);vertical-align:top';
+  const tdLast = 'padding:6px 10px;border-bottom:1px solid var(--border);vertical-align:top';
+  const thBase = 'text-align:left;padding:7px 10px;background:var(--surface2);border-right:1px solid var(--border);border-bottom:1px solid var(--border);font-weight:600;font-size:12px';
+  const thLast = 'text-align:left;padding:7px 10px;background:var(--surface2);border-bottom:1px solid var(--border);font-weight:600;font-size:12px';
+  const projInfo = [
+    ['Project No',  p.sap||'—',                  'Manufacturing Segment', segment],
+    ['Customer',    p.customer||'—',             'Product Type',          p.type||'—'],
+    ['Final Stage', finalStage,                  'QC Status',             '<span style="color:var(--green,#2b8a3e);font-weight:600">✅ Approved</span>'],
+  ];
+  const infoTable =
+    '<table style="width:100%;border-collapse:collapse;font-size:12px;background:var(--surface);border:1px solid var(--border);border-radius:6px;overflow:hidden;margin-bottom:12px">'
+    +'<thead><tr>'
+    +'<th style="'+thBase+';width:22%">Project Information</th>'
+    +'<th style="'+thBase+';width:28%">Value</th>'
+    +'<th style="'+thBase+';width:22%">Production Information</th>'
+    +'<th style="'+thLast+';width:28%">Value</th>'
+    +'</tr></thead><tbody>'
+    +projInfo.map((r,i)=>{
+      // Last row: strip bottom border so the border-radius looks clean.
+      const bb = (i===projInfo.length-1) ? ';border-bottom:none' : '';
+      return '<tr>'
+        +'<td class="text-muted" style="'+tdBase+bb+'">'+r[0]+'</td>'
+        +'<td class="fw-600" style="'+tdBase+bb+'">'+r[1]+'</td>'
+        +'<td class="text-muted" style="'+tdBase+bb+'">'+r[2]+'</td>'
+        +'<td class="fw-600" style="'+tdLast+bb+'">'+r[3]+'</td>'
+        +'</tr>';
+    }).join('')
+    +'</tbody></table>';
+
+  const compsHeader = '<div style="font-weight:600;font-size:12.5px;margin:2px 0 6px 0;color:var(--text-primary,#111)">Components Ready for Handover</div>';
+  const compsTable =
+    '<table style="width:100%;border-collapse:collapse;font-size:12px;background:var(--surface);border:1px solid var(--border);border-radius:6px;overflow:hidden">'
+    +'<thead><tr>'
+    +'<th style="'+thBase+';width:40px;text-align:center">Sr.</th>'
+    +'<th style="'+thBase+'">Component</th>'
+    +'<th style="'+thBase+'">Color / Finish</th>'
+    +'<th style="'+thBase+'">Size / Dimensions</th>'
+    +'<th style="'+thBase+';text-align:right;width:70px">Total Qty</th>'
+    +'<th style="'+thBase+';text-align:right;width:90px">Handover Qty</th>'
+    +'<th style="'+thBase+';text-align:right;width:80px">Pending Qty</th>'
+    +'<th style="'+thLast+';width:80px">Status</th>'
+    +'</tr></thead><tbody>'
+    +components.map((c,i)=>{
+      const bb = (i===components.length-1) ? ';border-bottom:none' : '';
+      const statusColor = c.status==='Complete' ? 'var(--green,#2b8a3e)' : 'var(--accent,#1971c2)';
+      return '<tr>'
+        +'<td style="'+tdBase+bb+';text-align:center">'+c.sr+'</td>'
+        +'<td class="fw-600" style="'+tdBase+bb+'">'+c.item+'</td>'
+        +'<td style="'+tdBase+bb+'">'+c.colorFinish+'</td>'
+        +'<td style="'+tdBase+bb+'">'+c.size+'</td>'
+        +'<td class="font-mono" style="'+tdBase+bb+';text-align:right">'+c.totalQty+'</td>'
+        +'<td class="font-mono" style="'+tdBase+bb+';text-align:right">'+c.handoverQty+'</td>'
+        +'<td class="font-mono" style="'+tdBase+bb+';text-align:right">'+c.pendingQty+'</td>'
+        +'<td style="'+tdLast+bb+';font-weight:600;color:'+statusColor+'">'+c.status+'</td>'
+        +'</tr>';
+    }).join('')
+    +'</tbody></table>';
+
+  document.getElementById('handoverPreview').innerHTML = infoTable + compsHeader + compsTable;
 
   // Build the deduplicated address pool for the To and Cc checkbox lists.
   // Sources merged, in this priority order: (a) admin-managed handover
@@ -8502,16 +8575,38 @@ async function openHandoverNotifyModal(autoOpened){
   document.getElementById('handoverCcNew').value = '';
 
   // Prefill Subject and Body — both editable by the sender before send.
+  // Body uses a plain-text structured layout (structured labels for the info
+  // block, one indented block per component) that reads as tabular even in
+  // proportional-font mail clients — since mailto: bodies are plain text,
+  // we can't use HTML tables here regardless of what the recipient's client
+  // supports, and column-space-aligned ASCII tables break the moment the
+  // client switches to a non-monospace font (which most do by default).
   const d = window._handoverContext.details;
   document.getElementById('handoverSubject').value =
     'Handover Notification — '+d.projectNo+' — '+d.component+' ('+d.finalStage+' Complete)';
+  const bodyComponents = components.map(c=>
+      '  # '+c.sr+'. '+c.item+'\n'
+    + '    Color / Finish   : '+c.colorFinish+'\n'
+    + '    Size / Dimensions: '+c.size+'\n'
+    + '    Total Qty        : '+c.totalQty+'\n'
+    + '    Handover Qty     : '+c.handoverQty+'\n'
+    + '    Pending Qty      : '+c.pendingQty+'\n'
+    + '    Status           : '+c.status
+  ).join('\n\n');
   document.getElementById('handoverBody').value =
-    'The following component has cleared final-stage QC and is ready for handover:\n\n'
-    +'Project No: '+d.projectNo+'\nCustomer: '+d.customer+'\nProduct Type: '+d.productType
-    +'\nComponent: '+d.component+'\nCompleted Quantity: '+d.completedQty+'\nColor / Finish: '+d.colorFinish
-    +'\nSize / Dimensions: '+d.size+'\nManufacturing Segment: '+d.segment
-    +'\nFinal Production Stage: '+d.finalStage+'\nQC Status: '+d.qcStatus
-    +'\n\n— Sent from ONEPWS Production Control Portal';
+      'FINAL-STAGE HANDOVER NOTIFICATION\n'
+    + '=================================\n\n'
+    + 'PROJECT INFORMATION\n'
+    + '  Project No     : '+(p.sap||'—')+'\n'
+    + '  Customer       : '+(p.customer||'—')+'\n'
+    + '  Final Stage    : '+finalStage+'\n\n'
+    + 'PRODUCTION INFORMATION\n'
+    + '  Manufacturing Segment : '+segment+'\n'
+    + '  Product Type          : '+(p.type||'—')+'\n'
+    + '  QC Status             : ✅ Approved\n\n'
+    + 'COMPONENTS READY FOR HANDOVER\n\n'
+    + bodyComponents+'\n\n'
+    + '— Sent from ONEPWS Production Control Portal';
   updateHandoverBodyCounter();
 
   // Auto-opened modals show "Skip — Don't notify for this line" and closing

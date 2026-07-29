@@ -3526,23 +3526,48 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
 
 <!-- FINAL-STAGE HANDOVER NOTIFICATION MODAL -->
 <div class="modal-overlay" id="handoverNotifyModal">
-  <div class="modal" style="max-width:640px">
+  <div class="modal" style="max-width:720px">
     <div class="modal-header">
       <div>
         <div class="modal-title">📧 Final-Stage Handover Notification</div>
-        <div class="text-xs text-muted" style="margin-top:2px">Review the details below, choose the recipient, then send — this opens your email client with the message ready to go.</div>
+        <div class="text-xs text-muted" style="margin-top:2px">Review the details, pick recipients, edit the message if needed, then send — opens your default email client with the message ready to review and send.</div>
       </div>
-      <button class="modal-close" onclick="closeMod('handoverNotifyModal')">×</button>
+      <button class="modal-close" onclick="handoverModalClose()">×</button>
     </div>
     <div class="modal-body">
       <div id="handoverPreview" style="background:var(--surface2);border-radius:8px;padding:12px 14px;font-size:12.5px;line-height:1.7;margin-bottom:14px"></div>
-      <div class="form-group" style="margin-bottom:0">
-        <label class="form-label">Send To <span class="req">*</span></label>
-        <select class="form-select" id="handoverRecipientSelect"></select>
+
+      <div class="form-group" style="margin-bottom:12px">
+        <label class="form-label">To <span class="req">*</span></label>
+        <div id="handoverToList" style="max-height:140px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:8px 10px;background:var(--surface);font-size:12.5px"></div>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <input type="email" class="form-input" id="handoverToNew" placeholder="Or type a new To address..." style="flex:1;font-size:12.5px" onkeydown="if(event.key==='Enter'){event.preventDefault();addNewHandoverAddress('to');}">
+          <button type="button" class="btn btn-outline btn-sm" onclick="addNewHandoverAddress('to')">+ Add</button>
+        </div>
+      </div>
+
+      <div class="form-group" style="margin-bottom:12px">
+        <label class="form-label">Cc</label>
+        <div id="handoverCcList" style="max-height:120px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:8px 10px;background:var(--surface);font-size:12.5px"></div>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <input type="email" class="form-input" id="handoverCcNew" placeholder="Or type a new Cc address..." style="flex:1;font-size:12.5px" onkeydown="if(event.key==='Enter'){event.preventDefault();addNewHandoverAddress('cc');}">
+          <button type="button" class="btn btn-outline btn-sm" onclick="addNewHandoverAddress('cc')">+ Add</button>
+        </div>
+      </div>
+
+      <div class="form-group" style="margin-bottom:12px">
+        <label class="form-label">Subject</label>
+        <input type="text" class="form-input" id="handoverSubject" style="font-size:12.5px">
+      </div>
+
+      <div class="form-group" style="margin-bottom:6px">
+        <label class="form-label">Message</label>
+        <textarea class="form-input" id="handoverBody" rows="10" style="font-size:12.5px;font-family:inherit;resize:vertical" oninput="updateHandoverBodyCounter()"></textarea>
+        <div id="handoverBodyCounter" class="text-xs text-muted" style="margin-top:4px"></div>
       </div>
     </div>
     <div class="modal-footer">
-      <button class="btn btn-outline" onclick="closeMod('handoverNotifyModal')">Cancel</button>
+      <button class="btn btn-outline" id="handoverLeftBtn" onclick="handoverModalClose()">Cancel</button>
       <button class="btn btn-primary" onclick="sendHandoverNotification()">📧 Send Handover Notification</button>
     </div>
   </div>
@@ -4281,6 +4306,13 @@ function apiLoadHandoverLog() {
 }
 function apiCreateHandover(payload) {
   return apiRequest('/handover-log', { method: 'POST', body: JSON.stringify(payload) });
+}
+// Phase 9 additions — history-driven recipient picker + skip-flag setter.
+function apiLoadHandoverAddressHistory() {
+  return apiRequest('/handover-log/address-history', { method: 'GET' });
+}
+function apiMarkEmailPromptShown(lineId) {
+  return apiRequest('/bom-lines/'+encodeURIComponent(lineId)+'/mark-email-prompt-shown', { method: 'POST' });
 }
 function apiLoadTodos() {
   return apiRequest('/todo-list', { method: 'GET' });
@@ -7996,25 +8028,13 @@ function isProductionAdminUser(){
 // cleared final-stage QC per isHandoverReady(), and (c) the auto-open
 // prompt hasn't already been shown or explicitly skipped for this line
 // (emailPromptShown flag). For rework lines, prompts a confirm() first
-// per the design.
-//
-// COMMIT 2 STATE: this function only console.log's what it would do next.
-// The actual modal open + skip-flag-set call is Commit 3 — split this way
-// so we can verify the trigger fires in the right conditions BEFORE
-// touching UI (which is much harder to test than console output).
+// per the design — declining the confirm sets the flag so the prompt
+// won't re-appear on the next QC action for that rework line.
 function checkAutoOpenHandover(p, b){
   if(!p || !b) return;
-  if(!isProductionAdminUser()){
-    // Silent — a QC or Maintenance admin doing QC approvals is normal
-    // operation, and logging every one of their approvals would be noise.
-    return;
-  }
+  if(!isProductionAdminUser()) return;
   if(!isHandoverReady(b)) return;
-  if(b.emailPromptShown){
-    console.log('[Handover auto-trigger] Would fire, but prompt already shown for this line.',
-      {lineId:b.lineId, item:b.item, projectSap:p.sap});
-    return;
-  }
+  if(b.emailPromptShown) return;
   if(b.isRework){
     const proceed = confirm(
       'Component "'+b.item+'" ('+b.lineId+') has cleared final-stage QC.\n\n'+
@@ -8022,15 +8042,20 @@ function checkAutoOpenHandover(p, b){
       'Generate handover notification draft?'
     );
     if(!proceed){
-      console.log('[Handover auto-trigger] Rework line, user declined confirm. In Commit 3 this would call mark-email-prompt-shown.',
-        {lineId:b.lineId, item:b.item});
+      // Persist the decline so the auto-prompt doesn't re-appear on every
+      // subsequent QC action for this rework line. The manual "Notify
+      // Handover" button remains available if the user changes their mind.
+      apiMarkEmailPromptShown(b.lineId).then(()=>{
+        b.emailPromptShown = true;
+      }).catch(err=>{
+        console.warn('Could not save rework-notification skip decision:', err.message);
+      });
       return;
     }
   }
-  console.log('[Handover auto-trigger] Would open Handover Notification modal here in Commit 3.',
-    {lineId:b.lineId, item:b.item, isRework:!!b.isRework,
-     finalStage:getFinalProductionStage(b.route), projectSap:p.sap,
-     user:CURRENT_USER?CURRENT_USER.fullName:'(none)'});
+  CUR_BOM_LINE = b;
+  CUR_PROJ = p;
+  openHandoverNotifyModal(true);
 }
 
 function isBoardStage(stageName){
@@ -8403,7 +8428,7 @@ function renderComponentTrace(){
 // Compiles the handover details for the current component and opens the
 // notification modal — shown only once the final production stage has
 // QC-approved quantity (mirrors isHandoverReady(), used to show the button).
-function openHandoverNotifyModal(){
+async function openHandoverNotifyModal(autoOpened){
   const b=CUR_BOM_LINE, p=CUR_PROJ;
   if(!b || !p){ toast('Select a component first.','⚠'); return; }
   if(!isHandoverReady(b)){ toast('This component has not yet cleared final-stage QC.','⚠'); return; }
@@ -8415,6 +8440,9 @@ function openHandoverNotifyModal(){
   window._handoverContext = {
     lineId:b.lineId, projectId:p.id, proj:p.sap, item:b.item, qty:sd.qcApproved, uom:b.uom||'PC',
     segment: b.seg==='ext'?'ext':'wood', finalStage,
+    line: b,
+    autoOpened: !!autoOpened,
+    _sent: false,
     details:{
       projectNo:p.sap, customer:p.customer, productType:p.type, component:b.item,
       completedQty:sd.qcApproved+' '+(b.uom||'PC'), colorFinish:b.colorFinish||'—',
@@ -8431,38 +8459,216 @@ function openHandoverNotifyModal(){
       }).join('')
     +'</div>';
 
-  const recipients = (M.handoverRecipients||[]).filter(r=>r.segment==='all'||r.segment===(b.seg==='ext'?'ext':'wood'));
-  const sel = document.getElementById('handoverRecipientSelect');
-  sel.innerHTML = recipients.length
-    ? recipients.map(r=>'<option value="'+r.email+'" data-dept="'+r.department+'">'+r.department+' ('+r.email+')</option>').join('')
-    : '<option value="">No recipients configured for this segment — add one in Admin Panel</option>';
+  // Build the deduplicated address pool for the To and Cc checkbox lists.
+  // Sources merged, in this priority order: (a) admin-managed handover
+  // recipients from Admin Panel (filtered to this segment or 'all') carry
+  // a "— {Department} (admin)" label so shop-configured defaults stand out;
+  // (b) history-of-used addresses from GET /handover-log/address-history
+  // (both prior To and prior Cc) carry a "— used N×" label so the picker
+  // surfaces most-frequently-used contacts first; (c) free-typed new
+  // addresses in the two "+ Add" inputs prepend to the list on submit.
+  // Deduped by lowercased email; admin label wins if both sources have it.
+  const segFilter = b.seg==='ext'?'ext':'wood';
+  const adminRecipients = (M.handoverRecipients||[]).filter(r=>r.segment==='all'||r.segment===segFilter);
+  let historyAddrs = [];
+  try{
+    const resp = await apiLoadHandoverAddressHistory();
+    historyAddrs = resp.addresses || [];
+  } catch(err){
+    // Non-fatal — the modal still works with just admin recipients and typed-in new addresses.
+    console.warn('Could not load handover address history:', err.message);
+  }
+  const merged = new Map();
+  adminRecipients.forEach(r=>{
+    if(!r.email) return;
+    const key = r.email.toLowerCase();
+    merged.set(key, {email:r.email, adminLabel:r.department||'', useCount:0});
+  });
+  historyAddrs.forEach(h=>{
+    if(!h.email) return;
+    const key = h.email.toLowerCase();
+    const existing = merged.get(key);
+    if(existing){ existing.useCount = h.useCount; }
+    else { merged.set(key, {email:h.email, adminLabel:'', useCount:h.useCount}); }
+  });
+  const addresses = Array.from(merged.values()).sort((a,z)=>{
+    if(!!a.adminLabel !== !!z.adminLabel) return a.adminLabel ? -1 : 1;
+    if(z.useCount !== a.useCount) return z.useCount - a.useCount;
+    return a.email.localeCompare(z.email);
+  });
+  renderHandoverAddressList('handoverToList', addresses, 'to');
+  renderHandoverAddressList('handoverCcList', addresses, 'cc');
+  document.getElementById('handoverToNew').value = '';
+  document.getElementById('handoverCcNew').value = '';
+
+  // Prefill Subject and Body — both editable by the sender before send.
+  const d = window._handoverContext.details;
+  document.getElementById('handoverSubject').value =
+    'Handover Notification — '+d.projectNo+' — '+d.component+' ('+d.finalStage+' Complete)';
+  document.getElementById('handoverBody').value =
+    'The following component has cleared final-stage QC and is ready for handover:\n\n'
+    +'Project No: '+d.projectNo+'\nCustomer: '+d.customer+'\nProduct Type: '+d.productType
+    +'\nComponent: '+d.component+'\nCompleted Quantity: '+d.completedQty+'\nColor / Finish: '+d.colorFinish
+    +'\nSize / Dimensions: '+d.size+'\nManufacturing Segment: '+d.segment
+    +'\nFinal Production Stage: '+d.finalStage+'\nQC Status: '+d.qcStatus
+    +'\n\n— Sent from ONEPWS Production Control Portal';
+  updateHandoverBodyCounter();
+
+  // Auto-opened modals show "Skip — Don't notify for this line" and closing
+  // via any path (X, Skip, Cancel) flips the server flag so the auto-open
+  // won't re-fire on subsequent QC actions. Manually-opened modals show
+  // "Cancel" and closing without sending is truly a no-op.
+  const leftBtn = document.getElementById('handoverLeftBtn');
+  if(leftBtn) leftBtn.textContent = autoOpened ? "Skip — Don't notify for this line" : 'Cancel';
 
   document.getElementById('handoverNotifyModal').classList.add('open');
+}
+
+// Renders one address checkbox list (To or Cc). See openHandoverNotifyModal
+// for how the addresses array is built and sorted.
+function renderHandoverAddressList(containerId, addresses, kind){
+  const el = document.getElementById(containerId);
+  if(!el) return;
+  if(!addresses.length){
+    el.innerHTML = '<div class="text-xs text-muted" style="padding:4px 0">No saved addresses yet — type one below.</div>';
+    return;
+  }
+  el.innerHTML = addresses.map((a,i)=>{
+    const id = 'ho_'+kind+'_'+i;
+    const suffix = a.adminLabel
+      ? ' <span class="text-xs text-muted">— '+a.adminLabel+' (admin)</span>'
+      : (a.useCount ? ' <span class="text-xs text-muted">— used '+a.useCount+'×</span>' : '');
+    const safeEmail = a.email.replace(/"/g,'&quot;');
+    return '<label style="display:flex;align-items:center;gap:8px;padding:3px 0;cursor:pointer">'
+      +'<input type="checkbox" id="'+id+'" data-kind="'+kind+'" value="'+safeEmail+'">'
+      +'<span>'+a.email+suffix+'</span>'
+      +'</label>';
+  }).join('');
+}
+
+// Handles the "+ Add" button beside each of To/Cc — validates the email
+// shape, dedupes against the existing list, and prepends a pre-checked row.
+// The address goes into audit history the first time the user actually
+// sends (via /api/handover-log), so it'll appear in the picker next time.
+function addNewHandoverAddress(kind){
+  const inputId = kind==='to' ? 'handoverToNew' : 'handoverCcNew';
+  const listId  = kind==='to' ? 'handoverToList' : 'handoverCcList';
+  const input = document.getElementById(inputId);
+  const raw = (input.value||'').trim();
+  if(!raw){ return; }
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw)){
+    toast('That does not look like a valid email address.','⚠');
+    return;
+  }
+  const existing = document.querySelectorAll('#'+listId+' input[type="checkbox"]');
+  for(const cb of existing){
+    if(cb.value.toLowerCase() === raw.toLowerCase()){ cb.checked = true; input.value=''; return; }
+  }
+  const el = document.getElementById(listId);
+  const idx = existing.length;
+  const row = document.createElement('label');
+  row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:3px 0;cursor:pointer';
+  row.innerHTML =
+    '<input type="checkbox" id="ho_'+kind+'_new_'+idx+'" data-kind="'+kind+'" value="'+raw.replace(/"/g,'&quot;')+'" checked>'
+    +'<span>'+raw+' <span class="text-xs text-muted">— just added</span></span>';
+  // Handle the "No saved addresses yet" placeholder — replace it wholesale.
+  if(el.querySelector('input[type="checkbox"]') === null){ el.innerHTML = ''; }
+  el.insertBefore(row, el.firstChild);
+  input.value = '';
+}
+
+// Reads currently-checked addresses out of the To or Cc list, deduped
+// case-insensitively while preserving the original case of the first
+// occurrence — used both by the send handler and the To/Cc overlap
+// dedupe (Cc entries that are also in To get dropped from Cc).
+function getCheckedHandoverAddresses(kind){
+  const listId = kind==='to' ? 'handoverToList' : 'handoverCcList';
+  const nodes = document.querySelectorAll('#'+listId+' input[type="checkbox"]:checked');
+  const seen = new Set(); const out = [];
+  nodes.forEach(cb=>{
+    const v = (cb.value||'').trim();
+    const k = v.toLowerCase();
+    if(v && !seen.has(k)){ seen.add(k); out.push(v); }
+  });
+  return out;
+}
+
+// Live message length indicator — mailto: URL practical limits vary but
+// ~2000 chars is a safe upper bound across Windows Mail, older Outlook,
+// and Gmail-in-browser. Flag at 1800 as a pragmatic warning threshold so
+// the sender has room to add recipients + subject in the URL.
+function updateHandoverBodyCounter(){
+  const body = document.getElementById('handoverBody');
+  const counter = document.getElementById('handoverBodyCounter');
+  if(!body || !counter) return;
+  const total = body.value.length;
+  if(total > 1800){
+    counter.style.color = 'var(--red, #d33)';
+    counter.textContent = 'Warning: '+total+' characters — long messages may be truncated by your mail client (mailto: URL limit ~2000). Consider shortening.';
+  } else {
+    counter.style.color = '';
+    counter.classList.add('text-muted');
+    counter.textContent = total+' characters';
+  }
 }
 
 // Opens the user's own mail client with the handover message pre-filled
 // (this app has no outbound email service configured, so a human reviews
 // and sends via their own client) and records the event to the audit trail
 // regardless — the record is what makes this traceable, not the send itself.
+// For auto-opened modals (fired by checkAutoOpenHandover after final-stage
+// QC), also flips the server email_prompt_shown flag so the modal won't
+// re-fire on subsequent QC actions for this line. Manual sends don't touch
+// the flag — the manual "Notify Handover" button in the component detail
+// view is designed to be re-runnable (e.g. re-notify a different recipient
+// later), and quietly flipping the flag on manual send would silently
+// suppress future auto-opens for that line, which the user hasn't asked for.
 async function sendHandoverNotification(){
   const ctx = window._handoverContext;
-  const sel = document.getElementById('handoverRecipientSelect');
-  const email = sel.value;
-  const department = sel.selectedOptions[0]?.getAttribute('data-dept')||'';
-  if(!email){ toast('No recipient selected — add one in Admin Panel > Handover Recipients first.','⚠'); return; }
+  if(!ctx){ toast('Handover context lost — reopen the modal.','⚠'); return; }
 
-  const d = ctx.details;
-  const subject = 'Handover Notification — '+d.projectNo+' — '+d.component+' ('+d.finalStage+' Complete)';
-  const body = 'The following component has cleared final-stage QC and is ready for handover:\n\n'
-    +'Project No: '+d.projectNo+'\nCustomer: '+d.customer+'\nProduct Type: '+d.productType
-    +'\nComponent: '+d.component+'\nCompleted Quantity: '+d.completedQty+'\nColor / Finish: '+d.colorFinish
-    +'\nSize / Dimensions: '+d.size+'\nManufacturing Segment: '+d.segment
-    +'\nFinal Production Stage: '+d.finalStage+'\nQC Status: '+d.qcStatus
-    +'\n\n— Sent from ONEPWS Production Control Portal';
+  const toAddrs = getCheckedHandoverAddresses('to');
+  const ccAddrs = getCheckedHandoverAddresses('cc');
+  if(!toAddrs.length){
+    toast('Pick at least one To address (or type one and click + Add).','⚠');
+    return;
+  }
+  // Cc entries that are also in To get silently dropped from Cc — spec-legal
+  // to have someone in both, but confusing in practice and every mail client
+  // ends up sending them one message anyway.
+  const toSet = new Set(toAddrs.map(a=>a.toLowerCase()));
+  const ccClean = ccAddrs.filter(a=>!toSet.has(a.toLowerCase()));
 
-  window.location.href = 'mailto:'+encodeURIComponent(email)+'?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(body);
+  const subject = document.getElementById('handoverSubject').value;
+  const body    = document.getElementById('handoverBody').value;
 
-  const payload = { ...ctx, department, email, triggeredBy: CURRENT_USER?CURRENT_USER.fullName:'Unknown' };
+  // mailto: allows comma-separated addresses in to and cc. All major mail
+  // clients handle this — falls back to single-recipient behavior if not.
+  const mailto = 'mailto:'+encodeURIComponent(toAddrs.join(','))
+    + '?subject='+encodeURIComponent(subject)
+    + (ccClean.length ? '&cc='+encodeURIComponent(ccClean.join(',')) : '')
+    + '&body='+encodeURIComponent(body);
+  window.location.href = mailto;
+
+  // Audit trail schema stores a single primary To (email column) plus an
+  // array (cc_emails). Multi-To sends record the first To as primary and
+  // roll remaining To addresses into cc_emails alongside the actual Cc
+  // list — a pragmatic compromise vs adding a to_emails column. If audit
+  // needs perfect To/Cc separation later, that's a small follow-up
+  // migration; for now the primary recipient is preserved and the full
+  // recipient set stays queryable via the address-history endpoint.
+  const primaryTo    = toAddrs[0];
+  const additionalTo = toAddrs.slice(1);
+  const auditCc      = additionalTo.concat(ccClean);
+  const payload = {
+    lineId:ctx.lineId, projectId:ctx.projectId, proj:ctx.proj, item:ctx.item,
+    qty:ctx.qty, uom:ctx.uom, segment:ctx.segment, finalStage:ctx.finalStage,
+    details:ctx.details,
+    department: '',
+    email: primaryTo,
+    ccEmails: auditCc,
+    triggeredBy: CURRENT_USER ? CURRENT_USER.fullName : 'Unknown',
+  };
   try{
     const resp = await apiCreateHandover(payload);
     DB.handoverLog.unshift(resp.handover);
@@ -8472,14 +8678,48 @@ async function sendHandoverNotification(){
     return;
   }
 
-  const ts=new Date().toISOString().replace('T',' ').slice(0,16);
-  DB.auditLog.unshift({ts,user:CURRENT_USER?CURRENT_USER.fullName:'Admin',action:'Handover Notification',module:'Stage-wise Production',
-    entity:ctx.item,field:ctx.proj,old:'--',nw:'Notified '+department+' ('+email+') — '+ctx.qty+' '+ctx.uom,ip:'192.168.1.1'});
+  if(ctx.autoOpened && ctx.line){
+    try{
+      await apiMarkEmailPromptShown(ctx.lineId);
+      ctx.line.emailPromptShown = true;
+    } catch(err){
+      // Non-fatal — worst case, the auto-open re-fires on the next QC action.
+      console.warn('Could not set email_prompt_shown flag on send:', err.message);
+    }
+  }
+  ctx._sent = true;
 
-  toast('Handover notification opened for '+department+' and recorded.','✓');
+  const ts=new Date().toISOString().replace('T',' ').slice(0,16);
+  const displayLabel = primaryTo + (auditCc.length ? ' + '+auditCc.length+' more' : '');
+  DB.auditLog.unshift({ts,user:CURRENT_USER?CURRENT_USER.fullName:'Admin',action:'Handover Notification',module:'Stage-wise Production',
+    entity:ctx.item,field:ctx.proj,old:'--',nw:'Notified '+displayLabel+' — '+ctx.qty+' '+ctx.uom,ip:'192.168.1.1'});
+
+  toast('Handover notification opened for '+displayLabel+' and recorded.','✓');
   closeMod('handoverNotifyModal');
   if(typeof renderComponentHandoverHistory==='function') renderComponentHandoverHistory();
 }
+
+// Wraps the modal-close behavior with the auto-open Skip logic. For an
+// auto-opened modal (fired by checkAutoOpenHandover after final-stage QC),
+// closing without sending is treated as "skip — don't ask again for this
+// line" and flips the server flag. For a manually-opened modal (via the
+// Notify Handover button), closing without sending is just a cancel — no
+// flag change. Wired to the X close button and to the left footer button
+// (whose label is "Skip …" when auto-opened and "Cancel" when manual).
+async function handoverModalClose(){
+  const ctx = window._handoverContext;
+  if(ctx && ctx.autoOpened && !ctx._sent){
+    try{
+      await apiMarkEmailPromptShown(ctx.lineId);
+      if(ctx.line) ctx.line.emailPromptShown = true;
+    } catch(err){
+      // Non-fatal — worst case, the auto-open will re-fire on the next QC action.
+      console.warn('Could not set email_prompt_shown flag on skip:', err.message);
+    }
+  }
+  closeMod('handoverNotifyModal');
+}
+async function skipHandoverNotification(){ return handoverModalClose(); }
 
 function renderComponentHistory(){
   const b=CUR_BOM_LINE; if(!b) return;

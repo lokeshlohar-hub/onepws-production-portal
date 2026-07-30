@@ -68,25 +68,25 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text-prim
    via scrollbar-width/scrollbar-color, since it doesn't support the
    ::-webkit-scrollbar pseudo-elements.
 */
-.table-wrap, .modal-body, .horiz-scroll{
+.table-wrap, .modal-body, .horiz-scroll, .bom-top-scroll{
   scrollbar-width:auto;
   scrollbar-color:var(--border2) var(--surface2);
 }
-.table-wrap::-webkit-scrollbar, .modal-body::-webkit-scrollbar, .horiz-scroll::-webkit-scrollbar{
+.table-wrap::-webkit-scrollbar, .modal-body::-webkit-scrollbar, .horiz-scroll::-webkit-scrollbar, .bom-top-scroll::-webkit-scrollbar{
   height:15px;
   width:15px;
 }
-.table-wrap::-webkit-scrollbar-track, .modal-body::-webkit-scrollbar-track, .horiz-scroll::-webkit-scrollbar-track{
+.table-wrap::-webkit-scrollbar-track, .modal-body::-webkit-scrollbar-track, .horiz-scroll::-webkit-scrollbar-track, .bom-top-scroll::-webkit-scrollbar-track{
   background:var(--surface2);
   border-radius:8px;
 }
-.table-wrap::-webkit-scrollbar-thumb, .modal-body::-webkit-scrollbar-thumb, .horiz-scroll::-webkit-scrollbar-thumb{
+.table-wrap::-webkit-scrollbar-thumb, .modal-body::-webkit-scrollbar-thumb, .horiz-scroll::-webkit-scrollbar-thumb, .bom-top-scroll::-webkit-scrollbar-thumb{
   background:var(--border2);
   border-radius:8px;
   border:3px solid var(--surface2);
   min-width:40px;
 }
-.table-wrap::-webkit-scrollbar-thumb:hover, .modal-body::-webkit-scrollbar-thumb:hover, .horiz-scroll::-webkit-scrollbar-thumb:hover{
+.table-wrap::-webkit-scrollbar-thumb:hover, .modal-body::-webkit-scrollbar-thumb:hover, .horiz-scroll::-webkit-scrollbar-thumb:hover, .bom-top-scroll::-webkit-scrollbar-thumb:hover{
   background:var(--accent);
 }
 .table-wrap, .modal-body{ scroll-behavior:smooth; }
@@ -94,6 +94,14 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text-prim
    horizontal scrollbar at all — modal-body previously only handled vertical
    overflow, so wide content had nowhere to scroll and was simply clipped. */
 .modal-body{ overflow-x:auto; }
+/* Top-of-table synced horizontal scrollbar — Phase 10. Placed above a wide
+   BOM table so a user doesn't have to scroll the modal all the way down to
+   reach the table's own bottom scrollbar; both bars share position via a
+   small JS handler (syncBomTopScroll/syncBomBottomScroll). Inherits the
+   fat 15px styled scrollbar via the same rules that style .table-wrap
+   above — the class is added to those selector lists on the same line. */
+.bom-top-scroll{overflow-x:auto;overflow-y:hidden;height:16px}
+.bom-top-scroll-spacer{height:1px}
 table{width:100%;border-collapse:collapse;font-size:12.5px}
 thead th{background:var(--surface2);padding:9px 12px;text-align:left;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;color:var(--text-muted);border-bottom:2px solid var(--border);white-space:nowrap;cursor:pointer;user-select:none}
 thead th:hover{color:var(--accent)}
@@ -10454,11 +10462,64 @@ function renderSegmentBOMSection(p, seg){
 
   return '<div style="margin-bottom:18px;border:1.5px solid '+headerColor+';border-radius:10px;overflow:hidden">'
     +'<div style="background:'+headerBg+';color:'+headerColor+';padding:9px 14px;font-weight:700;font-size:13px">'+icon+' '+label+'</div>'
-    +'<div class="table-wrap">'
+    +'<div class="bom-top-scroll" id="bomTopScroll_'+seg+'" onscroll="syncBomTopScroll(\''+seg+'\')">'
+      +'<div class="bom-top-scroll-spacer" id="bomTopSpacer_'+seg+'"></div>'
+    +'</div>'
+    +'<div class="table-wrap" id="bomTableWrap_'+seg+'" onscroll="syncBomBottomScroll(\''+seg+'\')">'
       +'<table style="margin:0"><thead><tr><th>#</th><th>Component</th><th>Type</th><th>L</th><th>W</th><th>T</th><th>UOM</th><th>Qty</th><th>Color / Finish</th><th>Special Characteristics</th><th>Fully Cleared</th><th>Pending</th><th>Current Stage</th></tr></thead>'
       +'<tbody>'+(bodyHtml||'<tr><td colspan="13" class="text-sm text-muted" style="padding:12px;text-align:center">No components in this segment.</td></tr>')+'</tbody></table>'
     +'</div>'
   +'</div>';
+}
+
+// Guard against feedback loops when programmatically scrolling one bar in
+// response to the other. onscroll fires whenever scrollLeft changes — even
+// programmatically — so without this flag, each sync would trigger the
+// paired sync, which triggers this sync, etc.
+let _bomScrollSyncing = false;
+function syncBomTopScroll(seg){
+  if(_bomScrollSyncing) return;
+  const top = document.getElementById('bomTopScroll_'+seg);
+  const bottom = document.getElementById('bomTableWrap_'+seg);
+  if(!top || !bottom) return;
+  _bomScrollSyncing = true;
+  bottom.scrollLeft = top.scrollLeft;
+  _bomScrollSyncing = false;
+}
+function syncBomBottomScroll(seg){
+  if(_bomScrollSyncing) return;
+  const top = document.getElementById('bomTopScroll_'+seg);
+  const bottom = document.getElementById('bomTableWrap_'+seg);
+  if(!top || !bottom) return;
+  _bomScrollSyncing = true;
+  top.scrollLeft = bottom.scrollLeft;
+  _bomScrollSyncing = false;
+}
+
+// Initialize the synced top scrollbar for one BOM segment: set the spacer
+// element's width to match the underlying table's scrollWidth so the top
+// bar spans the same horizontal range as the bottom, and wire up a
+// ResizeObserver so the spacer stays in sync if the table's width changes
+// later (e.g., when the BOM tab first becomes visible and the table
+// finally lays out, or when a component gets added/deleted). Called from
+// openProj() right after pt-bom.innerHTML is set — the ResizeObserver
+// callback handles the hidden-until-tab-clicked case automatically.
+function initBomScrollSync(seg){
+  const wrap = document.getElementById('bomTableWrap_'+seg);
+  const spacer = document.getElementById('bomTopSpacer_'+seg);
+  if(!wrap || !spacer) return;
+  const table = wrap.querySelector('table');
+  if(!table) return;
+  const update = ()=>{
+    const w = wrap.scrollWidth || table.scrollWidth || 0;
+    if(w > 0) spacer.style.width = w+'px';
+  };
+  update();
+  if(typeof ResizeObserver !== 'undefined'){
+    const ro = new ResizeObserver(update);
+    ro.observe(wrap);
+    ro.observe(table);
+  }
 }
 
 function openProj(id){
@@ -10474,6 +10535,11 @@ function openProj(id){
   document.getElementById('pt-bom').innerHTML='<div style="display:flex;justify-content:flex-end;margin-bottom:8px"><button class="btn btn-outline btn-sm" onclick="openRouteCardPDF(\''+p.id+'\')">🖨 Route Card PDF</button></div>'
     +(p.hasWood?renderSegmentBOMSection(p,'wood'):'')
     +(p.hasExt?renderSegmentBOMSection(p,'ext'):'');
+  // Wire up the synced top scrollbar for each rendered segment. Runs
+  // ResizeObserver internally, so the "hidden until BOM tab is clicked"
+  // case sorts itself out on tab reveal without extra plumbing.
+  if(p.hasWood) initBomScrollSync('wood');
+  if(p.hasExt)  initBomScrollSync('ext');
   document.getElementById('pt-docs').innerHTML=p.docs.length?p.docs.map(d=>'<div style="display:flex;align-items:center;gap:9px;padding:9px 12px;background:var(--surface2);border-radius:7px;border:1px solid var(--border);margin-bottom:6px"><span style="font-size:18px">'+(d.endsWith('.pdf')?'📄':'📊')+'</span><span class="text-sm fw-600">'+d+'</span><button class="btn btn-outline btn-sm" style="margin-left:auto" onclick="toast(\'Download simulated.\')">Download</button></div>').join(''):'<div class="text-muted text-sm">No documents attached.</div>';
   document.getElementById('pt-history').innerHTML='<table><thead><tr><th>Timestamp</th><th>User</th><th>Action</th><th>Stage</th><th>Old</th><th>New (incl. Operator)</th></tr></thead><tbody>'+(p.history||[]).map(h=>'<tr><td class="log-td">'+h.ts+'</td><td>'+h.u+'</td><td>'+h.act+'</td><td class="fw-600">'+h.f+'</td><td class="text-muted">'+(h.old||'—')+'</td><td class="fw-600" style="color:var(--accent)">'+(h.nw||'—')+'</td></tr>').join('')+'</tbody></table>';
   // Timeline tab

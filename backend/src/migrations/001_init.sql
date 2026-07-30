@@ -350,3 +350,12 @@ CREATE INDEX IF NOT EXISTS idx_mistake_status ON mistake_register(status);
 -- traceability reason the primary email column already exists.
 ALTER TABLE bom_lines    ADD COLUMN IF NOT EXISTS email_prompt_shown BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE handover_log ADD COLUMN IF NOT EXISTS cc_emails JSONB NOT NULL DEFAULT '[]';
+
+-- BOM line Description (traceability) — Phase 10. Optional free-text field
+-- used to distinguish similar components during production (e.g. two BOM
+-- lines both named SHUTTER, one carrying description "LEFT SHUTTER" and
+-- the other "RIGHT SHUTTER"). Never drives routing — routing continues to
+-- key off item name alone. Always uppercased on write (both server-side
+-- normalization here and client-side as-you-type) so LEFT and left match
+-- exactly in reports and search.
+ALTER TABLE bom_lines ADD COLUMN IF NOT EXISTS description VARCHAR(50);

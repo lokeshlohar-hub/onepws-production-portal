@@ -92,6 +92,15 @@ router.put('/:lineId', async (req, res) => {
     const push = (col, val) => { sets.push(col + ' = $' + i); vals.push(val); i++; };
 
     if (typeof b.item === 'string' && b.item.trim()) push('item', b.item.trim());
+    if (typeof b.description === 'string') {
+      // Free-text traceability field — uppercased server-side even if the
+      // frontend already did so, since a direct API call or CSV import path
+      // could skip the client's oninput handler. Empty string is legal
+      // (users can clear a description) and maps to NULL for a clean audit
+      // trail rather than an "" placeholder.
+      const desc = b.description.trim().toUpperCase();
+      push('description', desc || null);
+    }
     if (b.l !== undefined)   push('l', b.l === '' || b.l === null ? null : Number(b.l));
     if (b.w !== undefined)   push('w', b.w === '' || b.w === null ? null : Number(b.w));
     if (b.t !== undefined)   push('t', b.t === '' || b.t === null ? null : Number(b.t));

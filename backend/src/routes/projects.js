@@ -70,8 +70,8 @@ router.post('/', requireRole('admin', 'superadmin'), async (req, res) => {
         `INSERT INTO bom_lines (
            line_id, project_id, item, seg, l, w, t, profile, uom, qty, original_qty,
            color_finish, special_chars, components_per_board, edge_meters_per_comp,
-           board_qty, components_released, route, stage_data
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10,$11,$12,$13,$14,$15,0,$16,$17)`,
+           board_qty, components_released, route, stage_data, description
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10,$11,$12,$13,$14,$15,0,$16,$17,$18)`,
         [
           lineId, projectId, b.item, b.seg || 'wood', b.l || null, b.w || null, b.t || null, b.profile || null,
           b.uom || 'PC', b.qty,
@@ -79,6 +79,12 @@ router.post('/', requireRole('admin', 'superadmin'), async (req, res) => {
           b.componentsPerBoard || null, b.edgeMetersPerComp || null,
           b.boardQty || Math.max(1, Math.ceil(b.qty / (b.componentsPerBoard || 8))),
           JSON.stringify(route), JSON.stringify(stageData),
+          // Description is optional and always stored uppercase — clients
+          // uppercase-as-you-type but we normalize server-side too so that
+          // CSV import / direct API calls stay consistent with the UI path.
+          (typeof b.description === 'string' && b.description.trim())
+            ? b.description.trim().toUpperCase()
+            : null,
         ]
       );
       createdLines.push(lineId);
@@ -141,8 +147,8 @@ router.post('/:id/add-segment', requireRole('admin', 'superadmin'), async (req, 
         `INSERT INTO bom_lines (
            line_id, project_id, item, seg, l, w, t, profile, uom, qty, original_qty,
            color_finish, special_chars, components_per_board, edge_meters_per_comp,
-           board_qty, components_released, route, stage_data
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10,$11,$12,$13,$14,$15,0,$16,$17)`,
+           board_qty, components_released, route, stage_data, description
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10,$11,$12,$13,$14,$15,0,$16,$17,$18)`,
         [
           lineId, req.params.id, b.item, segment, b.l || null, b.w || null, b.t || null, b.profile || null,
           b.uom || 'PC', b.qty,
@@ -150,6 +156,9 @@ router.post('/:id/add-segment', requireRole('admin', 'superadmin'), async (req, 
           b.componentsPerBoard || null, b.edgeMetersPerComp || null,
           b.boardQty || Math.max(1, Math.ceil(b.qty / (b.componentsPerBoard || 8))),
           JSON.stringify(route), JSON.stringify(stageData),
+          (typeof b.description === 'string' && b.description.trim())
+            ? b.description.trim().toUpperCase()
+            : null,
         ]
       );
       createdLines.push(lineId);

@@ -7579,7 +7579,6 @@ function makeSegBOMEditRow(b, seg, projectId){
       +'<td><input type="text" class="form-input" style="height:27px;width:130px" id="e_bom_specials_ext_'+safeId+'" value="'+specialCharsStr.replace(/"/g,'&quot;')+'" placeholder="comma-separated" title="Comma-separated special characteristics"></td>'
       +'<td><div style="min-width:180px">'+routeDisplay+'</div></td>'
       +'<td style="white-space:nowrap">'
-        +'<button class="btn btn-primary btn-sm" style="height:26px;padding:0 8px;margin-right:4px" onclick="saveExistingBomLine(\''+safeId+'\',\''+seg+'\')">Save</button>'
         +'<button class="btn btn-danger btn-sm" style="height:26px;padding:0 8px" onclick="deleteExistingBomLine(\''+safeId+'\',\''+seg+'\')">Delete</button>'
       +'</td>'
       +'</tr>';
@@ -7598,7 +7597,6 @@ function makeSegBOMEditRow(b, seg, projectId){
     +'<td><input type="text" class="form-input" style="height:27px;width:130px" id="e_bom_specials_wood_'+safeId+'" value="'+specialCharsStr.replace(/"/g,'&quot;')+'" placeholder="comma-separated" title="Comma-separated special characteristics"></td>'
     +'<td><div style="min-width:200px">'+routeDisplay+'</div></td>'
     +'<td style="white-space:nowrap">'
-      +'<button class="btn btn-primary btn-sm" style="height:26px;padding:0 8px;margin-right:4px" onclick="saveExistingBomLine(\''+safeId+'\',\''+seg+'\')">Save</button>'
       +'<button class="btn btn-danger btn-sm" style="height:26px;padding:0 8px" onclick="deleteExistingBomLine(\''+safeId+'\',\''+seg+'\')">Delete</button>'
     +'</td>'
     +'</tr>';
@@ -8017,17 +8015,35 @@ async function saveProjectAddSegment(btn){
   const p = DB.projects.find(x=>x.id===_editingProjectId);
   if(!p){ toast('Project not found — please reopen from the project.','⚠'); return; }
 
-  // Only a segment whose checkbox is checked is touched at all — an
-  // already-existing segment stays checked+locked throughout, so this
-  // naturally covers both "add the missing segment" and "add new components
-  // to a segment that's already there".
+  // === Collect EDITS from both segments =================================
+  // Every editable existing-line row goes through PUT /api/bom-lines/:lineId
+  // as UPDATE-in-place, never as a new INSERT. This is the fix for the
+  // duplicate-BOM bug where the batched save previously walked every row
+  // (including edits) and pushed each as a new component.
+  const allEdits = [
+    ...collectSegEdits('wood', p),
+    ...collectSegEdits('ext',  p),
+  ];
+  // Basic pre-flight validation for edits — server also validates, but a
+  // client-side check gives a clearer per-row error before we start any
+  // network calls.
+  for(const e of allEdits){
+    if(!e.payload.item){
+      toast('Component name is required (line '+e.lineId+').','⚠');
+      return;
+    }
+    if(e.payload.qty !== undefined && e.payload.qty !== null && e.payload.qty < 1){
+      toast('Quantity must be at least 1 (line '+e.lineId+' — '+e.item+').','⚠');
+      return;
+    }
+  }
+
+  // === Collect ADDS (existing logic, now filtered to non-edit rows) =====
+  // collectSegBOM() now skips rows with data-edit-line-id, so this only
+  // sees "+ Add Component" rows — which is what the bulk add flow expects.
   const segsToCheck = [];
   if(document.getElementById('chk_wood')?.checked) segsToCheck.push('wood');
   if(document.getElementById('chk_ext')?.checked) segsToCheck.push('ext');
-  if(!segsToCheck.length){
-    toast('Check Wood and/or Extrusion, then add component(s), before saving.','⚠');
-    return;
-  }
 
   // Validate every segment being touched BEFORE calling the server for any
   // of them — so a mistake in the second segment can't leave the first one
@@ -8047,14 +8063,48 @@ async function saveProjectAddSegment(btn){
     if(!rec){toast((seg==='wood'?'Wood':'Extrusion')+' segment: File Receiving Date is required.','⚠');return;}
     plans.push({seg, isNewSegment, bom, rec, tat: document.getElementById('np_'+seg+'_tat')?.value||''});
   }
-  if(!plans.length){
-    toast('No new components were added — check a segment\'s components before saving.','⚠');
+  if(!allEdits.length && !plans.length){
+    toast('No changes to save — edit an existing component or add a new one.','⚠');
     return;
   }
 
   const originalBtnText = btn ? btn.textContent : '';
   if(btn){ btn.disabled=true; btn.textContent='Saving to server…'; }
 
+  // === Process EDITS (per-line PUT) =====================================
+  // Each edit is independent — one failure doesn't block the others.
+  // Failures are collected and shown in an aggregated toast at the end
+  // so the user can see everything at once. Route-recomputation warnings
+  // (renames where the new name has no admin routing rule) are also
+  // aggregated instead of one toast per rename.
+  const editSuccesses = [];
+  const editFailures  = [];
+  const renamedNoRoute = [];
+  const renamedWithRoute = [];
+  for(const e of allEdits){
+    const preSnapshot = {
+      item: e.localLine.item, l: e.localLine.l, w: e.localLine.w, t: e.localLine.t,
+      profile: e.localLine.profile, uom: e.localLine.uom, qty: e.localLine.qty,
+      colorFinish: e.localLine.colorFinish, specialChars: e.localLine.specialChars,
+      componentsPerBoard: e.localLine.componentsPerBoard, edgeMetersPerComp: e.localLine.edgeMetersPerComp,
+      boardQty: e.localLine.boardQty, route: e.localLine.route,
+    };
+    try{
+      const resp = await apiEditBomLine(e.lineId, e.payload);
+      const updated = resp.line ? serverBomLineToLocal(resp.line) : null;
+      if(updated){ Object.assign(e.localLine, updated); }
+      else { Object.assign(e.localLine, e.payload); }
+      if(resp.routeReplaced){
+        if(!resp.newRouteLength) renamedNoRoute.push(e.payload.item);
+        else renamedWithRoute.push({item: e.payload.item, stages: resp.newRouteLength});
+      }
+      editSuccesses.push({...e, preSnapshot});
+    } catch(err){
+      editFailures.push({lineId: e.lineId, item: e.item, error: err.message});
+    }
+  }
+
+  // === Process ADDS (existing bulk POST flow, unchanged) ================
   const results = [];
   for(const plan of plans){
     const {seg, isNewSegment, bom, rec, tat} = plan;
@@ -8120,6 +8170,18 @@ async function saveProjectAddSegment(btn){
   if(btn){ btn.disabled=false; btn.textContent=originalBtnText||'💾 Save BOM Changes'; }
 
   const ts=new Date().toISOString().replace('T',' ').slice(0,16);
+
+  // === Audit trail entries for successful edits =========================
+  editSuccesses.forEach(e => {
+    DB.auditLog.unshift({
+      ts, user: CURRENT_USER ? CURRENT_USER.fullName : 'Admin',
+      action: 'Edit BOM Line', module: 'Master Tracker',
+      entity: e.localLine.item, field: p.sap + ' / ' + e.lineId,
+      old: JSON.stringify(e.preSnapshot), nw: JSON.stringify(e.payload),
+      ip: '192.168.1.1',
+    });
+  });
+
   results.forEach(({seg, isNewSegment, bom, segData, stages})=>{
     if(isNewSegment){
       if(seg==='wood'){ p.hasWood=true; p.wood=segData; p.recWood=segData.received; p.planWood=segData.tat; p.woodSt='Running'; }
@@ -8137,8 +8199,34 @@ async function saveProjectAddSegment(btn){
   });
 
   _editingProjectId = null;
-  const summary = results.map(r=>(r.isNewSegment?'new ':'')+(r.seg==='wood'?'Wood':'Extrusion')+' ('+r.bom.length+')').join(', ');
-  toast('BOM updated for '+p.sap+' — '+summary+'. Routing generated — visible in Stage-wise Production Updates.','✓');
+  // Aggregated summary toast covering both flows. Individual counts are
+  // combined so the user sees one clear final status regardless of whether
+  // they edited existing lines, added new ones, or both.
+  const summaryParts = [];
+  if(editSuccesses.length){
+    summaryParts.push(editSuccesses.length+' component'+(editSuccesses.length===1?'':'s')+' updated');
+  }
+  if(results.length){
+    const addSummary = results.map(r=>(r.isNewSegment?'new ':'')+(r.seg==='wood'?'Wood':'Extrusion')+' ('+r.bom.length+')').join(', ');
+    summaryParts.push(addSummary);
+  }
+  const summary = summaryParts.length ? summaryParts.join(' · ') : 'no changes';
+  const anyFail = editFailures.length > 0;
+  toast('BOM saved for '+p.sap+' — '+summary+(anyFail?' · '+editFailures.length+' edit'+(editFailures.length===1?'':'s')+' failed':'')+'.', anyFail?'⚠':'✓');
+  // Route-recomputation warnings — aggregated so a batch of renames
+  // produces one toast per outcome type instead of one per line.
+  if(renamedWithRoute.length){
+    toast('Renamed with new routing: '+renamedWithRoute.map(r=>r.item+' ('+r.stages+' stages)').join(', '),'✓');
+  }
+  if(renamedNoRoute.length){
+    toast('Renamed but no BOM Routing rule for: '+renamedNoRoute.join(', ')+'. Configure in Admin Panel → BOM Routing before production can start on these lines.','⚠');
+  }
+  // Per-line edit failures (403, 409 from a race, network) — log to
+  // console for the user to inspect and show a summary toast.
+  if(editFailures.length){
+    editFailures.forEach(f => console.warn('BOM edit failed:', f.lineId, f.item, '—', f.error));
+    toast('Failed edits: '+editFailures.map(f=>f.item+' ('+f.error+')').join('; '),'⚠');
+  }
   setTimeout(()=>goUpdateProj(p.id),1300);
 }
 
@@ -8147,6 +8235,12 @@ function collectSegBOM(seg){
   const tbody=document.getElementById(bodyId); if(!tbody)return [];
   const bom=[];
   tbody.querySelectorAll('tr').forEach(tr=>{
+    // Skip existing-line edit rows — those are handled separately by
+    // collectSegEdits() and go through PUT /api/bom-lines/:lineId as
+    // UPDATE-in-place. Without this guard, "Save BOM Changes" would
+    // treat every edit row as a fresh new component and INSERT a
+    // duplicate BOM line, doubling the production quantity.
+    if(tr.hasAttribute('data-edit-line-id')) return;
     const td=tr.querySelectorAll('td'); if(td.length<6)return;
     const item=td[1].querySelector('select')?.value||''; if(!item)return;
     if(seg==='ext'){
@@ -8173,6 +8267,64 @@ function collectSegBOM(seg){
     }
   });
   return bom;
+}
+
+// Collects every edit-row (rows carrying data-edit-line-id, rendered by
+// makeSegBOMEditRow for untouched existing BOM lines) in one segment and
+// returns a PUT-ready payload per edit. Uses the same field-reading logic
+// as the prior per-row Save button, so validation and route-recomputation
+// behavior stays identical — the only difference is that all edits now
+// flow through the single "Save BOM Changes" button instead of separate
+// per-row Save clicks. Requires the project `p` to resolve the safe-id
+// (a sanitized version of the line ID used in element IDs) back to the
+// real lineId that the backend expects.
+function collectSegEdits(seg, p){
+  const bodyId = seg==='wood' ? 'woodBomBody' : 'extBomBody';
+  const tbody = document.getElementById(bodyId);
+  if(!tbody) return [];
+  const out = [];
+  tbody.querySelectorAll('tr[data-edit-line-id]').forEach(tr => {
+    const safeId = tr.getAttribute('data-edit-line-id');
+    const b = (p.bom||[]).find(x => String(x.lineId).replace(/[^a-zA-Z0-9_-]/g,'_') === safeId);
+    if(!b) return; // stale row without matching BOM line — skip safely
+    const gid = (prefix) => document.getElementById(prefix+'_'+safeId);
+    const readNum = (el) => {
+      if(!el) return undefined;
+      const raw = String(el.value||'').trim();
+      if(raw==='') return null;
+      const n = Number(raw);
+      return Number.isFinite(n) ? n : null;
+    };
+    const readStr = (el) => el ? String(el.value||'').trim() : undefined;
+    const readSpecials = (el) => {
+      if(!el) return undefined;
+      const raw = String(el.value||'').trim();
+      if(!raw) return [];
+      return raw.split(',').map(s => s.trim()).filter(Boolean);
+    };
+    const payload = {};
+    if(seg==='ext'){
+      payload.item        = readStr(gid('e_bom_comp_ext'));
+      payload.profile     = readStr(gid('e_bom_profile'));
+      payload.l           = readNum(gid('e_bom_l_ext'));
+      payload.uom         = readStr(gid('e_bom_uom_ext'));
+      payload.qty         = readNum(gid('e_bom_qty_ext'));
+      payload.colorFinish = readStr(gid('e_bom_finish_ext'));
+      payload.specialChars= readSpecials(gid('e_bom_specials_ext'));
+    } else {
+      payload.item        = readStr(gid('e_bom_comp_wood'));
+      payload.l           = readNum(gid('e_bom_l_wood'));
+      payload.w           = readNum(gid('e_bom_w_wood'));
+      payload.t           = readNum(gid('e_bom_t_wood'));
+      payload.uom         = readStr(gid('e_bom_uom_wood'));
+      payload.qty         = readNum(gid('e_bom_qty_wood'));
+      payload.colorFinish = readStr(gid('e_bom_finish_wood'));
+      payload.specialChars= readSpecials(gid('e_bom_specials_wood'));
+      payload.boardQty    = readNum(gid('e_bom_boards'));
+    }
+    out.push({lineId: b.lineId, seg, item: b.item, payload, localLine: b});
+  });
+  return out;
 }
 
 function collectSegDocs(listId){

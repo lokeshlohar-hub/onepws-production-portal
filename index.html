@@ -4314,6 +4314,16 @@ function apiLoadHandoverAddressHistory() {
 function apiMarkEmailPromptShown(lineId) {
   return apiRequest('/bom-lines/'+encodeURIComponent(lineId)+'/mark-email-prompt-shown', { method: 'POST' });
 }
+// Phase 10 additions — Production/Master admin BOM edit-unlock endpoints.
+// Both are gated server-side by role+department AND by the untouched test,
+// so a 403 (wrong role) or 409 (line has production activity) will surface
+// through apiRequest's error handling — the caller wraps them in a toast.
+function apiEditBomLine(lineId, payload) {
+  return apiRequest('/bom-lines/'+encodeURIComponent(lineId), { method: 'PUT', body: JSON.stringify(payload) });
+}
+function apiDeleteBomLine(lineId) {
+  return apiRequest('/bom-lines/'+encodeURIComponent(lineId), { method: 'DELETE' });
+}
 function apiLoadTodos() {
   return apiRequest('/todo-list', { method: 'GET' });
 }
@@ -7408,26 +7418,49 @@ function enterEditProjectMode(projectId){
   if(saveBtn){ saveBtn.textContent='💾 Save BOM Changes'; saveBtn.setAttribute('onclick','saveProjectAddSegment(this)'); }
 }
 
+// A BOM line is "untouched" — eligible for full edit / delete by a
+// Production or Master admin — when NOTHING has entered production
+// against it yet. Any single indicator of activity locks the line.
+// This mirrors the backend's isBomLineUntouched() in qc.js exactly so
+// the client and server agree on which lines the edit UI shows as
+// editable; the server always re-checks against a fresh row on PUT and
+// DELETE, so a client-side stale copy is safely caught with a 409.
+function isBomLineUntouchedFrontend(b){
+  if(!b) return false;
+  if(b.isRework === true) return false;
+  if((b.componentsReleased||0) > 0) return false;
+  const spawned = b.spawnedReworkLineIds;
+  if(Array.isArray(spawned) && spawned.length > 0) return false;
+  const sd = b.stageData || {};
+  for(const stageName of Object.keys(sd)){
+    const s = sd[stageName] || {};
+    if((s.completed||0)  > 0) return false;
+    if((s.qcApproved||0) > 0) return false;
+    if((s.qcRejected||0) > 0) return false;
+    if((s.rework   ||0) > 0) return false;
+    if((s.scrap    ||0) > 0) return false;
+    if((s.qcQueue  ||0) > 0) return false;
+    if(Array.isArray(s.history) && s.history.length > 0) return false;
+  }
+  return true;
+}
+
 // Configures one segment's section for edit mode.
 // - If the project does NOT yet have this segment: leaves it exactly as a
 //   fresh entry — checkbox unlocked, section fully editable, for adding the
 //   segment for the first time.
-// - If the project already has this segment: locks the checkbox on, shows a
-//   read-only summary of the components already in production (never
-//   editable — those have real stage history and QC against them), then
-//   appends one fresh, fully-editable row underneath so new components can
-//   be added for late-arriving requirements or design changes. The "+ Add
-//   Component" button stays available to add further new rows.
+// - If the project already has this segment: locks the checkbox on, splits
+//   the existing components into two groups — untouched lines (eligible
+//   for edit/delete by Production or Master admins) and locked lines (any
+//   production activity present, permanently view-only). Untouched lines
+//   for authorized users render as full editable rows with per-row Save
+//   and Delete buttons that hit PUT/DELETE /api/bom-lines/:lineId; locked
+//   lines and lines for unauthorized users render as the original compact
+//   read-only bullet list. The "+ Add Component" button below stays
+//   available in all cases to add fresh new components.
 function setupSegmentForEdit(seg, p){
   const has = seg==='wood' ? p.hasWood : p.hasExt;
   const chk = document.getElementById(seg==='wood'?'chk_wood':'chk_ext');
-  // p.wood/p.ext (the nested segment object) only exists reliably right after
-  // same-session creation — after any server round-trip (a refresh, or just
-  // loading the page) it comes back null and this data lives in flat
-  // top-level fields instead (p.recWood/p.planWood etc.). received/tat are
-  // required for saving, so those always come from the reliable flat
-  // fields; drawing/remarks/PO are display-only here and fall back to the
-  // nested object when it happens to be present.
   const data = seg==='wood' ? p.wood : p.ext;
   const reliableReceived = dateOnly(seg==='wood' ? p.recWood : p.recExt);
   const reliableTat = seg==='wood' ? p.planWood : p.planExt;
@@ -7456,19 +7489,244 @@ function setupSegmentForEdit(seg, p){
   const bodyId = seg==='wood'?'woodBomBody':'extBomBody';
   const tbody = document.getElementById(bodyId);
   const existingComps = (p.bom||[]).filter(b=>b.seg===seg);
+  const canEdit = isProductionAdminUser();
+  const editable = canEdit ? existingComps.filter(isBomLineUntouchedFrontend) : [];
+  const locked   = existingComps.filter(b=>!editable.includes(b));
+
   if(tbody){
-    // Only the read-only summary — deliberately NOT auto-appending a fresh
-    // editable row here. An untouched fresh row still has a valid default
-    // component selected and a default quantity, so collectSegBOM() would
-    // silently treat it as an intentional new component even if the user
-    // never touched this segment at all. Requiring an explicit "+ Add
-    // Component" click means a row only exists, and only gets saved, when
-    // the user actually means to add one.
-    tbody.innerHTML = '<tr><td colspan="10" style="padding:10px"><div class="text-xs text-muted" style="margin-bottom:6px">Already in production — view-only here. Use "+ Add Component" below only if you need to add a new one.</div>'
-      + existingComps.map(b=>'<div class="text-sm" style="padding:3px 0">• '+b.item+' — Qty: '+b.qty+' '+b.uom+(b.colorFinish?' — '+b.colorFinish:'')+'</div>').join('')
-      + '</td></tr>';
+    let html = '';
+    // Editable rows first — full multi-column TR per row with pre-populated
+    // inputs and per-row Save/Delete buttons. Each row is independent —
+    // Save hits PUT with just that row's fields, no batching with the
+    // project-level save.
+    if(editable.length){
+      html += editable.map(b=>makeSegBOMEditRow(b, seg, p.id)).join('');
+    }
+    // Locked bullets — original view-only summary, verbatim from the
+    // pre-Phase-10 behavior. Shown if any component is locked, OR if the
+    // user simply doesn't have edit permission (in which case ALL existing
+    // components go here regardless of untouched state).
+    if(locked.length){
+      const bullets = locked.map(b=>
+        '<div class="text-sm" style="padding:3px 0">• '+b.item+' — Qty: '+b.qty+' '+(b.uom||'PC')+(b.colorFinish?' — '+b.colorFinish:'')+'</div>'
+      ).join('');
+      const introMsg = editable.length
+        ? '<div class="text-xs text-muted" style="margin:8px 0 6px 0">Locked — production activity exists on these components (view-only):</div>'
+        : (canEdit
+          ? '<div class="text-xs text-muted" style="margin-bottom:6px">All existing components are already in production — view-only. Use "+ Add Component" below to add new ones.</div>'
+          : '<div class="text-xs text-muted" style="margin-bottom:6px">Already in production — view-only here. Use "+ Add Component" below only if you need to add a new one.</div>');
+      html += '<tr><td colspan="12" style="padding:10px">'+introMsg+bullets+'</td></tr>';
+    }
+    tbody.innerHTML = html;
   }
   if(seg==='wood') woodBomIdx=0; else extBomIdx=0;
+}
+
+// Builds one editable existing-line row. Uses lineId in element IDs so
+// multiple edit rows in the same segment can coexist without colliding
+// with each other or with fresh-add rows (which use the sequential
+// woodBomIdx/extBomIdx). Includes the current component name as a
+// selectable option even if the admin master list no longer contains it,
+// so a rename to a name that IS in the master list is one dropdown pick,
+// and keeping the current name doesn't require the master list to still
+// know about it.
+function makeSegBOMEditRow(b, seg, projectId){
+  const id = b.lineId;
+  const safeId = id.replace(/[^a-zA-Z0-9_-]/g,'_');
+  let compNames = bomComponentsForSegment(seg);
+  if(!compNames.includes(b.item)) compNames = [b.item].concat(compNames);
+  const compOpts = compNames.map(c=>'<option'+(c===b.item?' selected':'')+'>'+c+'</option>').join('');
+  const uom = (b.uom||'PC').toUpperCase();
+  const specialCharsStr = Array.isArray(b.specialChars) ? b.specialChars.join(', ') : '';
+  const routeDisplay = (Array.isArray(b.route)&&b.route.length)
+    ? b.route.map((s,i)=>'<span class="text-xs" style="display:inline-block;margin:1px 3px 1px 0;padding:1px 5px;background:var(--surface2);border-radius:3px">'+(i+1)+'. '+s+'</span>').join('')
+    : '<span class="text-xs" style="color:var(--red,#d33)">No routing rule</span>';
+  const rowStyle = 'background:#f0fdf4';  // very light green tint = "editable existing line"
+  const dataAttrs = 'data-edit-line-id="'+safeId+'" data-project-id="'+projectId+'"';
+  if(seg==='ext'){
+    const uomOpts = ['PC','MTR','NOS'].map(u=>'<option'+(u===uom?' selected':'')+'>'+u+'</option>').join('');
+    return '<tr '+dataAttrs+' style="'+rowStyle+'">'
+      +'<td style="font-size:12px">•</td>'
+      +'<td><select class="form-select" style="height:27px;min-width:120px" id="e_bom_comp_ext_'+safeId+'">'+compOpts+'</select></td>'
+      +'<td><input type="text" class="form-input" style="height:27px;width:75px" id="e_bom_profile_'+safeId+'" value="'+(b.profile||'')+'"></td>'
+      +'<td><input type="number" class="form-input dim-input" style="height:27px;width:70px" id="e_bom_l_ext_'+safeId+'" value="'+(b.l||'')+'"></td>'
+      +'<td><select class="form-select" style="height:27px;width:55px" id="e_bom_uom_ext_'+safeId+'">'+uomOpts+'</select></td>'
+      +'<td><input type="number" class="form-input" style="height:27px;width:52px" id="e_bom_qty_ext_'+safeId+'" value="'+b.qty+'" min="1"></td>'
+      +'<td><input type="text" class="form-input" style="height:27px;width:100px" id="e_bom_finish_ext_'+safeId+'" value="'+(b.colorFinish||'').replace(/"/g,'&quot;')+'"></td>'
+      +'<td><input type="text" class="form-input" style="height:27px;width:130px" id="e_bom_specials_ext_'+safeId+'" value="'+specialCharsStr.replace(/"/g,'&quot;')+'" placeholder="comma-separated" title="Comma-separated special characteristics"></td>'
+      +'<td><div style="min-width:180px">'+routeDisplay+'</div></td>'
+      +'<td style="white-space:nowrap">'
+        +'<button class="btn btn-primary btn-sm" style="height:26px;padding:0 8px;margin-right:4px" onclick="saveExistingBomLine(\''+safeId+'\',\''+seg+'\')">Save</button>'
+        +'<button class="btn btn-danger btn-sm" style="height:26px;padding:0 8px" onclick="deleteExistingBomLine(\''+safeId+'\',\''+seg+'\')">Delete</button>'
+      +'</td>'
+      +'</tr>';
+  }
+  const uomOpts = ['PC','SET','NOS'].map(u=>'<option'+(u===uom?' selected':'')+'>'+u+'</option>').join('');
+  return '<tr '+dataAttrs+' style="'+rowStyle+'">'
+    +'<td style="font-size:12px">•</td>'
+    +'<td><select class="form-select" style="height:27px;min-width:120px" id="e_bom_comp_wood_'+safeId+'">'+compOpts+'</select></td>'
+    +'<td><input type="number" class="form-input dim-input" style="height:27px;width:65px" id="e_bom_l_wood_'+safeId+'" value="'+(b.l||'')+'"></td>'
+    +'<td><input type="number" class="form-input dim-input" style="height:27px;width:65px" id="e_bom_w_wood_'+safeId+'" value="'+(b.w||'')+'"></td>'
+    +'<td><input type="number" class="form-input dim-input" style="height:27px;width:58px" id="e_bom_t_wood_'+safeId+'" value="'+(b.t||'')+'"></td>'
+    +'<td><select class="form-select" style="height:27px;width:55px" id="e_bom_uom_wood_'+safeId+'">'+uomOpts+'</select></td>'
+    +'<td><input type="number" class="form-input" style="height:27px;width:52px" id="e_bom_qty_wood_'+safeId+'" value="'+b.qty+'" min="1"></td>'
+    +'<td><input type="number" class="form-input" style="height:27px;width:52px;background:#ede9fe;color:#7c3aed;font-weight:700" id="e_bom_boards_'+safeId+'" value="'+(b.boardQty||'')+'" min="1" placeholder="Auto"></td>'
+    +'<td><input type="text" class="form-input" style="height:27px;width:100px" id="e_bom_finish_wood_'+safeId+'" value="'+(b.colorFinish||'').replace(/"/g,'&quot;')+'"></td>'
+    +'<td><input type="text" class="form-input" style="height:27px;width:130px" id="e_bom_specials_wood_'+safeId+'" value="'+specialCharsStr.replace(/"/g,'&quot;')+'" placeholder="comma-separated" title="Comma-separated special characteristics"></td>'
+    +'<td><div style="min-width:200px">'+routeDisplay+'</div></td>'
+    +'<td style="white-space:nowrap">'
+      +'<button class="btn btn-primary btn-sm" style="height:26px;padding:0 8px;margin-right:4px" onclick="saveExistingBomLine(\''+safeId+'\',\''+seg+'\')">Save</button>'
+      +'<button class="btn btn-danger btn-sm" style="height:26px;padding:0 8px" onclick="deleteExistingBomLine(\''+safeId+'\',\''+seg+'\')">Delete</button>'
+    +'</td>'
+    +'</tr>';
+}
+
+// Save handler for one existing-line edit row — collects the row's field
+// values into a PUT payload (matching the backend's whitelist), calls
+// PUT /api/bom-lines/:lineId, and on success updates the local project
+// state and audit trail. Handles the three interesting server responses:
+// 200 (edit applied, possibly with route recomputed on rename), 403 (role
+// gate — shouldn't happen if the frontend UI check was right, but caught
+// defensively), 409 (line just entered production — the untouched test
+// is authoritative on the server so the row can no longer be edited).
+async function saveExistingBomLine(safeId, seg){
+  const projectId = _editingProjectId;
+  if(!projectId){ toast('Editing session lost. Reopen Edit BOM.','⚠'); return; }
+  const p = DB.projects.find(x=>x.id===projectId);
+  if(!p){ toast('Project not found in local state.','⚠'); return; }
+  const b = (p.bom||[]).find(x=>String(x.lineId).replace(/[^a-zA-Z0-9_-]/g,'_')===safeId);
+  if(!b){ toast('BOM line not found in local state.','⚠'); return; }
+
+  const gid = (prefix)=>document.getElementById(prefix+'_'+safeId);
+  const readNum = (el)=>{
+    if(!el) return undefined;
+    const raw = String(el.value||'').trim();
+    if(raw==='') return null;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  };
+  const readStr = (el)=> el ? String(el.value||'').trim() : undefined;
+  const readSpecials = (el)=>{
+    if(!el) return undefined;
+    const raw = String(el.value||'').trim();
+    if(!raw) return [];
+    return raw.split(',').map(s=>s.trim()).filter(Boolean);
+  };
+
+  const payload = {};
+  const preSnapshot = {
+    item: b.item, l: b.l, w: b.w, t: b.t, profile: b.profile, uom: b.uom,
+    qty: b.qty, colorFinish: b.colorFinish, specialChars: b.specialChars,
+    componentsPerBoard: b.componentsPerBoard, edgeMetersPerComp: b.edgeMetersPerComp,
+    boardQty: b.boardQty, route: b.route,
+  };
+
+  if(seg==='ext'){
+    payload.item        = readStr(gid('e_bom_comp_ext'));
+    payload.profile     = readStr(gid('e_bom_profile'));
+    payload.l           = readNum(gid('e_bom_l_ext'));
+    payload.uom         = readStr(gid('e_bom_uom_ext'));
+    payload.qty         = readNum(gid('e_bom_qty_ext'));
+    payload.colorFinish = readStr(gid('e_bom_finish_ext'));
+    payload.specialChars= readSpecials(gid('e_bom_specials_ext'));
+  } else {
+    payload.item        = readStr(gid('e_bom_comp_wood'));
+    payload.l           = readNum(gid('e_bom_l_wood'));
+    payload.w           = readNum(gid('e_bom_w_wood'));
+    payload.t           = readNum(gid('e_bom_t_wood'));
+    payload.uom         = readStr(gid('e_bom_uom_wood'));
+    payload.qty         = readNum(gid('e_bom_qty_wood'));
+    payload.colorFinish = readStr(gid('e_bom_finish_wood'));
+    payload.specialChars= readSpecials(gid('e_bom_specials_wood'));
+    payload.boardQty    = readNum(gid('e_bom_boards'));
+  }
+
+  if(!payload.item){ toast('Component name is required.','⚠'); return; }
+  if(!payload.qty || payload.qty < 1){ toast('Quantity must be at least 1.','⚠'); return; }
+
+  try{
+    const resp = await apiEditBomLine(b.lineId, payload);
+    const updated = resp.line ? serverBomLineToLocal(resp.line) : null;
+    if(updated){
+      Object.assign(b, updated);
+    } else {
+      // Fallback: server accepted but returned nothing usable — apply the payload locally.
+      Object.assign(b, payload);
+    }
+    // Route auto-recomputation feedback (server sets routeReplaced=true
+    // when item name changed, and newRouteLength tells us whether the new
+    // name had a rule in the admin panel).
+    if(resp.routeReplaced){
+      if(!resp.newRouteLength){
+        toast('Component renamed — but no BOM Routing rule for "'+payload.item+'". Configure it in Admin Panel before production can start on this line.','⚠');
+      } else {
+        toast('Component renamed. Route auto-updated to '+resp.newRouteLength+' stage'+(resp.newRouteLength===1?'':'s')+'.','✓');
+      }
+    } else {
+      toast('BOM line updated.','✓');
+    }
+
+    // Audit trail — before/after snapshot
+    const ts = new Date().toISOString().replace('T',' ').slice(0,16);
+    DB.auditLog.unshift({
+      ts, user: CURRENT_USER ? CURRENT_USER.fullName : 'Admin',
+      action: 'Edit BOM Line', module: 'Master Tracker',
+      entity: b.item, field: p.sap+' / '+b.lineId,
+      old: JSON.stringify(preSnapshot), nw: JSON.stringify(payload),
+      ip: '192.168.1.1'
+    });
+
+    // Re-render the row so route display reflects the new route if renamed.
+    setupSegmentForEdit(seg, p);
+  } catch(err){
+    // apiRequest surfaces the server's error message; 409 (untouched-test
+    // failed) and 403 (role gate) both come through here with their
+    // server-side error strings verbatim.
+    toast('Save failed: '+err.message,'⚠');
+  }
+}
+
+// Delete handler for one existing-line row — confirms, calls DELETE, and
+// records the full pre-delete BOM line in the audit trail. Server does
+// the same untouched-test on DELETE as on PUT, so a line that just
+// entered production between form-open and Delete-click gets 409.
+async function deleteExistingBomLine(safeId, seg){
+  const projectId = _editingProjectId;
+  if(!projectId){ toast('Editing session lost. Reopen Edit BOM.','⚠'); return; }
+  const p = DB.projects.find(x=>x.id===projectId);
+  if(!p){ toast('Project not found in local state.','⚠'); return; }
+  const b = (p.bom||[]).find(x=>String(x.lineId).replace(/[^a-zA-Z0-9_-]/g,'_')===safeId);
+  if(!b){ toast('BOM line not found in local state.','⚠'); return; }
+
+  const proceed = confirm(
+    'Delete BOM component "'+b.item+'" ('+b.lineId+') from project '+p.sap+'?\n\n'+
+    'This is permanent. Only allowed because this line has no production activity yet.\n\n'+
+    'Deleted details will be recorded in the Audit Trail.'
+  );
+  if(!proceed) return;
+
+  try{
+    await apiDeleteBomLine(b.lineId);
+    // Audit trail — snapshot the whole BOM line before we drop it locally.
+    const ts = new Date().toISOString().replace('T',' ').slice(0,16);
+    DB.auditLog.unshift({
+      ts, user: CURRENT_USER ? CURRENT_USER.fullName : 'Admin',
+      action: 'Delete BOM Line', module: 'Master Tracker',
+      entity: b.item, field: p.sap+' / '+b.lineId,
+      old: JSON.stringify({
+        item:b.item, l:b.l, w:b.w, t:b.t, profile:b.profile, uom:b.uom,
+        qty:b.qty, originalQty:b.originalQty, colorFinish:b.colorFinish,
+        specialChars:b.specialChars, boardQty:b.boardQty, route:b.route,
+      }),
+      nw: '(deleted)', ip: '192.168.1.1'
+    });
+    // Drop from local project state so the row disappears on re-render.
+    p.bom = (p.bom||[]).filter(x=>x.lineId!==b.lineId);
+    toast('BOM line deleted and recorded in Audit Trail.','✓');
+    setupSegmentForEdit(seg, p);
+  } catch(err){
+    toast('Delete failed: '+err.message,'⚠');
+  }
 }
 
 function cancelEditProjectMode(){

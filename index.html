@@ -1086,7 +1086,6 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
         </div>
         <div style="display:flex;align-items:center;gap:8px">
           <button class="btn btn-outline btn-sm" id="editBomBtn" style="display:none" onclick="if(CUR_PROJ)openEditBomForProject(CUR_PROJ.id)">📝 Edit BOM / Update Project</button>
-          <button class="btn btn-outline btn-sm" onclick="if(CUR_PROJ)openRouteCardPDF(CUR_PROJ.id)">🖨 Route Card PDF</button>
           <span id="stageOTD"></span>
         </div>
       </div>
@@ -10473,7 +10472,8 @@ function renderSegmentBOMSection(p, seg){
     const pend=b.qty-done;
     const curStage=b.route.find(st=>pendingQty(b,st)>0||b.stageData[st].qcQueue>0)||(pend<=0?'Complete':b.route[0]||'—');
     const typeCell=b.isRework?'<span class="badge" style="background:#fef3c7;color:#92400e;font-size:9px" title="Auto-created after rejection at '+(b.reworkSourceStage||'—')+' on '+(b.reworkDate||'—')+' — '+(b.reworkReason||'')+'">&#128260; Rework</span>':'<span class="text-xs text-muted">Original</span>';
-    return '<tr><td>'+(i+1)+'</td><td class="fw-600">'+b.item+'</td><td>'+typeCell+'</td><td class="font-mono">'+(b.l||'—')+'</td><td class="font-mono">'+(b.w||'—')+'</td><td class="font-mono">'+(b.t||'—')+'</td><td>'+b.uom+'</td><td class="fw-600">'+b.qty+'</td><td class="text-xs">'+(b.colorFinish||'—')+'</td><td>'+((b.specialChars||[]).length?b.specialChars.map(c=>'<span class="char-chip">'+c+'</span>').join(''):'<span class="text-xs text-muted">—</span>')+'</td><td class="text-success fw-600">'+done+'</td><td class="'+(pend>0?'text-danger fw-600':'text-muted')+'">'+pend+'</td><td class="text-xs">'+curStage+'</td></tr>';
+    const rcBtn='<button class="btn btn-outline btn-sm" style="height:24px;padding:0 8px;font-size:10.5px;white-space:nowrap" onclick="openRouteCardForLine(\''+b.lineId+'\',\''+p.id+'\')" title="Print or save this component\'s Route Card">🖨 Route Card</button>';
+    return '<tr><td>'+(i+1)+'</td><td class="fw-600">'+b.item+'</td><td>'+typeCell+'</td><td class="font-mono">'+(b.l||'—')+'</td><td class="font-mono">'+(b.w||'—')+'</td><td class="font-mono">'+(b.t||'—')+'</td><td>'+b.uom+'</td><td class="fw-600">'+b.qty+'</td><td class="text-xs">'+(b.colorFinish||'—')+'</td><td>'+((b.specialChars||[]).length?b.specialChars.map(c=>'<span class="char-chip">'+c+'</span>').join(''):'<span class="text-xs text-muted">—</span>')+'</td><td class="text-success fw-600">'+done+'</td><td class="'+(pend>0?'text-danger fw-600':'text-muted')+'">'+pend+'</td><td class="text-xs">'+curStage+'</td><td>'+rcBtn+'</td></tr>';
   }).join('');
 
   return '<div style="margin-bottom:18px;border:1.5px solid '+headerColor+';border-radius:10px;overflow:hidden;max-height:55vh;display:flex;flex-direction:column">'
@@ -10482,8 +10482,8 @@ function renderSegmentBOMSection(p, seg){
       +'<div class="bom-top-scroll-spacer" id="bomTopSpacer_'+seg+'"></div>'
     +'</div>'
     +'<div class="table-wrap bom-scrollable-content" id="bomTableWrap_'+seg+'" onscroll="syncBomBottomScroll(\''+seg+'\')">'
-      +'<table style="margin:0"><thead><tr><th>#</th><th>Component</th><th>Type</th><th>L</th><th>W</th><th>T</th><th>UOM</th><th>Qty</th><th>Color / Finish</th><th>Special Characteristics</th><th>Fully Cleared</th><th>Pending</th><th>Current Stage</th></tr></thead>'
-      +'<tbody>'+(bodyHtml||'<tr><td colspan="13" class="text-sm text-muted" style="padding:12px;text-align:center">No components in this segment.</td></tr>')+'</tbody></table>'
+      +'<table style="margin:0"><thead><tr><th>#</th><th>Component</th><th>Type</th><th>L</th><th>W</th><th>T</th><th>UOM</th><th>Qty</th><th>Color / Finish</th><th>Special Characteristics</th><th>Fully Cleared</th><th>Pending</th><th>Current Stage</th><th>Route Card</th></tr></thead>'
+      +'<tbody>'+(bodyHtml||'<tr><td colspan="14" class="text-sm text-muted" style="padding:12px;text-align:center">No components in this segment.</td></tr>')+'</tbody></table>'
     +'</div>'
   +'</div>';
 }
@@ -10548,8 +10548,7 @@ function openProj(id){
       +(p.hasExt?renderSegmentOverviewCard(p,'ext'):'')
     +'</div>'
     +'<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)"><div class="text-xs text-muted" style="margin-bottom:5px">Project Certification Requirement</div>'+certChipsHTML(p.certifications)+'</div>';
-  document.getElementById('pt-bom').innerHTML='<div style="display:flex;justify-content:flex-end;margin-bottom:8px"><button class="btn btn-outline btn-sm" onclick="openRouteCardPDF(\''+p.id+'\')">🖨 Route Card PDF</button></div>'
-    +(p.hasWood?renderSegmentBOMSection(p,'wood'):'')
+  document.getElementById('pt-bom').innerHTML=(p.hasWood?renderSegmentBOMSection(p,'wood'):'')
     +(p.hasExt?renderSegmentBOMSection(p,'ext'):'');
   // Wire up the synced top scrollbar for each rendered segment. Runs
   // ResizeObserver internally, so the "hidden until BOM tab is clicked"
@@ -10570,57 +10569,320 @@ function closeMod(id){document.getElementById(id).classList.remove('open');}
 // Shop-floor traveler document for a project's full BOM — Item, dimensions, qty,
 // Color/Finish, Special Characteristics and routing sequence for every component.
 // Uses the same print-window pattern as the Reports & Export PDF downloads.
-function openRouteCardPDF(projId){
-  const p=DB.projects.find(x=>x.id===projId); if(!p){ toast('Project not found.','⚠'); return; }
-  (p.bom||[]).forEach(ensureBomLineStructure);
-  const rows=(p.bom||[]).map((b,i)=>{
-    const routeStr=(b.route||[]).map((st,ri)=>(ri>0?' &rarr; ':'')+st).join('');
-    const charsStr=(b.specialChars||[]).length?b.specialChars.join(', '):'—';
-    const typeStr=b.isRework?`<span style="color:#92400e;font-weight:700">Rework</span><br><span style="font-size:8px;color:#8492a6">from ${b.reworkSourceStage||'—'}, ${b.reworkDate||'—'}</span>`:'Original';
-    return `<tr><td>${i+1}</td><td><strong>${b.item}</strong></td><td>${typeStr}</td>
-      <td>${b.l||'—'}</td><td>${b.w||'—'}</td><td>${b.t||'—'}</td><td>${b.uom||'—'}</td><td>${b.qty||'—'}</td>
-      <td>${b.colorFinish||'—'}</td><td>${charsStr}</td>
-      <td style="font-size:9px">${routeStr||'Not mapped'}</td></tr>`;
-  }).join('');
-  const html=`<!DOCTYPE html><html><head><title>Route Card — ${p.sap}</title><style>
+// Component-level IMS Route Card generator — Phase 10. Replaces the previous
+// project-level openRouteCardPDF which printed one shared card for the entire
+// project's BOM. The user's official format (IMS-11-01-L4-06 Rev 04, effective
+// 11-Feb-2026) is a per-component Process Control Chart: page 1 has the stage
+// table (dynamic per the component's route, not the 16 fixed rows in the paper
+// form — the portal knows which stages this component actually goes through),
+// page 2 has the In-Process QC table + Raw Material log + Handover Summary.
+// Both pages are stitched into a single HTML doc that opens in a new window
+// and auto-triggers print — the user's browser Print-to-PDF is the delivery
+// mechanism (same as the previous card, no PDF library required).
+//
+// Data mapping:
+//   Project No           <- p.sap
+//   Customer Name        <- p.customer
+//   Component Name       <- b.item  (added — not in original single-project card)
+//   Qty                  <- b.qty
+//   Material             <- b.colorFinish  (portal doesn't track "material type"
+//                          as a separate field from finish; closest match)
+//   Drawing Rev No       <- segment drawing filename if available, else blank
+//   Date of Generation   <- now
+//   Special Characteristics tick-marks <- b.specialChars entries
+//   Stage table          <- b.route (dynamic — one row per stage, not all 16)
+//   Start/End/Qty/History <- pulled from b.stageData[stage].history where present
+//                            so an already-in-progress component prints its
+//                            latest status; blank rows for stages not yet run
+//   Required Sizes L,W   <- b.l, b.w
+// Department header is always WOOD PRODUCTION DEPARTMENT per user's spec
+// (one physical department runs both segments); the segment label
+// (Wood Production / Aluminium Extrusion) is a sub-line below it.
+function openRouteCardForLine(lineId, projId){
+  const p = DB.projects.find(x=>x.id===projId);
+  if(!p){ toast('Project not found.','⚠'); return; }
+  const b = (p.bom||[]).find(x=>x.lineId===lineId);
+  if(!b){ toast('BOM component not found.','⚠'); return; }
+  ensureBomLineStructure(b);
+
+  const isWood   = b.seg==='wood';
+  const segLabel = isWood ? 'Wood Production' : 'Aluminium Extrusion';
+  const nowStr   = new Date().toLocaleString('en-GB', {day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
+  const drawingRef = isWood
+    ? (p.wood && p.wood.drawing) || ''
+    : (p.ext  && p.ext.drawing)  || '';
+
+  // IMS reference tick-mark set from Sheet 1. If the portal component's
+  // specialChars list contains any of these (case-insensitive), we tick it;
+  // any specialChars value NOT in this canonical list is preserved verbatim
+  // under "Other" so custom tags aren't lost.
+  const IMS_TICKS = ['FSC','CARB Certified','Fire Rated','Particle Board','A.S.S.','Marmoleum','Alucore','Prelam'];
+  const compChars = (b.specialChars||[]).map(c=>String(c).trim());
+  const compCharsLc = compChars.map(c=>c.toLowerCase());
+  const isTicked = name => compCharsLc.includes(name.toLowerCase());
+  const otherChars = compChars.filter(c=>!IMS_TICKS.some(t=>t.toLowerCase()===c.toLowerCase()));
+
+  // Latest history record per stage (for pre-filling any already-run stages).
+  // If a stage has never been touched, the row prints blank so the operator
+  // fills it in by hand.
+  const latestHist = stage => {
+    const sd = b.stageData && b.stageData[stage];
+    if(!sd || !Array.isArray(sd.history) || !sd.history.length) return null;
+    // history entries are appended chronologically — take the last as the
+    // most recent event on this stage.
+    return sd.history[sd.history.length-1];
+  };
+  const stageRows = (b.route||[]).map((stage,idx)=>{
+    const h = latestHist(stage);
+    const sd = b.stageData && b.stageData[stage] || {};
+    const startDate = h ? (h.date||h.ts||'') : '';
+    const endDate   = ''; // portal history is per-entry, not start/end paired — leave for operator
+    const qty       = sd.completed || (h && h.qty) || '';
+    const nextStage = b.route[idx+1] || '<em style="color:#888">Final</em>';
+    const rejQty    = sd.qcRejected || '';
+    return '<tr>'
+      +'<td style="text-align:center;font-weight:600">'+(idx+1)+'</td>'
+      +'<td style="font-weight:600">'+stage+'</td>'
+      +'<td>'+startDate+'</td>'
+      +'<td>'+endDate+'</td>'
+      +'<td style="text-align:right">'+qty+'</td>'
+      +'<td></td>'  // Operator Sign — physical signature
+      +'<td></td>'  // QC Check Sign — physical signature
+      +'<td>'+nextStage+'</td>'
+      +'<td></td>'  // Accepted Sign — physical signature
+      +'<td style="text-align:right">'+rejQty+'</td>'
+      +'</tr>';
+  }).join('') || '<tr><td colspan="10" style="text-align:center;padding:8px;color:#888">No routing configured for this component. Set BOM Routing in Admin Panel.</td></tr>';
+
+  const tick = ticked => ticked ? '☑' : '☐';
+  const tickRow = IMS_TICKS.map(name=>
+    '<span style="display:inline-block;margin-right:14px;font-size:10.5px">'
+    +'<span style="font-size:13px;vertical-align:-1px">'+tick(isTicked(name))+'</span> '+name
+    +'</span>'
+  ).join('');
+  const otherStr = otherChars.length
+    ? '<span style="display:inline-block;font-size:10.5px"><span style="font-size:13px;vertical-align:-1px">☑</span> Other: '+otherChars.join(', ')+'</span>'
+    : '<span style="display:inline-block;font-size:10.5px"><span style="font-size:13px;vertical-align:-1px">☐</span> Other</span>';
+
+  // Page 2 — In-Process QC empty rows. The paper form has 23 rows for
+  // per-unit entries. Print a generous number of blank rows so operators can
+  // record actual measurements by hand — using min(qty, 23) rows to fit the
+  // page but not print more rows than there are units to check.
+  const qcRowCount = Math.max(1, Math.min(b.qty||1, 23));
+  const qcRows = Array.from({length: qcRowCount}, (_,i)=>
+    '<tr>'
+    +'<td style="text-align:center">'+(i+1)+'</td>'
+    +'<td></td>'  // Required Length (from design)
+    +'<td></td>'  // Required Width
+    +'<td></td>'  // Qty Manufactured
+    +'<td></td>'  // Finish / Description
+    +'<td></td>'  // Tolerance
+    +'<td></td>'  // QC Accepted (Ok / Hold / Reject)
+    +'<td style="font-size:8.5px">Measuring Tape: __________<br>Vernier Caliper: __________</td>'
+    +'<td></td>'  // QC Remarks
+    +'</tr>'
+  ).join('');
+
+  const headerBlock = `
+    <table class="ims-header">
+      <tr>
+        <td rowspan="4" style="width:14%;text-align:center;font-weight:700;font-size:11px;padding:6px">ONEPWS</td>
+        <td class="ttl">ONEPWS Private Limited (Formerly Known As: Pyrotech Workspace Solutions Pvt. Ltd.)</td>
+        <td class="doc">Doc No: IMS-11-01-L4-06</td>
+      </tr>
+      <tr>
+        <td class="ttl-sm">WOOD PRODUCTION DEPARTMENT &nbsp;•&nbsp; Segment: <b>${segLabel}</b></td>
+        <td class="doc-sm">Original Issue Date: 10/Aug/2018</td>
+      </tr>
+      <tr>
+        <td class="ttl-sm"><b>PROCESS CONTROL CHART (Route Card)</b></td>
+        <td class="doc-sm">Latest Revision no.: 04</td>
+      </tr>
+      <tr>
+        <td class="doc-sm">STANDARD: QMS, EMS, OHSMS</td>
+        <td class="doc-sm">Effective Date of Latest Rev: 11-Feb-2026</td>
+      </tr>
+    </table>`;
+
+  const html = `<!DOCTYPE html><html><head><title>Route Card — ${p.sap} — ${b.item}</title><style>
     *{box-sizing:border-box;margin:0;padding:0}
-    body{font-family:Arial,sans-serif;font-size:11px;color:#0f1b2d;padding:20px}
-    .header{background:#1a56db;color:#fff;padding:14px 18px;border-radius:6px;margin-bottom:14px}
-    .header h1{font-size:17px;font-weight:700;margin-bottom:3px}
-    .header p{font-size:11px;opacity:.9}
-    .meta{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px}
-    .meta div{background:#f8f9fc;border:1px solid #e2e6ed;border-radius:6px;padding:8px 10px}
-    .meta .l{font-size:9px;color:#8492a6;text-transform:uppercase;letter-spacing:.4px}
-    .meta .v{font-size:12px;font-weight:700}
-    table{width:100%;border-collapse:collapse;font-size:10px;margin-bottom:16px}
-    th{background:#f0f2f5;font-size:9px;font-weight:700;color:#8492a6;text-transform:uppercase;letter-spacing:.4px;padding:6px 8px;border:1px solid #e2e6ed;text-align:left}
-    td{padding:6px 8px;border:1px solid #e2e6ed;vertical-align:top}
-    tr:nth-child(even){background:#f8f9fc}
-    .footer{margin-top:10px;font-size:9.5px;color:#8492a6;border-top:1px solid #e2e6ed;padding-top:8px}
-    @media print{body{padding:10px}.header{border-radius:0}}
+    body{font-family:Arial,'Helvetica Neue',sans-serif;font-size:10.5px;color:#000;padding:10mm;background:#fff}
+    table{width:100%;border-collapse:collapse}
+    .ims-header{border:1.5px solid #000;margin-bottom:8px}
+    .ims-header td{border:1px solid #000;padding:4px 8px;vertical-align:middle}
+    .ims-header .ttl{font-weight:700;font-size:10.5px;text-align:center}
+    .ims-header .ttl-sm{font-weight:600;font-size:10.5px;text-align:center;padding:3px 8px}
+    .ims-header .doc{font-size:9.5px;text-align:right;width:24%;font-weight:600}
+    .ims-header .doc-sm{font-size:9px;text-align:right;padding:3px 8px}
+    .info-grid{border:1.5px solid #000;border-top:none;margin-bottom:8px}
+    .info-grid td{border:1px solid #000;padding:4px 8px;font-size:10.5px}
+    .info-grid .lbl{font-weight:700;background:#f2f2f2;width:14%}
+    .chars{border:1.5px solid #000;border-top:none;padding:6px 8px;margin-bottom:8px}
+    .chars-title{font-weight:700;font-size:10.5px;margin-bottom:3px}
+    .stage-table{border:1.5px solid #000;margin-bottom:8px}
+    .stage-table th{background:#e6e6e6;border:1px solid #000;padding:5px 4px;font-size:9.5px;font-weight:700;text-align:center}
+    .stage-table td{border:1px solid #000;padding:5px 6px;font-size:10px;min-height:22px;height:22px}
+    .stage-table thead .grp{background:#d9d9d9}
+    .remarks{border:1.5px solid #000;margin-bottom:8px}
+    .remarks th{background:#e6e6e6;border:1px solid #000;padding:4px 8px;font-size:9.5px;font-weight:700;text-align:left}
+    .remarks td{border:1px solid #000;padding:5px 8px;font-size:10px;vertical-align:top}
+    .notes{font-size:9.5px;line-height:1.55;margin-bottom:6px}
+    .notes b{margin-right:5px}
+    .doc-class{font-size:8.5px;text-align:center;font-style:italic;color:#555;border-top:1px solid #ccc;padding-top:4px;margin-top:6px}
+    .page2{page-break-before:always}
+    .qc-table{border:1.5px solid #000;margin-bottom:8px}
+    .qc-table th{background:#e6e6e6;border:1px solid #000;padding:4px 3px;font-size:9px;font-weight:700;text-align:center;line-height:1.15}
+    .qc-table td{border:1px solid #000;padding:4px 5px;font-size:10px;height:22px}
+    .rm-table th{background:#e6e6e6;border:1px solid #000;padding:4px 6px;font-size:9.5px;font-weight:700;text-align:left}
+    .rm-table td{border:1px solid #000;padding:5px 8px;font-size:10px;height:24px}
+    .rm-table{border:1.5px solid #000;margin-bottom:8px}
+    .handover{border:1.5px solid #000;margin-bottom:8px}
+    .handover td{border:1px solid #000;padding:6px 10px;font-size:10.5px;font-weight:600}
+    .handover .handlbl{background:#f2f2f2;width:22%}
+    .print-btn{position:fixed;top:8px;right:8px;padding:8px 14px;background:#1a56db;color:#fff;border:none;border-radius:4px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,0.2)}
+    @media print{.print-btn{display:none}body{padding:8mm}}
+    @page{size:A4;margin:8mm}
   </style></head><body>
-    <div class="header"><h1>🖨 Route Card / Production Traveler</h1><p>${p.sap} — ${p.customer} · Generated: ${new Date().toLocaleString()}</p></div>
-    <div class="meta">
-      <div><div class="l">Project No</div><div class="v">${p.sap}</div></div>
-      <div><div class="l">Type / Category</div><div class="v">${p.type} / ${p.cat}</div></div>
-      <div><div class="l">Customer</div><div class="v">${p.customer}</div></div>
-      <div><div class="l">Project Manager</div><div class="v">${p.pm}</div></div>
-      <div><div class="l">Engineer</div><div class="v">${p.eng}</div></div>
-      <div><div class="l">PO No.</div><div class="v">${p.po||'—'}</div></div>
+    <button class="print-btn" onclick="window.print()">🖨 Print / Save as PDF</button>
+
+    ${headerBlock}
+
+    <table class="info-grid">
+      <tr>
+        <td class="lbl">Project No</td><td>${p.sap||''}</td>
+        <td class="lbl">Customer Name</td><td>${p.customer||''}</td>
+        <td class="lbl">Qty</td><td>${b.qty||''} ${b.uom||''}</td>
+      </tr>
+      <tr>
+        <td class="lbl">Component</td><td><b>${b.item||''}</b></td>
+        <td class="lbl">Material / Finish</td><td>${b.colorFinish||'—'}</td>
+        <td class="lbl">Drawing Ref / Rev No</td><td>${drawingRef||''}</td>
+      </tr>
+      <tr>
+        <td class="lbl">Size (L × W × T)</td><td>${(b.l||'—')} × ${(b.w||'—')} × ${(b.t||'—')} ${b.uom==='MTR'?'mm':'mm'}</td>
+        <td class="lbl">Type</td><td>${p.type||''}${b.isRework?' <span style="color:#92400e;font-weight:700">(REWORK)</span>':''}</td>
+        <td class="lbl">Date of Generation</td><td>${nowStr}</td>
+      </tr>
+      <tr>
+        <td class="lbl">Project Manager</td><td>${p.pm||''}</td>
+        <td class="lbl">Engineer</td><td>${p.eng||''}</td>
+        <td class="lbl">Line ID</td><td style="font-family:monospace">${b.lineId||''}</td>
+      </tr>
+    </table>
+
+    <div class="chars">
+      <div class="chars-title">Key / Special Material Characteristic (Tick Mark The Applicable):</div>
+      <div style="line-height:1.9">${tickRow} ${otherStr}</div>
     </div>
-    <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:8px 12px;margin-bottom:16px">
-      <div style="font-size:9px;color:#8492a6;text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px">Project Certification Requirement</div>
-      <div style="font-size:11.5px;font-weight:700;color:#1e40af">${(p.certifications&&p.certifications.length)?p.certifications.join('  •  '):'None specified'}</div>
+
+    <table class="stage-table">
+      <thead>
+        <tr class="grp">
+          <th rowspan="2" style="width:5%">Stage</th>
+          <th rowspan="2" style="width:16%">OPERATION STAGE</th>
+          <th colspan="8">To be filled by Operator</th>
+        </tr>
+        <tr>
+          <th style="width:9%">Start Date</th>
+          <th style="width:9%">End Date</th>
+          <th style="width:8%">Qty Produced</th>
+          <th style="width:9%">Operator Sign</th>
+          <th style="width:10%">Quality Check Sign</th>
+          <th style="width:12%">Next Stage</th>
+          <th style="width:9%">Accepted Sign</th>
+          <th style="width:8%">Rejection Qty</th>
+        </tr>
+      </thead>
+      <tbody>${stageRows}</tbody>
+    </table>
+
+    <table class="remarks">
+      <thead><tr>
+        <th style="width:5%">S. No.</th>
+        <th style="width:55%">Special Remarks / Special Customer Requirements (As per Production File Checklist)</th>
+        <th style="width:20%">Checked By</th>
+        <th style="width:20%">Observation: Found Okay or Not Okay</th>
+      </tr></thead>
+      <tbody>
+        <tr><td>1</td><td>Did the operator follow the Work Instructions mentioned on the Machine Display Board? Mention deviation observed, if any:</td><td>In Process Quality In-charge</td><td></td></tr>
+        <tr><td>2</td><td>Is the Operator Skill matching with the Skill Level Required at each stage? Mention deviation observed, if any:</td><td>In Process Quality In-charge</td><td></td></tr>
+      </tbody>
+    </table>
+
+    <div class="notes">
+      <b>Note 1:</b> Always refer the Production File Checklist and Drawings for any kind of Special Instructions to be taken care of.<br>
+      <b>Note 2:</b> No overwriting shall be accepted on any of the recorded values on this Card.<br>
+      <b>Note 3:</b> Each machine operator is required to follow all the Technical and Safety Work Instructions mentioned on the QHSE Board Numbers pasted right next to the machine.
     </div>
-    <table><thead><tr><th>#</th><th>Component</th><th>Type</th><th>L</th><th>W</th><th>T</th><th>UOM</th><th>Qty</th><th>Color / Finish</th><th>Special Characteristics</th><th>Routing Sequence</th></tr></thead>
-    <tbody>${rows||'<tr><td colspan="10" style="text-align:center;padding:14px">No BOM components on this project.</td></tr>'}</tbody></table>
-    <div class="footer">ONEPWS Production Control Portal · Route Card · ${p.bom?.length||0} component(s)</div>
+
+    <div style="border:1px solid #000;padding:6px 8px;margin-bottom:6px;font-size:10.5px;min-height:22px"><b>Special Remarks (if Any):</b> </div>
+
+    <div class="doc-class">Document Classified As: INTERNAL — (Limited Distribution)</div>
+
+    <!-- ================ PAGE 2 ================ -->
+    <div class="page2"></div>
+    ${headerBlock}
+
+    <table class="info-grid" style="margin-bottom:6px">
+      <tr>
+        <td class="lbl">Project No</td><td>${p.sap||''}</td>
+        <td class="lbl">Customer</td><td>${p.customer||''}</td>
+        <td class="lbl">Component</td><td><b>${b.item||''}</b></td>
+        <td class="lbl">Total Qty</td><td>${b.qty||''} ${b.uom||''}</td>
+      </tr>
+    </table>
+
+    <table class="qc-table">
+      <thead>
+        <tr class="grp">
+          <th rowspan="2" style="width:4%">Sr. No.</th>
+          <th colspan="2" style="width:16%">Required Sizes (As per Design)</th>
+          <th rowspan="2" style="width:8%">Qty Manufactured</th>
+          <th rowspan="2" style="width:15%">Finish / Description</th>
+          <th rowspan="2" style="width:8%">Tolerance</th>
+          <th rowspan="2" style="width:12%">QC Accepted<br>(Ok / Hold / Reject)</th>
+          <th rowspan="2" style="width:18%">Calibrated Instrument Id Used To Check</th>
+          <th rowspan="2" style="width:19%">QC Remarks</th>
+        </tr>
+        <tr>
+          <th style="width:8%">Length</th>
+          <th style="width:8%">Width</th>
+        </tr>
+      </thead>
+      <tbody>${qcRows}</tbody>
+    </table>
+
+    <table class="rm-table">
+      <thead><tr>
+        <th style="width:5%">Sr. No.</th>
+        <th style="width:35%">Name of Raw Material Used In This Project (Only for Special CAT projects)</th>
+        <th style="width:15%">Quantity Used</th>
+        <th style="width:25%">Batch Number Consumed</th>
+        <th style="width:20%">Serial Number</th>
+      </tr></thead>
+      <tbody>
+        <tr><td>1</td><td></td><td></td><td></td><td></td></tr>
+        <tr><td>2</td><td></td><td></td><td></td><td></td></tr>
+        <tr><td>3</td><td></td><td></td><td></td><td></td></tr>
+        <tr><td>4</td><td></td><td></td><td></td><td></td></tr>
+      </tbody>
+    </table>
+
+    <table class="handover">
+      <tr><td colspan="2" style="text-align:center;background:#f2f2f2">Material Handover Summary</td></tr>
+      <tr><td class="handlbl">Handed Over To:</td><td></td></tr>
+      <tr><td class="handlbl">Date &amp; Sign:</td><td></td></tr>
+    </table>
+
+    <div class="doc-class">Document Classified As: INTERNAL — (Limited Distribution)</div>
   </body></html>`;
-  const w=window.open('','_blank');
+
+  const w = window.open('','_blank');
   if(!w){ toast('Pop-up blocked. Allow pop-ups to view the Route Card.','⚠'); return; }
-  w.document.write(html); w.document.close();
-  setTimeout(()=>{ w.focus(); w.print(); },400);
-  toast('Route Card opened in new window — use Print → Save as PDF','🖨');
+  w.document.write(html);
+  w.document.close();
+  setTimeout(()=>{ w.focus(); w.print(); }, 400);
+  toast('Route Card for '+b.item+' opened — use Print → Save as PDF','🖨');
 }
 
 // ----------------------------------------------------------------------

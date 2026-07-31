@@ -359,3 +359,47 @@ ALTER TABLE handover_log ADD COLUMN IF NOT EXISTS cc_emails JSONB NOT NULL DEFAU
 -- normalization here and client-side as-you-type) so LEFT and left match
 -- exactly in reports and search.
 ALTER TABLE bom_lines ADD COLUMN IF NOT EXISTS description VARCHAR(50);
+
+-- Document Library persistence — Phase 11. Migrates DMS documents from
+-- an in-memory DB.dmsDocuments frontend array to a real Postgres table
+-- so uploads survive page refreshes and are visible across users. File
+-- bytes are stored inline as base64 in file_data — capped at ~3 MB decoded
+-- per row by validateFileSize() in routes/dms.js. If document counts or
+-- file sizes ever outgrow this (5MB+ CAD files common, thousands of
+-- documents), swapping file_data for an S3 URL + a separate upload
+-- endpoint is a straightforward follow-up. Access log JSONB is capped
+-- to the latest 200 entries per document in the PUT handler to keep the
+-- row from growing unbounded on frequently-viewed documents.
+CREATE SEQUENCE IF NOT EXISTS dms_doc_seq START 1;
+CREATE TABLE IF NOT EXISTS dms_documents (
+  id                VARCHAR(20)  PRIMARY KEY,
+  doc_no            VARCHAR(100),
+  name              VARCHAR(200) NOT NULL,
+  dept              VARCHAR(80),
+  origin            VARCHAR(80),
+  category          VARCHAR(80),
+  level             VARCHAR(40),
+  freq              VARCHAR(40),
+  status            VARCHAR(40),
+  purpose           TEXT,
+  owner             VARCHAR(100),
+  prep_by           VARCHAR(100),
+  approved_by       VARCHAR(100),
+  linked_docs       TEXT,
+  audit_remarks     TEXT,
+  folder_id         VARCHAR(80),
+  file_type         VARCHAR(20),
+  file_name         VARCHAR(255),
+  file_size         VARCHAR(40),
+  file_data         TEXT,
+  first_issue_date  DATE,
+  tags              JSONB NOT NULL DEFAULT '[]',
+  revisions         JSONB NOT NULL DEFAULT '[]',
+  access_log        JSONB NOT NULL DEFAULT '[]',
+  created_by        VARCHAR(100),
+  created_at        TIMESTAMP NOT NULL DEFAULT NOW(),
+  updated_at        TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_dms_dept    ON dms_documents(dept);
+CREATE INDEX IF NOT EXISTS idx_dms_status  ON dms_documents(status);
+CREATE INDEX IF NOT EXISTS idx_dms_created ON dms_documents(created_at DESC);

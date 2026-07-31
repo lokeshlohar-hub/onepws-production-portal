@@ -1016,7 +1016,7 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
         </div>
         <div style="overflow-x:auto">
           <table style="font-size:12px;min-width:880px">
-            <thead><tr><th>#</th><th>Component &#128274;</th><th>L (mm)</th><th>W (mm)</th><th>T (mm)</th><th class="bom-col-uom">UOM</th><th>Qty (Components)</th><th title="Boards Planned for Hot Press and Beam Saw. Auto-calc from Qty if blank."><span style="color:#7c3aed">Boards Planned</span></th><th>Color / Finish</th><th>Special Characteristics</th><th class="bom-col-route">Auto Routing &#128274;</th><th></th></tr></thead>
+            <thead><tr><th>#</th><th>Component &#128274;</th><th>Description</th><th>L (mm)</th><th>W (mm)</th><th>T (mm)</th><th class="bom-col-uom">UOM</th><th>Qty (Components)</th><th title="Boards Planned for Hot Press and Beam Saw. Auto-calc from Qty if blank."><span style="color:#7c3aed">Boards Planned</span></th><th>Color / Finish</th><th>Special Characteristics</th><th class="bom-col-route">Auto Routing &#128274;</th><th></th></tr></thead>
             <tbody id="woodBomBody"></tbody>
           </table>
           <button class="btn btn-outline btn-sm mt-2" onclick="addBOMToSegment('wood')">+ Add Component</button>
@@ -1057,7 +1057,7 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
         </div>
         <div style="overflow-x:auto">
           <table style="font-size:12px;min-width:820px">
-            <thead><tr><th>#</th><th>Component &#128274;</th><th class="bom-col-profile">Profile Size</th><th>Length (mm)</th><th class="bom-col-uom">UOM</th><th>Qty</th><th>Color / Finish</th><th>Special Characteristics</th><th class="bom-col-route">Auto Routing &#128274;</th><th></th></tr></thead>
+            <thead><tr><th>#</th><th>Component &#128274;</th><th>Description</th><th class="bom-col-profile">Profile Size</th><th>Length (mm)</th><th class="bom-col-uom">UOM</th><th>Qty</th><th>Color / Finish</th><th>Special Characteristics</th><th class="bom-col-route">Auto Routing &#128274;</th><th></th></tr></thead>
             <tbody id="extBomBody"></tbody>
           </table>
           <button class="btn btn-outline btn-sm mt-2" onclick="addBOMToSegment('ext')">+ Add Component</button>
@@ -4521,6 +4521,10 @@ function serverBomLineToLocal(row) {
     // QC actions or page refreshes. The manual "Notify Handover" button in
     // the component detail view is unaffected by this flag.
     emailPromptShown: !!row.email_prompt_shown,
+    // Optional free-text traceability field — Phase 10. Server stores as
+    // uppercase; NULL from the DB means "no description" and we treat
+    // that identically to an empty string throughout the frontend.
+    description: row.description || '',
   };
 }
 
@@ -4993,13 +4997,13 @@ BULK_IMPORT_CONFIGS.projects = {
       recWood: rec.hasWood?today:null, planWood:null,
       recExt: rec.hasExt?today:null, planExt:null,
       certifications: rec.certifications,
-      bom: rec.bom.map(b=>({item:b.item, seg:b.seg, l:b.l, w:b.w, t:b.t, uom:b.uom, qty:b.qty,
+      bom: rec.bom.map(b=>({item:b.item, description:b.description||'', seg:b.seg, l:b.l, w:b.w, t:b.t, uom:b.uom, qty:b.qty,
         colorFinish:b.colorFinish, specialChars:b.specialChars, componentsPerBoard:b.componentsPerBoard, route:b.route}))
     });
     const nid = serverResult.projectId;
     const ts=new Date().toISOString().replace('T',' ').slice(0,16);
     const fullBom = rec.bom.map((b,i)=>{
-      const line = {item:b.item, l:b.l, w:b.w, t:b.t, uom:b.uom, qty:b.qty, done:0, seg:b.seg,
+      const line = {item:b.item, description:b.description||'', l:b.l, w:b.w, t:b.t, uom:b.uom, qty:b.qty, done:0, seg:b.seg,
         colorFinish:b.colorFinish, specialChars:b.specialChars, componentsPerBoard:b.componentsPerBoard,
         lineId: serverResult.bomLineIds[i]};
       ensureBomLineStructure(line);
@@ -7590,6 +7594,7 @@ function makeSegBOMEditRow(b, seg, projectId){
     return '<tr '+dataAttrs+' style="'+rowStyle+'">'
       +'<td style="font-size:12px">•</td>'
       +'<td><select class="form-select" style="height:27px;min-width:120px" id="e_bom_comp_ext_'+safeId+'">'+compOpts+'</select></td>'
+      +'<td><input type="text" class="form-input" style="height:27px;width:130px;text-transform:uppercase" maxlength="50" id="e_bom_desc_ext_'+safeId+'" value="'+(b.description||'').replace(/"/g,'&quot;')+'" placeholder="Optional identifier" oninput="this.value=this.value.toUpperCase()" title="Optional traceability description"></td>'
       +'<td class="bom-col-profile"><input type="text" class="form-input" style="height:27px;width:75px" id="e_bom_profile_'+safeId+'" value="'+(b.profile||'')+'"></td>'
       +'<td><input type="number" class="form-input dim-input" style="height:27px;width:70px" id="e_bom_l_ext_'+safeId+'" value="'+(b.l||'')+'"></td>'
       +'<td class="bom-col-uom"><select class="form-select" style="height:27px;width:55px" id="e_bom_uom_ext_'+safeId+'">'+uomOpts+'</select></td>'
@@ -7606,6 +7611,7 @@ function makeSegBOMEditRow(b, seg, projectId){
   return '<tr '+dataAttrs+' style="'+rowStyle+'">'
     +'<td style="font-size:12px">•</td>'
     +'<td><select class="form-select" style="height:27px;min-width:120px" id="e_bom_comp_wood_'+safeId+'">'+compOpts+'</select></td>'
+    +'<td><input type="text" class="form-input" style="height:27px;width:130px;text-transform:uppercase" maxlength="50" id="e_bom_desc_wood_'+safeId+'" value="'+(b.description||'').replace(/"/g,'&quot;')+'" placeholder="Optional identifier" oninput="this.value=this.value.toUpperCase()" title="Optional traceability description"></td>'
     +'<td><input type="number" class="form-input dim-input" style="height:27px;width:65px" id="e_bom_l_wood_'+safeId+'" value="'+(b.l||'')+'"></td>'
     +'<td><input type="number" class="form-input dim-input" style="height:27px;width:65px" id="e_bom_w_wood_'+safeId+'" value="'+(b.w||'')+'"></td>'
     +'<td><input type="number" class="form-input dim-input" style="height:27px;width:58px" id="e_bom_t_wood_'+safeId+'" value="'+(b.t||'')+'"></td>'
@@ -7783,6 +7789,7 @@ function makeSegBOMRow(i, seg){
     return '<tr>'
       +'<td style="font-size:12px">'+(i+1)+'</td>'
       +'<td><select class="form-select" style="height:27px;min-width:120px" id="bom_comp_ext_'+i+'" onchange="autoFillRoutingSeg('+i+',\'ext\')">'+compOpts+'</select></td>'
+      +'<td><input type="text" class="form-input" style="height:27px;width:130px;text-transform:uppercase" maxlength="50" placeholder="Optional identifier" oninput="this.value=this.value.toUpperCase()" title="Optional traceability description — e.g. LEFT SHUTTER"></td>'
       +'<td class="bom-col-profile"><input type="text" class="form-input" style="height:27px;width:75px" placeholder="40x54"></td>'
       +'<td><input type="number" class="form-input dim-input" style="height:27px;width:70px" placeholder="6000"></td>'
       +'<td class="bom-col-uom"><select class="form-select" style="height:27px;width:55px"><option>PC</option><option>MTR</option><option>NOS</option></select></td>'
@@ -7796,6 +7803,7 @@ function makeSegBOMRow(i, seg){
   return '<tr>'
     +'<td style="font-size:12px">'+(i+1)+'</td>'
     +'<td><select class="form-select" style="height:27px;min-width:120px" id="bom_comp_wood_'+i+'" onchange="autoFillRoutingSeg('+i+',\'wood\')">'+compOpts+'</select></td>'
+    +'<td><input type="text" class="form-input" style="height:27px;width:130px;text-transform:uppercase" maxlength="50" placeholder="Optional identifier" oninput="this.value=this.value.toUpperCase()" title="Optional traceability description — e.g. LEFT SHUTTER"></td>'
     +'<td><input type="number" class="form-input dim-input" style="height:27px;width:65px" placeholder="L"></td>'
     +'<td><input type="number" class="form-input dim-input" style="height:27px;width:65px" placeholder="W"></td>'
     +'<td><input type="number" class="form-input dim-input" style="height:27px;width:58px" placeholder="T"></td>'
@@ -8170,7 +8178,7 @@ async function saveProjectAddSegment(btn){
       serverResult = await apiAddSegmentToProject(p.id, {
         segment: seg, received: rec, tat,
         bom: bom.map(b=>({
-          item:b.item, l:b.l, w:b.w, t:b.t, profile:b.profile, uom:b.uom, qty:b.qty,
+          item:b.item, description:b.description||'', l:b.l, w:b.w, t:b.t, profile:b.profile, uom:b.uom, qty:b.qty,
           colorFinish:b.colorFinish, specialChars:b.specialChars,
           componentsPerBoard:b.componentsPerBoard, edgeMetersPerComp:b.edgeMetersPerComp, boardQty:b.boardQty,
           route:b.route
@@ -8260,29 +8268,33 @@ function collectSegBOM(seg){
     // treat every edit row as a fresh new component and INSERT a
     // duplicate BOM line, doubling the production quantity.
     if(tr.hasAttribute('data-edit-line-id')) return;
-    const td=tr.querySelectorAll('td'); if(td.length<6)return;
+    const td=tr.querySelectorAll('td'); if(td.length<7)return;
     const item=td[1].querySelector('select')?.value||''; if(!item)return;
+    // Description at td[2] — optional free-text traceability field. Uppercased
+    // as-you-type via the input's oninput handler; server also uppercases on
+    // save as defense in depth. Empty stays empty (not persisted as string).
+    const description=(td[2].querySelector('input')?.value||'').trim().toUpperCase();
     if(seg==='ext'){
-      const profile=td[2].querySelector('input')?.value||'';
-      const len=parseFloat(td[3].querySelector('input')?.value)||0;
-      const uom=td[4].querySelector('select')?.value||'PC';
-      const qty=parseInt(td[5].querySelector('input')?.value)||1;
-      const colorFinish=td[6]?.querySelector('input')?.value.trim()||'';
-      bom.push({item,profile,l:len,w:0,t:0,uom,qty,done:0,seg:'ext',colorFinish,
-        specialChars:Array.from(td[7]?.querySelectorAll('.char-option:checked')||[]).map(o=>o.value)});
-    } else {
-      const l=parseFloat(td[2].querySelector('input')?.value)||0;
-      const w=parseFloat(td[3].querySelector('input')?.value)||0;
-      const t=parseFloat(td[4].querySelector('input')?.value)||0;
+      const profile=td[3].querySelector('input')?.value||'';
+      const len=parseFloat(td[4].querySelector('input')?.value)||0;
       const uom=td[5].querySelector('select')?.value||'PC';
       const qty=parseInt(td[6].querySelector('input')?.value)||1;
-      // Boards Planned is now td[7] (Comp/Brd and EB columns removed)
-      const brdInput = td[7]?.querySelector('input');
+      const colorFinish=td[7]?.querySelector('input')?.value.trim()||'';
+      bom.push({item,description,profile,l:len,w:0,t:0,uom,qty,done:0,seg:'ext',colorFinish,
+        specialChars:Array.from(td[8]?.querySelectorAll('.char-option:checked')||[]).map(o=>o.value)});
+    } else {
+      const l=parseFloat(td[3].querySelector('input')?.value)||0;
+      const w=parseFloat(td[4].querySelector('input')?.value)||0;
+      const t=parseFloat(td[5].querySelector('input')?.value)||0;
+      const uom=td[6].querySelector('select')?.value||'PC';
+      const qty=parseInt(td[7].querySelector('input')?.value)||1;
+      // Boards Planned is now td[8] (was td[7] before Description column was added at td[2])
+      const brdInput = td[8]?.querySelector('input');
       const brd = brdInput ? (parseInt(brdInput.value)||0) : 0;
       const boardQty = brd || Math.ceil(qty/8); // default: 1 board per 8 components
-      const colorFinish=td[8]?.querySelector('input')?.value.trim()||'';
-      const specialChars=Array.from(td[9]?.querySelectorAll('.char-option:checked')||[]).map(o=>o.value);
-      bom.push({item,l,w,t,uom,qty,done:0,seg:'wood',componentsPerBoard:8,edgeMetersPerComp:5,boardQty,componentsReleased:0,colorFinish,specialChars});
+      const colorFinish=td[9]?.querySelector('input')?.value.trim()||'';
+      const specialChars=Array.from(td[10]?.querySelectorAll('.char-option:checked')||[]).map(o=>o.value);
+      bom.push({item,description,l,w,t,uom,qty,done:0,seg:'wood',componentsPerBoard:8,edgeMetersPerComp:5,boardQty,componentsReleased:0,colorFinish,specialChars});
     }
   });
   return bom;
@@ -8324,6 +8336,7 @@ function collectSegEdits(seg, p){
     const payload = {};
     if(seg==='ext'){
       payload.item        = readStr(gid('e_bom_comp_ext'));
+      payload.description = (readStr(gid('e_bom_desc_ext'))||'').toUpperCase();
       payload.profile     = readStr(gid('e_bom_profile'));
       payload.l           = readNum(gid('e_bom_l_ext'));
       payload.uom         = readStr(gid('e_bom_uom_ext'));
@@ -8332,6 +8345,7 @@ function collectSegEdits(seg, p){
       payload.specialChars= readSpecials(gid('e_bom_specials_ext'));
     } else {
       payload.item        = readStr(gid('e_bom_comp_wood'));
+      payload.description = (readStr(gid('e_bom_desc_wood'))||'').toUpperCase();
       payload.l           = readNum(gid('e_bom_l_wood'));
       payload.w           = readNum(gid('e_bom_w_wood'));
       payload.t           = readNum(gid('e_bom_t_wood'));
@@ -8910,6 +8924,7 @@ async function openHandoverNotifyModal(autoOpened){
   const components = [{
     sr: 1,
     item: b.item,
+    description: b.description || '',
     colorFinish: b.colorFinish || '—',
     size,
     totalQty: b.qty,
@@ -8971,7 +8986,7 @@ async function openHandoverNotifyModal(autoOpened){
       const statusColor = c.status==='Complete' ? 'var(--green,#2b8a3e)' : 'var(--accent,#1971c2)';
       return '<tr>'
         +'<td style="'+tdBase+bb+';text-align:center">'+c.sr+'</td>'
-        +'<td class="fw-600" style="'+tdBase+bb+'">'+c.item+'</td>'
+        +'<td class="fw-600" style="'+tdBase+bb+'">'+c.item+(c.description?'<div style="font-size:10.5px;font-weight:500;color:#4b5563">'+c.description+'</div>':'')+'</td>'
         +'<td style="'+tdBase+bb+'">'+c.colorFinish+'</td>'
         +'<td style="'+tdBase+bb+'">'+c.size+'</td>'
         +'<td class="font-mono" style="'+tdBase+bb+';text-align:right">'+c.totalQty+'</td>'
@@ -9053,7 +9068,7 @@ async function openHandoverNotifyModal(autoOpened){
   const bodyComponents = components.map(c=>{
     const asciiColorFinish = (c.colorFinish==='—') ? asciiDash : c.colorFinish;
     const asciiSize        = String(c.size).replace(/—/g, asciiDash).replace(/×/g, 'x');
-    return   '  # '+c.sr+'. '+c.item+'\n'
+    return   '  # '+c.sr+'. '+c.item+(c.description?' — '+c.description:'')+'\n'
       + '    Color / Finish   : '+asciiColorFinish+'\n'
       + '    Size / Dimensions: '+asciiSize+'\n'
       + '    Total Qty        : '+c.totalQty+'\n'
@@ -10644,7 +10659,8 @@ function renderSegmentBOMSection(p, seg){
     const curStage=b.route.find(st=>pendingQty(b,st)>0||b.stageData[st].qcQueue>0)||(pend<=0?'Complete':b.route[0]||'—');
     const typeCell=b.isRework?'<span class="badge" style="background:#fef3c7;color:#92400e;font-size:9px" title="Auto-created after rejection at '+(b.reworkSourceStage||'—')+' on '+(b.reworkDate||'—')+' — '+(b.reworkReason||'')+'">&#128260; Rework</span>':'<span class="text-xs text-muted">Original</span>';
     const rcBtn='<button class="btn btn-outline btn-sm" style="height:24px;padding:0 8px;font-size:10.5px;white-space:nowrap" onclick="openRouteCardForLine(\''+b.lineId+'\',\''+p.id+'\')" title="Print or save this component\'s Route Card">🖨 Route Card</button>';
-    return '<tr><td>'+(i+1)+'</td><td class="fw-600">'+b.item+'</td><td>'+typeCell+'</td><td class="font-mono">'+(b.l||'—')+'</td><td class="font-mono">'+(b.w||'—')+'</td><td class="font-mono">'+(b.t||'—')+'</td><td>'+b.uom+'</td><td class="fw-600">'+b.qty+'</td><td class="text-xs">'+(b.colorFinish||'—')+'</td><td>'+((b.specialChars||[]).length?b.specialChars.map(c=>'<span class="char-chip">'+c+'</span>').join(''):'<span class="text-xs text-muted">—</span>')+'</td><td class="text-success fw-600">'+done+'</td><td class="'+(pend>0?'text-danger fw-600':'text-muted')+'">'+pend+'</td><td class="text-xs">'+curStage+'</td><td>'+rcBtn+'</td></tr>';
+    const descCell=b.description?'<span class="text-xs" style="color:var(--text-primary,#0f1b2d);font-weight:600">'+b.description+'</span>':'<span class="text-xs text-muted">—</span>';
+    return '<tr><td>'+(i+1)+'</td><td class="fw-600">'+b.item+'</td><td>'+descCell+'</td><td>'+typeCell+'</td><td class="font-mono">'+(b.l||'—')+'</td><td class="font-mono">'+(b.w||'—')+'</td><td class="font-mono">'+(b.t||'—')+'</td><td>'+b.uom+'</td><td class="fw-600">'+b.qty+'</td><td class="text-xs">'+(b.colorFinish||'—')+'</td><td>'+((b.specialChars||[]).length?b.specialChars.map(c=>'<span class="char-chip">'+c+'</span>').join(''):'<span class="text-xs text-muted">—</span>')+'</td><td class="text-success fw-600">'+done+'</td><td class="'+(pend>0?'text-danger fw-600':'text-muted')+'">'+pend+'</td><td class="text-xs">'+curStage+'</td><td>'+rcBtn+'</td></tr>';
   }).join('');
 
   return '<div style="margin-bottom:18px;border:1.5px solid '+headerColor+';border-radius:10px;overflow:hidden;max-height:55vh;display:flex;flex-direction:column">'
@@ -10653,8 +10669,8 @@ function renderSegmentBOMSection(p, seg){
       +'<div class="bom-top-scroll-spacer" id="bomTopSpacer_'+seg+'"></div>'
     +'</div>'
     +'<div class="table-wrap bom-scrollable-content" id="bomTableWrap_'+seg+'" onscroll="syncBomBottomScroll(\''+seg+'\')">'
-      +'<table style="margin:0"><thead><tr><th>#</th><th>Component</th><th>Type</th><th>L</th><th>W</th><th>T</th><th>UOM</th><th>Qty</th><th>Color / Finish</th><th>Special Characteristics</th><th>Fully Cleared</th><th>Pending</th><th>Current Stage</th><th>Route Card</th></tr></thead>'
-      +'<tbody>'+(bodyHtml||'<tr><td colspan="14" class="text-sm text-muted" style="padding:12px;text-align:center">No components in this segment.</td></tr>')+'</tbody></table>'
+      +'<table style="margin:0"><thead><tr><th>#</th><th>Component</th><th>Description</th><th>Type</th><th>L</th><th>W</th><th>T</th><th>UOM</th><th>Qty</th><th>Color / Finish</th><th>Special Characteristics</th><th>Fully Cleared</th><th>Pending</th><th>Current Stage</th><th>Route Card</th></tr></thead>'
+      +'<tbody>'+(bodyHtml||'<tr><td colspan="15" class="text-sm text-muted" style="padding:12px;text-align:center">No components in this segment.</td></tr>')+'</tbody></table>'
     +'</div>'
   +'</div>';
 }
@@ -10925,7 +10941,7 @@ function openRouteCardForLine(lineId, projId){
         <td class="lbl">Qty</td><td>${b.qty||''} ${b.uom||''}</td>
       </tr>
       <tr>
-        <td class="lbl">Component</td><td><b>${b.item||''}</b></td>
+        <td class="lbl">Component</td><td><b>${b.item||''}</b>${b.description?' <span style="color:#4b5563;font-weight:600">— '+b.description+'</span>':''}</td>
         <td class="lbl">Material / Finish</td><td>${b.colorFinish||'—'}</td>
         <td class="lbl">Drawing Ref / Rev No</td><td>${drawingRef||''}</td>
       </tr>
@@ -10998,7 +11014,7 @@ function openRouteCardForLine(lineId, projId){
       <tr>
         <td class="lbl">Project No</td><td>${p.sap||''}</td>
         <td class="lbl">Customer</td><td>${p.customer||''}</td>
-        <td class="lbl">Component</td><td><b>${b.item||''}</b></td>
+        <td class="lbl">Component</td><td><b>${b.item||''}</b>${b.description?' <span style="color:#4b5563;font-weight:600">— '+b.description+'</span>':''}</td>
         <td class="lbl">Total Qty</td><td>${b.qty||''} ${b.uom||''}</td>
       </tr>
     </table>

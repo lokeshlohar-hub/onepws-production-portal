@@ -4366,6 +4366,44 @@ function apiEditBomLine(lineId, payload) {
 function apiDeleteBomLine(lineId) {
   return apiRequest('/bom-lines/'+encodeURIComponent(lineId), { method: 'DELETE' });
 }
+
+// Phase 11 additions — Document Library persistence. All five endpoints
+// gated by requireAuth server-side, POST/PUT/DELETE additionally require
+// admin/superadmin. GET list deliberately excludes file_data (would send
+// megabytes of base64 per doc); the /:id/file endpoint returns raw file
+// bytes only when the download flow actually needs them.
+function apiListDmsDocuments() {
+  return apiRequest('/dms-documents', { method: 'GET' });
+}
+function apiGetDmsFile(id) {
+  return apiRequest('/dms-documents/'+encodeURIComponent(id)+'/file', { method: 'GET' });
+}
+function apiCreateDmsDocument(payload) {
+  return apiRequest('/dms-documents', { method: 'POST', body: JSON.stringify(payload) });
+}
+function apiUpdateDmsDocument(id, payload) {
+  return apiRequest('/dms-documents/'+encodeURIComponent(id), { method: 'PUT', body: JSON.stringify(payload) });
+}
+function apiDeleteDmsDocument(id) {
+  return apiRequest('/dms-documents/'+encodeURIComponent(id), { method: 'DELETE' });
+}
+
+// Reads a File object as a base64 string, stripping the "data:...;base64,"
+// prefix that FileReader.readAsDataURL includes. The server stores just the
+// raw base64 payload in file_data; keeping the data-URL prefix would inflate
+// the row and complicate serve-back logic. Rejects if the read fails.
+function fileToBase64(file){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result || '';
+      const commaIdx = dataUrl.indexOf(',');
+      resolve(commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : dataUrl);
+    };
+    reader.onerror = () => reject(reader.error || new Error('Failed to read file'));
+    reader.readAsDataURL(file);
+  });
+}
 function apiLoadTodos() {
   return apiRequest('/todo-list', { method: 'GET' });
 }
@@ -4815,6 +4853,22 @@ async function loadMistakesFromServer() {
     toast('Could not load the saved Mistake Register from the server: ' + err.message, '⚠');
   }
 }
+async function loadDmsDocumentsFromServer() {
+  // Phase 11 — Document Library documents now persist server-side. This
+  // runs during bootstrap so DB.dmsDocuments always reflects what's in
+  // Postgres, not just what was created in this browser session (which
+  // was the "refresh loses all documents" bug). file_data is excluded
+  // from the list response by design — bytes come via apiGetDmsFile on
+  // download. Failing softly (empty array + toast) keeps the rest of
+  // the app functional if the DMS endpoint has a transient issue.
+  try {
+    const resp = await apiListDmsDocuments();
+    DB.dmsDocuments = resp.documents || [];
+  } catch (err) {
+    DB.dmsDocuments = DB.dmsDocuments || [];
+    toast('Could not load the saved Document Library from the server: ' + err.message, '⚠');
+  }
+}
 
 // Guarantees every entry in M.bomComponents has a Wood/Extrusion classification
 // in M.bomComponentSegments. Anything already classified is left untouched.
@@ -5250,23 +5304,32 @@ BULK_IMPORT_CONFIGS.dms = {
     return {valid:true, record:{docNo,name,deptName,originName,folderId:deptFolder?deptFolder.id:'',category,level,freq,status,revNo,revDate,issueDate,purpose,prepBy,approvedBy,owner,linked,tags,remarks}};
   },
   summaryOfRecord(rec){ return (rec.docNo?rec.docNo+' — ':'')+rec.name+' (from '+rec.originName+')'; },
-  importRecord(rec){
-    const id='DOC-'+String(DB.dmsDocuments.length+1).padStart(4,'0');
-    const ts=new Date().toISOString().replace('T',' ').slice(0,16);
-    const newDoc={
-      id, docNo:rec.docNo, name:rec.name, dept:rec.deptName, origin:rec.originName, category:rec.category, level:rec.level,
-      freq:rec.freq, status:rec.status, purpose:rec.purpose,
-      owner:rec.owner, prepBy:rec.prepBy, approvedBy:rec.approvedBy, linkedDocs:rec.linked,
-      remarks:'', auditRemarks:rec.remarks,
-      folderId:rec.folderId,
-      fileType:'', fileName:'', fileSize:'', firstIssueDate:rec.issueDate,
-      tags: rec.tags.length ? rec.tags : [rec.deptName, rec.originName, rec.category, rec.level].filter(Boolean),
-      revisions:[{revNo:rec.revNo,revDate:rec.revDate,revBy:rec.prepBy,approvedBy:rec.approvedBy,changeSummary:'First Issue (bulk import)',fileRef:'',status:'Active',archivedAt:null}],
-      accessLog:[{ts,user:'Admin User',action:'Bulk Import',ip:'192.168.1.1'}],
-      createdAt:ts,createdBy:'Admin User',updatedAt:ts
+  async importRecord(rec){
+    // CSV import lands on the server just like the interactive Upload flow —
+    // no fileData because bulk-import doesn't attach files. The server
+    // generates the DOC-NNNN id via dms_doc_seq so concurrent imports
+    // can't collide, uppercases the docNo, and defaults status/revision
+    // shape when not supplied.
+    const payload = {
+      docNo: rec.docNo, name: rec.name,
+      dept: rec.deptName, origin: rec.originName,
+      category: rec.category, level: rec.level, freq: rec.freq, status: rec.status,
+      purpose: rec.purpose, owner: rec.owner,
+      prepBy: rec.prepBy, approvedBy: rec.approvedBy,
+      linkedDocs: rec.linked, auditRemarks: rec.remarks,
+      folderId: rec.folderId,
+      firstIssueDate: rec.issueDate || null,
+      tags: rec.tags && rec.tags.length ? rec.tags : [rec.deptName, rec.originName, rec.category, rec.level].filter(Boolean),
+      revisions: [{
+        revNo: rec.revNo, revDate: rec.revDate, revBy: rec.prepBy, approvedBy: rec.approvedBy,
+        changeSummary: 'First Issue (bulk import)', fileRef: '', status: 'Active', archivedAt: null,
+      }],
     };
-    DB.dmsDocuments.push(newDoc);
-    DB.auditLog.unshift({ts,user:'Admin User',action:'Create',module:'DMS',entity:rec.docNo||id,
+    const resp = await apiCreateDmsDocument(payload);
+    const created = resp.document;
+    DB.dmsDocuments.unshift(created);
+    const ts = new Date().toISOString().replace('T',' ').slice(0,16);
+    DB.auditLog.unshift({ts,user:'Admin User',action:'Create',module:'DMS',entity:rec.docNo||created.id,
       field:'Document',old:'',nw:rec.name+' | '+rec.category+' | '+rec.level+' (bulk import)',ip:'192.168.1.1'});
   },
   afterImport(){
@@ -5691,6 +5754,7 @@ async function attemptLogin(btn){
     await loadHandoverLogFromServer();
     await loadTodosFromServer();
     await loadMistakesFromServer();
+    await loadDmsDocumentsFromServer();
 
     onLoginSuccess();
   } catch(err){
@@ -5738,6 +5802,7 @@ async function restoreSession(){
     await loadHandoverLogFromServer();
     await loadTodosFromServer();
     await loadMistakesFromServer();
+    await loadDmsDocumentsFromServer();
     onLoginSuccess(true);
   } catch(err){
     try{ localStorage.removeItem('onepws_token'); }catch(e){}
@@ -20126,7 +20191,7 @@ function openDmsDetail(docId){
   document.getElementById('dmsDetailModal').classList.add('open');
 }
 
-function simulateDownload(docId, revNo){
+async function simulateDownload(docId, revNo){
   if(!hasPermission('dms', null, 'download')){
     toast('You do not have permission to download documents.','⚠');
     return;
@@ -20134,10 +20199,58 @@ function simulateDownload(docId, revNo){
   const d=DB.dmsDocuments.find(x=>x.id===docId); if(!d) return;
   const ts=new Date().toISOString().replace('T',' ').slice(0,16);
   const actorName = CURRENT_USER ? CURRENT_USER.fullName : 'Admin User';
+  // Fetch the file bytes on-demand from the server — kept out of the list
+  // response since a single doc's base64 can be several MB. If the server
+  // has no file_data for this document (e.g. it was CSV-imported without
+  // a file), we still record the audit but toast a clearer message.
+  try{
+    const resp = await apiGetDmsFile(docId);
+    if(!resp.fileData){
+      toast('No file attached to this document — audit-only entry.','⚠');
+    } else {
+      // Reconstitute a data URL with the recorded MIME type (falls back to
+      // application/octet-stream if unknown), then trigger a normal browser
+      // download via a hidden <a download="..."> click. Works identically
+      // in Chrome, Edge, and Firefox without needing any download library.
+      const mime = resp.fileType ? mimeForExtension(resp.fileType) : 'application/octet-stream';
+      const dataUrl = 'data:'+mime+';base64,'+resp.fileData;
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = resp.fileName || (d.name + (revNo?' — '+revNo:''));
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+  } catch(err){
+    toast('Could not download file: '+err.message,'⚠');
+    return;
+  }
   d.accessLog.push({ts,user:actorName,action:'Download',ip:'192.168.1.1'});
   DB.auditLog.unshift({ts,user:actorName,action:'Download',module:'DMS',entity:d.docNo||d.id,
     field:'Document',old:'',nw:(d.name+(revNo?' ['+revNo+']':' [Latest]')),ip:'192.168.1.1'});
-  toast('Download initiated: '+d.name+(revNo?' — '+revNo:''),'📥');
+  toast('Downloaded: '+d.name+(revNo?' — '+revNo:''),'📥');
+}
+
+// Small MIME-type lookup for the file-extension → Content-Type conversion
+// used when rebuilding a data URL for download. Covers the file types
+// accepted by the DMS upload input (pdf/doc/xls/ppt/img/dwg/csv/txt/zip)
+// plus a generic octet-stream fallback for anything else.
+function mimeForExtension(ext){
+  const map = {
+    pdf: 'application/pdf',
+    doc: 'application/msword',
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    xls: 'application/vnd.ms-excel',
+    xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    ppt: 'application/vnd.ms-powerpoint',
+    pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    jpg: 'image/jpeg', jpeg: 'image/jpeg',
+    png: 'image/png', gif: 'image/gif', bmp: 'image/bmp',
+    dwg: 'application/acad',
+    csv: 'text/csv', txt: 'text/plain',
+    zip: 'application/zip',
+  };
+  return map[(ext||'').toLowerCase()] || 'application/octet-stream';
 }
 
 function openDmsUpload(){
@@ -20201,7 +20314,7 @@ function dmsFileSelected(input){
   document.getElementById('dmsFileLabel').textContent='✅ '+f.name+' ('+Math.round(f.size/1024)+' KB) — ready to upload';
 }
 
-function saveDmsDocument(){
+async function saveDmsDocument(){
   const docNo=document.getElementById('dms_docno').value.trim();
   const name=document.getElementById('dms_name').value.trim();
   const dept=document.getElementById('dms_dept').value;
@@ -20234,45 +20347,85 @@ function saveDmsDocument(){
   if(!appBy){toast('Enter Approved By name.','⚠');return;}
   if(!file&&!_dmsEditId){toast('Please select a file to upload.','⚠');return;}
 
+  // Client-side pre-check for the 3 MB per-document limit — matches the
+  // server-side MAX_FILE_BYTES so users see a clean error before we spend
+  // time base64-encoding a file that would be rejected anyway.
+  if(file && file.size > 3*1024*1024){
+    toast('File is '+Math.round(file.size/1024)+' KB — exceeds the 3 MB per-document limit. Reduce file size or split into multiple documents.','⚠');
+    return;
+  }
+
   const ts=new Date().toISOString().replace('T',' ').slice(0,16);
   const fileExt=file?file.name.split('.').pop().toLowerCase():'';
   const fileName=file?file.name:'';
   const fileSize=file?Math.round(file.size/1024)+' KB':'';
 
+  // Read the file as base64 (if present) before any network call so we can
+  // catch read errors up-front with a clear message rather than mid-flight.
+  let fileData = null;
+  if(file){
+    try{
+      fileData = await fileToBase64(file);
+    } catch(readErr){
+      toast('Could not read file: '+(readErr.message||readErr),'⚠');
+      return;
+    }
+  }
+
+  // Payload shared by both POST (new) and PUT (revision) — the server's
+  // whitelist ignores extra keys and applies COALESCE for PUT so unspecified
+  // fields keep their prior value. `folderId` is derived from the department
+  // to match the existing frontend convention.
+  const basePayload = {
+    docNo, name, dept, origin, category: cat, level, freq, status,
+    purpose, owner, prepBy, approvedBy: appBy,
+    linkedDocs: linked, auditRemarks: remarks,
+    folderId: 'dept-'+dept.toLowerCase().replace(/\s+/g,'-'),
+    revNo, revDate, revLog,
+    firstIssueDate: issueDate || null,
+    tags: [dept, origin, cat, level].filter(Boolean),
+  };
+  if(file){
+    basePayload.fileType = fileExt;
+    basePayload.fileName = fileName;
+    basePayload.fileSize = fileSize;
+    basePayload.fileData = fileData;
+  }
+
   if(_dmsEditId){
-    // Update existing document — archive current active revision
-    const d=DB.dmsDocuments.find(x=>x.id===_dmsEditId);
-    if(!d){toast('Document not found.','⚠');return;}
-    // Archive previous active revision
-    (d.revisions||[]).forEach(r=>{ if(r.status==='Active'){r.status='Archived';r.archivedAt=ts;} });
-    // Push new revision
-    d.revisions.push({revNo,revDate,revBy:prepBy,approvedBy:appBy,changeSummary:revLog||'Revision update',fileRef:fileName||d.fileName,status:'Active',archivedAt:null});
-    d.name=name;d.dept=dept;d.origin=origin;d.category=cat;d.level=level;d.freq=freq;d.status=status;
-    d.purpose=purpose;d.prepBy=prepBy;d.approvedBy=appBy;d.owner=owner;d.linkedDocs=linked;
-    d.auditRemarks=remarks;d.updatedAt=ts;
-    if(file){d.fileType=fileExt;d.fileName=fileName;d.fileSize=fileSize;}
-    d.accessLog.push({ts,user:'Admin User',action:'Revision Upload ('+revNo+')',ip:'192.168.1.1'});
-    DB.auditLog.unshift({ts,user:'Admin User',action:'Update',module:'DMS',entity:d.docNo||d.id,
-      field:'Revision',old:'Previous Rev',nw:revNo+' | '+name,ip:'192.168.1.1'});
-    toast('✓ New revision '+revNo+' saved. Previous version archived for audit traceability.','✓');
+    // Revision — server archives prior Active revision, appends new one,
+    // caps access_log at 200 entries, and preserves any field we don't
+    // send in the PUT payload. On success we replace the local record
+    // with the server's canonical shape so the list re-renders exactly
+    // as the server sees it.
+    try{
+      const resp = await apiUpdateDmsDocument(_dmsEditId, basePayload);
+      const updated = resp.document;
+      const idx = DB.dmsDocuments.findIndex(x=>x.id===_dmsEditId);
+      if(idx>=0) DB.dmsDocuments[idx] = updated;
+      DB.auditLog.unshift({ts,user:'Admin User',action:'Update',module:'DMS',entity:updated.docNo||updated.id,
+        field:'Revision',old:'Previous Rev',nw:revNo+' | '+name,ip:'192.168.1.1'});
+      toast('✓ New revision '+revNo+' saved. Previous version archived for audit traceability.','✓');
+    } catch(err){
+      toast('Could not save revision: '+err.message,'⚠');
+      return;
+    }
   } else {
-    // New document
-    const id='DOC-'+String(DB.dmsDocuments.length+1).padStart(4,'0');
-    const newDoc={
-      id,docNo,name,dept,origin,category:cat,level,freq,status,purpose,
-      owner,prepBy,approvedBy:appBy,linkedDocs:linked,
-      remarks:'',auditRemarks:remarks,
-      folderId:'dept-'+dept.toLowerCase().replace(/\s+/g,'-'),
-      fileType:fileExt,fileName,fileSize,firstIssueDate:issueDate,
-      tags:[dept,origin,cat,level].filter(Boolean),
-      revisions:[{revNo,revDate,revBy:prepBy,approvedBy:appBy,changeSummary:revLog||'First Issue',fileRef:fileName,status:'Active',archivedAt:null}],
-      accessLog:[{ts,user:'Admin User',action:'Upload',ip:'192.168.1.1'}],
-      createdAt:ts,createdBy:'Admin User',updatedAt:ts
-    };
-    DB.dmsDocuments.push(newDoc);
-    DB.auditLog.unshift({ts,user:'Admin User',action:'Create',module:'DMS',entity:docNo||id,
-      field:'Document',old:'',nw:name+' | '+cat+' | '+level,ip:'192.168.1.1'});
-    toast('✓ Document "'+name+'" uploaded and registered in the Document Library.','✓');
+    // New — server generates the DOC-NNNN id via a sequence (no more
+    // collisions from concurrent uploads), returns the full document,
+    // and we prepend it to the local list so the newest appears first
+    // in the search view (matching the server's ORDER BY created_at DESC).
+    try{
+      const resp = await apiCreateDmsDocument(basePayload);
+      const created = resp.document;
+      DB.dmsDocuments.unshift(created);
+      DB.auditLog.unshift({ts,user:'Admin User',action:'Create',module:'DMS',entity:created.docNo||created.id,
+        field:'Document',old:'',nw:name+' | '+cat+' | '+level,ip:'192.168.1.1'});
+      toast('✓ Document "'+name+'" uploaded and registered in the Document Library.','✓');
+    } catch(err){
+      toast('Could not save document: '+err.message,'⚠');
+      return;
+    }
   }
   closeMod('dmsUploadModal');
   _dmsEditId=null;

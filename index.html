@@ -3460,11 +3460,62 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
         <label class="form-label">Assigned Machines <span class="req">*</span> <span class="text-xs text-muted">(select one or more)</span></label>
         <div id="pg_machine_checklist" style="max-height:280px;overflow-y:auto;border:1px solid var(--border2);border-radius:8px;padding:10px;display:flex;flex-direction:column;gap:4px"></div>
       </div>
-      <div class="alert alert-info" id="pg_processonly_note" style="display:none;font-size:12px;margin-bottom:0">This group will not have any machine assigned. During production, the operator can complete this stage directly without selecting a machine.</div>
+      <div class="alert alert-info" id="pg_processonly_note" style="display:none;font-size:12px;margin-bottom:0">This group will not have any machine assigned. Add specific process items (with their own operators and capacity) via the <b>Process-Only Master</b> tab of this admin section.</div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeMod('processGroupModal')">Cancel</button>
       <button class="btn btn-primary" onclick="saveProcessGroupModal()">💾 Save Group</button>
+    </div>
+  </div>
+</div>
+
+<!-- PROCESS-ONLY ITEM MODAL — Phase 13. Add or edit one item under a
+     process-only group (e.g. "Handover" under "HOTO"). Multiple items
+     can share a group; each carries its own dedicated operators and
+     optional capacity. Group dropdown lists only existing process-only
+     groups from M.stageToWorkstation — to create a new group, use the
+     Groups tab first. -->
+<div class="modal-overlay" id="processOnlyItemModal">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-header">
+      <div class="modal-title" id="poItemModalTitle">⚙️ New Process-Only Item</div>
+      <button class="modal-close" onclick="closeMod('processOnlyItemModal')">×</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="poItem_id">
+      <div class="form-group">
+        <label class="form-label">Item Name <span class="req">*</span></label>
+        <input type="text" class="form-input" id="poItem_name" placeholder="e.g. Handover, takeover, Fabrication">
+        <div class="text-xs text-muted" style="margin-top:3px">Sub-item that this group contains. One group can have many items — each with its own operators.</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Group <span class="req">*</span></label>
+        <select class="form-select" id="poItem_group"></select>
+        <div class="text-xs text-muted" style="margin-top:3px">Pick an existing process-only group. To create a new group, use the Groups tab first.</div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Capacity <span class="text-xs text-muted">(optional)</span></label>
+          <input type="number" class="form-input" id="poItem_capacity" min="0" step="1" placeholder="e.g. 20">
+          <div class="text-xs text-muted" style="margin-top:3px">Units per day this item can process. Leave blank if no capacity limit applies.</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Status</label>
+          <select class="form-select" id="poItem_active">
+            <option value="true">Active</option>
+            <option value="false">Inactive</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group" style="margin-bottom:0">
+        <label class="form-label">Operators <span class="req">*</span> <span class="text-xs text-muted">(comma-separated)</span></label>
+        <textarea class="form-textarea" id="poItem_operators" rows="2" placeholder="e.g. Ram Lal, Shyam, Ravi"></textarea>
+        <div class="text-xs text-muted" style="margin-top:3px">Dedicated operators for this process-only item. These appear in the Operator dropdown at Stage-wise Production Updates when the routing hits this group. At least one operator required.</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeMod('processOnlyItemModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveProcessOnlyItemModal()">💾 Save Item</button>
     </div>
   </div>
 </div>
@@ -9595,9 +9646,25 @@ function renderStageEntryForm(){
 
   let opOpts='<option value="">-- Select Operator --</option>';
   if(isProcessOnly){
-    M.operators.slice().sort((a,c)=>a.name.localeCompare(c.name)).forEach(o=>{
-      opOpts+='<option>'+o.name+'</option>';
-    });
+    // Phase 13 — for process-only stages, populate from dedicated operators
+    // registered on the Process-Only Master items whose group matches this
+    // stage. Dedup across items (same operator can appear on multiple items
+    // in the same group). If no items exist yet under this group (transitional
+    // state — group was created but items haven't been added), fall back to
+    // the full operator list so production isn't blocked.
+    const groupItems = (M.processOnlyItems||[]).filter(it => it.group===st && it.active!==false);
+    const groupOperators = groupItems.length
+      ? Array.from(new Set(groupItems.flatMap(it => it.operators||[]))).sort((a,b)=>a.localeCompare(b))
+      : null;
+    if(groupOperators && groupOperators.length){
+      groupOperators.forEach(opName => { opOpts+='<option>'+opName+'</option>'; });
+    } else {
+      // Fallback — no dedicated operators registered yet under this group.
+      // Show every operator so the stage entry doesn't dead-end.
+      M.operators.slice().sort((a,c)=>a.name.localeCompare(c.name)).forEach(o=>{
+        opOpts+='<option>'+o.name+'</option>';
+      });
+    }
   } else {
     activeWsIds.forEach(wsId=>{
       M.operators.filter(o=>o.workstation===wsId).sort((a,c)=>a.seq-c.seq).forEach(o=>{
@@ -17518,7 +17585,95 @@ function deleteHandoverRecipient(idx){
   persistAdminConfig('handoverRecipients');
 }
 
+// Which tab is active inside the Process Groups admin section. Persists
+// across render cycles so switching tabs and coming back to the admin
+// section shows the tab you were last on. Global scope because it's read
+// by both the tab-render function and the tab-switch onclick handlers.
+let _pgAdminActiveTab = 'groups';
+function pgAdminSetTab(tab){
+  _pgAdminActiveTab = tab;
+  renderAdmin('processgroups', null);
+}
+
+// Renders the Process Groups admin section as a two-tab layout:
+//   Groups            — existing process-group list (Machine-Based +
+//                        Process-Only groups shown together)
+//   Process-Only Master — sub-items under each process-only group, each
+//                        with dedicated operators + optional capacity
+// The Groups tab is the classic behavior; the Process-Only Master tab is
+// the Phase 13 addition. Both write back through the same M.stageToWorkstation
+// and (new) M.processOnlyItems structures — persistence is by key so the
+// server sees them side-by-side without any schema change.
 function getProcessGroupsAdmin(){
+  const tabBar = `<div style="display:flex;gap:0;border-bottom:2px solid var(--border);margin-bottom:14px">
+    <button class="pg-tab-btn" style="padding:9px 18px;font-size:12.5px;font-weight:600;background:transparent;border:none;border-bottom:3px solid ${_pgAdminActiveTab==='groups'?'var(--blue)':'transparent'};color:${_pgAdminActiveTab==='groups'?'var(--blue)':'var(--text-muted)'};cursor:pointer;margin-bottom:-2px" onclick="pgAdminSetTab('groups')">🏭 Groups</button>
+    <button class="pg-tab-btn" style="padding:9px 18px;font-size:12.5px;font-weight:600;background:transparent;border:none;border-bottom:3px solid ${_pgAdminActiveTab==='processonly'?'var(--purple)':'transparent'};color:${_pgAdminActiveTab==='processonly'?'var(--purple)':'var(--text-muted)'};cursor:pointer;margin-bottom:-2px" onclick="pgAdminSetTab('processonly')">⚙️ Process-Only Master</button>
+  </div>`;
+  return tabBar + (_pgAdminActiveTab==='processonly' ? getProcessOnlyMasterTab() : getProcessGroupsGroupsTab());
+}
+
+// The Process-Only Master tab — Phase 13 add. Lists items keyed to
+// process-only groups with per-item operators + capacity. Items grouped
+// by their .group field with a group header row so the visual mirrors
+// the routing convention the user drew ("HOTO" containing "Handover" +
+// "takeover", etc.). New items are added via the modal; the group
+// dropdown in the modal is populated from existing process-only groups
+// in M.stageToWorkstation.
+function getProcessOnlyMasterTab(){
+  const items = (M.processOnlyItems||[]).slice();
+  // Group by .group field for visual grouping
+  const byGroup = {};
+  items.forEach(it => { (byGroup[it.group] = byGroup[it.group] || []).push(it); });
+  // Also include process-only groups that have no items yet — so admins
+  // can see "HOTO — no items yet" and know to add some. A group is
+  // process-only if it exists in M.stageToWorkstation with an empty array.
+  Object.keys(M.stageToWorkstation||{}).forEach(g => {
+    if((M.stageToWorkstation[g]||[]).length===0 && !NON_ROUTING_GROUP_KEYS.includes(g) && !byGroup[g]){
+      byGroup[g] = [];
+    }
+  });
+  const groupNames = Object.keys(byGroup).sort();
+  const rows = groupNames.length ? groupNames.map(gName => {
+    const itemsInGroup = byGroup[gName] || [];
+    const groupHeader = `<tr style="background:var(--surface2)"><td colspan="6" style="padding:8px 12px;font-weight:700;font-size:12px;color:var(--purple)">⚙️ ${gName} <span class="text-xs text-muted" style="font-weight:400">(${itemsInGroup.length} item${itemsInGroup.length===1?'':'s'})</span></td></tr>`;
+    if(itemsInGroup.length===0){
+      return groupHeader + `<tr><td colspan="6" class="text-sm text-muted" style="padding:10px 14px;text-align:center;font-style:italic">No items yet — click "+ Add Process-Only Item" to create the first one under this group.</td></tr>`;
+    }
+    return groupHeader + itemsInGroup.map((it,i)=>{
+      const opsText = (it.operators||[]).join(', ') || '<span class="text-muted" style="font-style:italic">no operators</span>';
+      const capText = (it.capacity===null||it.capacity===undefined||it.capacity==='') ? '<span class="text-muted">—</span>' : it.capacity+' /day';
+      return `<tr>
+        <td class="text-xs text-muted" style="padding-left:22px">${i+1}</td>
+        <td class="fw-600">${it.name}</td>
+        <td class="text-sm">${opsText}</td>
+        <td class="font-mono text-sm">${capText}</td>
+        <td>${it.active===false ? '<span class="badge" style="background:var(--red)22;color:var(--red)">Inactive</span>' : '<span class="badge" style="background:var(--green)22;color:var(--green)">Active</span>'}</td>
+        <td style="display:flex;gap:4px">
+          <button class="btn btn-outline btn-sm" onclick="openProcessOnlyItemModal('${it.id}')">✏ Edit</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteProcessOnlyItem('${it.id}')">🗑</button>
+        </td>
+      </tr>`;
+    }).join('');
+  }).join('') : '';
+  return `<div class="card">
+    <div class="card-header">
+      <div>
+        <div class="card-title">⚙️ Process-Only Master${lockBadge('ADMIN ONLY')}</div>
+        <div class="text-xs text-muted" style="margin-top:2px">Sub-items under each process-only group. Each item has its own dedicated operators (visible in the Operator dropdown at Stage-wise Production Updates) and an optional daily capacity. Machine-based groups are managed in the Machine Master; this tab is only for process-only groups.</div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="openProcessOnlyItemModal(null)">+ Add Process-Only Item</button>
+    </div>
+    <div class="card-body">
+      <div class="alert alert-info mb-3" style="font-size:12px">To add an item, you first need at least one process-only group (a group with "Machine Not Required" set in the Groups tab). Groups in Machine Master aren't listed here — they're managed via Machine Master directly.</div>
+      <table>
+        <thead><tr><th style="width:40px">#</th><th>Item</th><th>Operators</th><th style="width:110px">Capacity</th><th style="width:90px">Status</th><th style="width:130px">Actions</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="6" class="text-sm text-muted" style="padding:14px;text-align:center">No process-only groups yet. Create one in the Groups tab first (choose "Machine Not Required"), then come back here to add items.</td></tr>'}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+function getProcessGroupsGroupsTab(){
   const groupNames = Object.keys(M.stageToWorkstation).filter(k=>!NON_ROUTING_GROUP_KEYS.includes(k));
   const rows = groupNames.map(gName=>{
     const memberIds = M.stageToWorkstation[gName]||[];
@@ -17526,10 +17681,15 @@ function getProcessGroupsAdmin(){
     const isProcessOnly = memberIds.length===0;
     const gNameNorm = gName.trim().toLowerCase();
     const usedByCount = Object.values(M.componentRouting).filter(route=>route.some(step=>String(step||'').trim().toLowerCase()===gNameNorm)).length;
+    // For process-only groups, show the count of items assigned in the Process-Only Master
+    // as an additional badge — helps admin spot "HOTO group exists but has no items yet"
+    const itemCount = isProcessOnly ? (M.processOnlyItems||[]).filter(it=>it.group===gName).length : 0;
     return `<tr>
       <td class="fw-600 text-sm">${gName}</td>
       <td>${isProcessOnly ? '<span class="badge" style="background:var(--purple)22;color:var(--purple)">⚙️ Process-Only</span>' : '<span class="badge" style="background:var(--blue)22;color:var(--blue)">🔧 Machine-Based</span>'}</td>
-      <td class="text-sm">${isProcessOnly ? '<span class="text-muted" style="font-style:italic">No machine required</span>' : memberNames.join(', ')}</td>
+      <td class="text-sm">${isProcessOnly
+        ? (itemCount ? '<span class="text-muted">'+itemCount+' item(s) — see Process-Only Master tab</span>' : '<span class="text-muted" style="font-style:italic">No items yet — add via Process-Only Master tab</span>')
+        : memberNames.join(', ')}</td>
       <td class="text-xs text-muted">${usedByCount ? usedByCount+' component(s)' : 'not yet used'}</td>
       <td style="display:flex;gap:4px;flex-wrap:wrap">
         <button class="btn btn-outline btn-sm" onclick="openProcessGroupModal('${gName.replace(/'/g,"\\'")}')">✏ Edit</button>
@@ -17541,7 +17701,7 @@ function getProcessGroupsAdmin(){
   return `<div class="card">
     <div class="card-header">
       <div><div class="card-title">🏭 Process / Workstation Groups${lockBadge('ADMIN ONLY')}</div>
-      <div class="text-xs text-muted" style="margin-top:2px">Routing references only the group name (e.g. "Beam Saw"). Machine-Based groups ask the operator to pick which active machine did the work; Process-Only groups (e.g. "Assembly") skip machine selection entirely.</div></div>
+      <div class="text-xs text-muted" style="margin-top:2px">Routing references only the group name (e.g. "Beam Saw"). Machine-Based groups ask the operator to pick which active machine did the work; Process-Only groups (e.g. "Assembly") skip machine selection entirely and use dedicated operators from the Process-Only Master tab.</div></div>
       <div style="display:flex;gap:6px">
         <button class="btn btn-outline btn-sm" onclick="migrateRoutingToProcessGroups()">🔀 Migrate Routing to Groups</button>
         <button class="btn btn-primary btn-sm" onclick="openProcessGroupModal(null)">+ Add Group</button>
@@ -17550,7 +17710,7 @@ function getProcessGroupsAdmin(){
     <div class="card-body">
       <div class="alert alert-info mb-3" style="font-size:12px">If a group shows as "used by" components but you expected it to be the old machine-specific name (e.g. "Selco Beam Saw"), your saved routing master hasn't been updated to the new group names yet — click <b>Migrate Routing to Groups</b> above to update it in one step, rather than editing each component by hand.</div>
       <table>
-        <thead><tr><th>Group Name</th><th style="width:140px">Type</th><th>Assigned Machines</th><th>Used In Routing</th><th style="width:170px">Actions</th></tr></thead>
+        <thead><tr><th>Group Name</th><th style="width:140px">Type</th><th>Assigned Machines / Items</th><th>Used In Routing</th><th style="width:170px">Actions</th></tr></thead>
         <tbody>${rows || '<tr><td colspan="5" class="text-sm text-muted" style="padding:14px;text-align:center">No process groups yet. Click + Add Group to create one.</td></tr>'}</tbody>
       </table>
     </div>
@@ -17661,6 +17821,125 @@ function deleteProcessGroup(gName){
   persistAdminConfig('stageToWorkstation');
   persistAdminConfig('routing');
   renderAdmin('processgroups',null);
+}
+
+// ============ PROCESS-ONLY ITEM HANDLERS — Phase 13 ============
+// Item shape: {id, name, group, capacity, operators: [name...], active}
+// Persistence key: 'processOnlyItems' — writes through the same
+// admin_config JSONB storage as every other M.* key. No schema change.
+
+// Ensure the array exists — old accounts that boot up before this key
+// was persisted come back with M.processOnlyItems undefined.
+function ensureProcessOnlyItems(){ if(!Array.isArray(M.processOnlyItems)) M.processOnlyItems = []; }
+
+// Populates the group dropdown with every process-only group in
+// stageToWorkstation (those with a zero-length machine list). Called
+// each time the modal opens so a newly-created process-only group
+// appears without a page refresh.
+function fillProcessOnlyItemGroupDropdown(currentValue){
+  const sel = document.getElementById('poItem_group');
+  const processOnlyGroups = Object.keys(M.stageToWorkstation||{})
+    .filter(g => (M.stageToWorkstation[g]||[]).length===0 && !NON_ROUTING_GROUP_KEYS.includes(g))
+    .sort();
+  if(!processOnlyGroups.length){
+    sel.innerHTML = '<option value="">-- No process-only groups exist yet --</option>';
+    return;
+  }
+  sel.innerHTML = '<option value="">-- Select group --</option>'
+    + processOnlyGroups.map(g => `<option value="${g}" ${g===currentValue?'selected':''}>${g}</option>`).join('');
+}
+
+function openProcessOnlyItemModal(itemId){
+  ensureProcessOnlyItems();
+  const existing = itemId ? M.processOnlyItems.find(x=>x.id===itemId) : null;
+  document.getElementById('poItemModalTitle').textContent = existing ? '⚙️ Edit Process-Only Item' : '⚙️ New Process-Only Item';
+  document.getElementById('poItem_id').value = existing ? existing.id : '';
+  document.getElementById('poItem_name').value = existing ? existing.name : '';
+  document.getElementById('poItem_capacity').value = existing && existing.capacity!=null ? existing.capacity : '';
+  document.getElementById('poItem_active').value = existing && existing.active===false ? 'false' : 'true';
+  document.getElementById('poItem_operators').value = existing && Array.isArray(existing.operators) ? existing.operators.join(', ') : '';
+  fillProcessOnlyItemGroupDropdown(existing ? existing.group : '');
+  document.getElementById('processOnlyItemModal').classList.add('open');
+}
+
+function saveProcessOnlyItemModal(){
+  ensureProcessOnlyItems();
+  const id = document.getElementById('poItem_id').value;
+  const name = document.getElementById('poItem_name').value.trim();
+  const group = document.getElementById('poItem_group').value;
+  const capacityRaw = document.getElementById('poItem_capacity').value.trim();
+  const active = document.getElementById('poItem_active').value === 'true';
+  const operatorsRaw = document.getElementById('poItem_operators').value.trim();
+  if(!name){ toast('Item name is required.','⚠'); return; }
+  if(!group){ toast('Pick a process-only group. Create one in the Groups tab first if the dropdown is empty.','⚠'); return; }
+  const operators = operatorsRaw ? operatorsRaw.split(',').map(s=>s.trim()).filter(Boolean) : [];
+  if(!operators.length){ toast('At least one operator is required — enter comma-separated names.','⚠'); return; }
+  const capacity = capacityRaw === '' ? null : Math.max(0, parseInt(capacityRaw)||0);
+  // Duplicate-name-within-group guard — prevents "Handover" twice under HOTO
+  const dupe = M.processOnlyItems.find(x => x.group===group && x.name.trim().toLowerCase()===name.toLowerCase() && x.id!==id);
+  if(dupe){ toast('An item named "'+name+'" already exists under "'+group+'". Pick a different name.','⚠'); return; }
+  if(id){
+    const idx = M.processOnlyItems.findIndex(x=>x.id===id);
+    if(idx<0){ toast('Item not found — reopen the modal.','⚠'); return; }
+    M.processOnlyItems[idx] = { ...M.processOnlyItems[idx], name, group, capacity, operators, active };
+  } else {
+    const newId = 'po-'+Date.now().toString().slice(-8)+'-'+Math.floor(Math.random()*1000);
+    M.processOnlyItems.push({ id:newId, name, group, capacity, operators, active });
+  }
+  // Auto-sync: if the group doesn't have a stageToWorkstation entry yet
+  // (shouldn't happen since the dropdown only offers existing groups,
+  // but defensive), create one as empty array (process-only marker).
+  if(!(group in (M.stageToWorkstation||{}))){
+    M.stageToWorkstation[group] = [];
+    persistAdminConfig('stageToWorkstation');
+  }
+  const ts=new Date().toISOString().replace('T',' ').slice(0,16);
+  DB.auditLog.unshift({ts,user:'Admin',action:id?'Update':'Create',module:'Process-Only Master',entity:name,
+    field:'Item ('+group+')',old:'',nw:name+' — operators: '+operators.join(', ')+(capacity!=null?' — capacity: '+capacity:''),ip:'192.168.1.1'});
+  persistAdminConfig('processOnlyItems');
+  closeMod('processOnlyItemModal');
+  toast('Process-only item "'+name+'" saved under "'+group+'".','✓');
+  renderAdmin('processgroups', null);
+}
+
+function deleteProcessOnlyItem(itemId){
+  ensureProcessOnlyItems();
+  const it = M.processOnlyItems.find(x=>x.id===itemId);
+  if(!it) return;
+  const group = it.group;
+  const otherItemsInGroup = M.processOnlyItems.filter(x=>x.group===group && x.id!==itemId);
+  const isLastInGroup = otherItemsInGroup.length === 0;
+  const gNameNorm = group.trim().toLowerCase();
+  const usedByComponents = Object.entries(M.componentRouting||{}).filter(([,route])=>route.some(step=>String(step||'').trim().toLowerCase()===gNameNorm)).map(([comp])=>comp);
+  let msg = 'Delete process-only item "'+it.name+'" from group "'+group+'"?';
+  if(isLastInGroup){
+    if(usedByComponents.length){
+      msg += '\n\n⚠ This is the LAST item in group "'+group+'", and the group is referenced in routing for: '+usedByComponents.join(', ')+'.\n\nDeleting this item alone will NOT delete the group (it stays as an empty process-only group so routing keeps working). Delete the group separately from the Groups tab once you\'ve updated the routing.';
+    } else {
+      msg += '\n\n⚙️ This is the LAST item in group "'+group+'". Since the group isn\'t used in any routing, it will be removed along with this item.';
+    }
+  }
+  if(!confirm(msg+'\n\nContinue?')) return;
+  M.processOnlyItems = M.processOnlyItems.filter(x=>x.id!==itemId);
+  persistAdminConfig('processOnlyItems');
+  const ts=new Date().toISOString().replace('T',' ').slice(0,16);
+  DB.auditLog.unshift({ts,user:'Admin',action:'Delete',module:'Process-Only Master',entity:it.name,
+    field:'Item ('+group+')',old:it.name,nw:'Deleted',ip:'192.168.1.1'});
+  // Cascade group removal per user's answer B: if the last item under a
+  // process-only group is deleted AND the group isn't used in routing,
+  // drop the group entry too. When it IS used in routing, keep the empty
+  // group so existing routings don't silently fail — admin must delete
+  // via the Groups tab explicitly.
+  if(isLastInGroup && !usedByComponents.length && (M.stageToWorkstation[group]||[]).length===0){
+    delete M.stageToWorkstation[group];
+    M.routing = (M.routing||[]).filter(r=>r!==group);
+    persistAdminConfig('stageToWorkstation');
+    persistAdminConfig('routing');
+    toast('Item deleted and empty group "'+group+'" removed.','✓');
+  } else {
+    toast('Item deleted.','✓');
+  }
+  renderAdmin('processgroups', null);
 }
 
 // One-click migration: rewrites every existing componentRouting entry that

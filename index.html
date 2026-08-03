@@ -7682,7 +7682,7 @@ function makeSegBOMEditRow(b, seg, projectId){
     +'<td><input type="number" class="form-input dim-input" style="height:27px;width:58px" id="e_bom_t_wood_'+safeId+'" value="'+(b.t||'')+'"></td>'
     +'<td class="bom-col-uom"><select class="form-select" style="height:27px;width:55px" id="e_bom_uom_wood_'+safeId+'">'+uomOpts+'</select></td>'
     +'<td><input type="number" class="form-input" style="height:27px;width:52px" id="e_bom_qty_wood_'+safeId+'" value="'+b.qty+'" min="1"></td>'
-    +'<td><input type="number" class="form-input" style="height:27px;width:52px;background:#ede9fe;color:#7c3aed;font-weight:700" id="e_bom_boards_'+safeId+'" value="'+(b.boardQty||'')+'" min="1" placeholder="Auto"></td>'
+    +'<td><input type="number" class="form-input" style="height:27px;width:52px;background:#ede9fe;color:#7c3aed;font-weight:700" id="e_bom_boards_'+safeId+'" value="'+((b.boardQty===0||b.boardQty)?b.boardQty:'')+'" min="0" placeholder="Auto" title="Boards Planned — leave blank for auto, or enter 0 to link this component to a previous shared board"></td>'
     +'<td><input type="text" class="form-input" style="height:27px;width:100px" id="e_bom_finish_wood_'+safeId+'" value="'+(b.colorFinish||'').replace(/"/g,'&quot;')+'"></td>'
     +'<td><input type="text" class="form-input" style="height:27px;width:130px" id="e_bom_specials_wood_'+safeId+'" value="'+specialCharsStr.replace(/"/g,'&quot;')+'" placeholder="comma-separated" title="Comma-separated special characteristics"></td>'
     +'<td class="bom-col-route"><div style="min-width:200px">'+routeDisplay+'</div></td>'
@@ -7874,7 +7874,7 @@ function makeSegBOMRow(i, seg){
     +'<td><input type="number" class="form-input dim-input" style="height:27px;width:58px" placeholder="T"></td>'
     +'<td class="bom-col-uom"><select class="form-select" style="height:27px;width:55px"><option>PC</option><option>SET</option><option>NOS</option></select></td>'
     +'<td title="Total COMPONENTS to manufacture (BOM quantity)"><input type="number" class="form-input" style="height:27px;width:52px" value="1" min="1"></td>'
-    +'<td title="Boards Planned for Hot Press / Beam Saw. Auto = Qty if blank."><input type="number" class="form-input" style="height:27px;width:52px;background:#ede9fe;color:#7c3aed;font-weight:700" min="1" placeholder="Auto"></td>'
+    +'<td title="Boards Planned for Hot Press / Beam Saw. Auto = Qty if blank. Enter 0 to share the board with a previous line (shared-board optimization)."><input type="number" class="form-input" style="height:27px;width:52px;background:#ede9fe;color:#7c3aed;font-weight:700" min="0" placeholder="Auto"></td>'
     +'<td><input type="text" class="form-input" id="bom_finish_wood_'+i+'" style="height:27px;width:100px" placeholder="e.g. Walnut, White"></td>'
     +'<td><div class="ms-dropdown" id="ms_wood_'+i+'"><button type="button" class="ms-toggle" id="ms_toggle_wood_'+i+'" onclick="toggleMsPanel(\'wood\','+i+')"><span class="ms-toggle-text ms-placeholder" id="ms_text_wood_'+i+'">Select...</span><span class="ms-caret">▾</span></button><div class="ms-panel" id="ms_panel_wood_'+i+'">'+msOptionsHTML('wood',i)+'</div></div></td>'
     +'<td class="bom-col-route"><div id="bom_route_wood_'+i+'" style="min-width:200px"><div style="font-size:11px;color:var(--text-muted);font-style:italic">Select component for routing</div></div></td>'
@@ -8354,9 +8354,15 @@ function collectSegBOM(seg){
       const uom=td[6].querySelector('select')?.value||'PC';
       const qty=parseInt(td[7].querySelector('input')?.value)||1;
       // Boards Planned is now td[8] (was td[7] before Description column was added at td[2])
+      // Empty input → auto-calculate 1 board per 8 components. Explicit "0" is legal
+      // and means "this component shares its board with an earlier line" (positional
+      // shared-board cascade — see Phase 12). Only fall back to auto when the input
+      // is truly empty; treating 0 as falsy would silently override the user's choice.
       const brdInput = td[8]?.querySelector('input');
-      const brd = brdInput ? (parseInt(brdInput.value)||0) : 0;
-      const boardQty = brd || Math.ceil(qty/8); // default: 1 board per 8 components
+      const brdRaw = brdInput ? String(brdInput.value||'').trim() : '';
+      const brdIsExplicit = brdRaw !== '';
+      const brd = brdIsExplicit ? Math.max(0, parseInt(brdRaw)||0) : NaN;
+      const boardQty = brdIsExplicit ? brd : Math.ceil(qty/8);
       const colorFinish=td[9]?.querySelector('input')?.value.trim()||'';
       const specialChars=Array.from(td[10]?.querySelectorAll('.char-option:checked')||[]).map(o=>o.value);
       bom.push({item,description,l,w,t,uom,qty,done:0,seg:'wood',componentsPerBoard:8,edgeMetersPerComp:5,boardQty,componentsReleased:0,colorFinish,specialChars});
@@ -8608,8 +8614,10 @@ function eligibleInputQty(b, stageName){
   ensureBomLineStructure(b);
   const idx = b.route.indexOf(stageName);
   if(isBoardStage(stageName)){
-    // Board stages work against boardQty (planned boards), not component qty
-    const boardQty = b.boardQty || Math.ceil(b.qty / Math.max(1,b.componentsPerBoard||8));
+    // Board stages work against boardQty (planned boards), not component qty.
+    // Use ?? not || so an explicit boardQty of 0 (shared-board line) yields
+    // 0 eligible boards — the operator can't process what isn't there.
+    const boardQty = b.boardQty ?? Math.ceil(b.qty / Math.max(1,b.componentsPerBoard||8));
     if(idx <= 0) return boardQty; // Hot Press: full board qty available
     // Subsequent board stages: boards approved at previous board stage
     const prevStage = b.route[idx-1];
@@ -8710,11 +8718,21 @@ function pendingQty(b, stageName){
   return Math.max(0, elig - sd.completed);
 }
 
-// After Beam Saw QC clears N boards, convert to components and release downstream
-function applyBoardToComponentConversion(b, sawStageName, boardsApproved){
-  const boardQty = b.boardQty || 1;
+// After Beam Saw QC clears N boards, convert to components and release downstream.
+// Also cascades to any consecutive same-segment BOM lines with boardQty=0
+// following this one — the "shared board" workflow where one physical board
+// yields multiple components. Server does the same cascade inside its QC
+// transaction (productionEngine.js), so this frontend mirror keeps the UI in
+// sync immediately without waiting for a refresh; on refresh the server's
+// canonical state matches.
+function applyBoardToComponentConversion(p, b, sawStageName, boardsApproved){
+  // Use ?? not || so an explicit boardQty of 0 stays 0 (this line is a
+  // "linked" line that shares its board with an earlier owner — the
+  // conversion path is a no-op for a linked line and it should never
+  // be called with b having boardQty=0 in the first place, but the
+  // defensive coalesce keeps behavior sane).
+  const boardQty = b.boardQty ?? 1;
   const compQty  = b.qty || 1;
-  // Conversion ratio: components per board
   const ratio = compQty / boardQty;
   const newComponents = Math.round(boardsApproved * ratio);
   b.componentsReleased = (b.componentsReleased||0) + newComponents;
@@ -8723,6 +8741,38 @@ function applyBoardToComponentConversion(b, sawStageName, boardsApproved){
     ws:'CONVERSION',operator:'Auto',qty:boardsApproved,
     action:'Conversion: '+boardsApproved+' boards approved → '+newComponents+' components released for downstream (ratio '+ratio.toFixed(2)+')'
   });
+  // Positional shared-board cascade — Phase 12. Walk forward through same-
+  // segment BOM lines; while the next line has boardQty === 0, release its
+  // components proportionally. Stops at the next line with boardQty > 0
+  // (which is the next owner) or at end of segment.
+  if(p && Array.isArray(p.bom)){
+    const segLines = p.bom.filter(x => x.seg === b.seg);
+    const idx = segLines.findIndex(x => x.lineId === b.lineId);
+    if(idx >= 0){
+      const ownerBoardQty = b.boardQty ?? 1;
+      for(let i = idx + 1; i < segLines.length; i++){
+        const sibling = segLines[i];
+        if((sibling.boardQty ?? 1) !== 0) break;
+        const siblingCompQty = sibling.qty || 1;
+        const cascadeQty = boardsApproved >= ownerBoardQty
+          ? siblingCompQty
+          : Math.floor(siblingCompQty * (boardsApproved / ownerBoardQty));
+        if(cascadeQty <= 0) continue;
+        sibling.componentsReleased = (sibling.componentsReleased||0) + cascadeQty;
+        // Log cascade on the sibling's Beam Saw stage if it exists, else
+        // on its first stage — matches the server's targeting logic.
+        const sawStage = (sibling.route||[]).find(s => isSawStage(s));
+        const targetStage = sawStage || (sibling.route||[])[0];
+        if(targetStage && sibling.stageData[targetStage]){
+          sibling.stageData[targetStage].history.push({
+            ts: new Date().toISOString().replace('T',' ').slice(0,16),
+            ws:'CASCADE', operator:'Auto', qty: cascadeQty,
+            action: 'Cascade: shared board from '+b.item+' ('+b.lineId+') → '+cascadeQty+' components released downstream'
+          });
+        }
+      }
+    }
+  }
 }
 
 // ------ AUTOMATIC REWORK/REJECTION LOGIC ------
@@ -8927,7 +8977,7 @@ function selectComponentStage(stageName){
 function renderComponentTrace(){
   const b=CUR_BOM_LINE; if(!b) return;
   ensureBomLineStructure(b);
-  const boardQty=b.boardQty||Math.ceil(b.qty/Math.max(1,b.componentsPerBoard||8));
+  const boardQty=b.boardQty ?? Math.ceil(b.qty/Math.max(1,b.componentsPerBoard||8));
   document.getElementById('compTraceTable').innerHTML = b.route.map((st,i)=>{
     const sd=b.stageData[st];
     const elig=eligibleInputQty(b,st);
@@ -9441,7 +9491,7 @@ function renderStageEntryForm(){
   const isBoard=isBoardStage(st);
   const isSaw=isSawStage(st);
   const unit=stageUnit(b,st);
-  const boardQty=b.boardQty||Math.ceil(b.qty/Math.max(1,b.componentsPerBoard||8));
+  const boardQty=b.boardQty ?? Math.ceil(b.qty/Math.max(1,b.componentsPerBoard||8));
   const elig=eligibleInputQty(b,st);
   const pend=pendingQty(b,st);
   const wsIds = M.stageToWorkstation[st] || [];
@@ -9957,9 +10007,11 @@ function processQcDecision(p, b, stageName, approveQty, rejectQty, disposition, 
   sd.qcApproved += approveQty;
 
   // BOARD→COMPONENT CONVERSION: if this is a Beam Saw stage and boards are approved,
-  // automatically convert to components and release them for downstream stages
+  // automatically convert to components and release them for downstream stages.
+  // Passing p so the conversion can walk sibling BOM lines and cascade the
+  // release to any consecutive board=0 lines (positional shared-board workflow).
   if(isSawStage(stageName) && approveQty > 0){
-    applyBoardToComponentConversion(b, stageName, approveQty);
+    applyBoardToComponentConversion(p, b, stageName, approveQty);
   }
   if(rejectQty>0){
     sd.qcRejected += rejectQty;
@@ -10404,7 +10456,7 @@ function buildFutureSchedule(shiftHours){
     const planStart = projectPlanStartDate(p);
     (p.bom||[]).forEach(b=>{
       ensureBomLineStructure(b);
-      const boardQty = b.boardQty || Math.ceil((b.qty||1)/Math.max(1,b.componentsPerBoard||8));
+      const boardQty = b.boardQty ?? Math.ceil((b.qty||1)/Math.max(1,b.componentsPerBoard||8));
       b.route.forEach((step, stepIdx)=>{
         const wsIds = M.stageToWorkstation[step]||[];
         if(!wsIds.length) return;
@@ -10522,7 +10574,7 @@ function buildMachineSchedule(){
         if(!wsIds.length) return;
         const isBoard = isBoardStage(step);
         const schedQty = isBoard
-          ? Math.max(0,(b.boardQty||Math.ceil(b.qty/Math.max(1,b.componentsPerBoard||8)))-sd.completed)
+          ? Math.max(0,(b.boardQty ?? Math.ceil(b.qty/Math.max(1,b.componentsPerBoard||8)))-sd.completed)
           : Math.max(0,eligibleInputQty(b,step)-sd.completed);
         if(schedQty<=0) return;
         const cyclePerUnit=(M.componentCycleTime[b.item]||{})[step];
@@ -12296,8 +12348,11 @@ function buildConversionPlan(projFilter){
       // Board/component quantities from the definitive BOM fields
       const cpb = b.componentsPerBoard || 8;
       const empComp = b.edgeMetersPerComp || 5;
-      // boardQty = explicitly set boards planned, or derived from component qty / cpb
-      const rawBoards = b.boardQty || Math.max(1, Math.ceil(qty/cpb));
+      // boardQty = explicitly set boards planned, or derived from component qty / cpb.
+      // Use ?? not || so a shared-board line (boardQty=0) contributes 0 boards to
+      // the report total — matches the physical reality that only owner lines
+      // actually consume boards.
+      const rawBoards = b.boardQty ?? Math.max(1, Math.ceil(qty/cpb));
       const componentQty = qty; // BOM qty IS the component quantity
       const edgeMeters = componentQty * empComp;
 

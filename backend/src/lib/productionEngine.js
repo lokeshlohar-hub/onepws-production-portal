@@ -321,7 +321,7 @@ async function processQcDecision(lineId, { stageName, approveQty, rejectQty, dis
 
 // Operator submits a completed quantity at a stage — moves it from "pending"
 // into "awaiting QC" (qc_queue). Mirrors the frontend's submitStageEntry().
-async function submitStageEntry(lineId, { stageName, qty, operator, shift, remark, assBatchNos, adhesiveBatchNo, adhesiveExpiryDate }) {
+async function submitStageEntry(lineId, { stageName, qty, operator, shift, remark, assBatchNos, adhesiveBatchNo, adhesiveExpiryDate, roomTemperature }) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -350,6 +350,15 @@ async function submitStageEntry(lineId, { stageName, qty, operator, shift, remar
     if (Array.isArray(assBatchNos) && assBatchNos.length) historyEntry.assBatchNos = assBatchNos;
     if (adhesiveBatchNo) historyEntry.adhesiveBatchNo = adhesiveBatchNo;
     if (adhesiveExpiryDate) historyEntry.adhesiveExpiryDate = adhesiveExpiryDate;
+    // Room Temperature (°C) — optional Fabrication-stage traceability field.
+    // Stored on the history entry alongside adhesive batch/expiry so future
+    // audits can correlate curing conditions with adhesive lot. Number-typed
+    // check so an empty string, 0, and NaN behave sensibly: 0 is a legal
+    // value (unlikely at Fabrication but valid), '' means "not entered".
+    if (roomTemperature !== undefined && roomTemperature !== null && roomTemperature !== '') {
+      const n = Number(roomTemperature);
+      if (Number.isFinite(n)) historyEntry.roomTemperature = n;
+    }
     sd.history.push(historyEntry);
 
     await client.query('UPDATE bom_lines SET stage_data = $1 WHERE line_id = $2', [JSON.stringify(line.stage_data), lineId]);

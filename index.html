@@ -9429,7 +9429,7 @@ function renderComponentHistory(){
       : h.shift==='day'||h.action?.includes('Completed')
         ? '<span class="shift-badge-day">☀️ Day</span>'
         : '';
-    const hasTrace = (h.assBatchNos&&h.assBatchNos.length) || h.adhesiveBatchNo || h.adhesiveExpiryDate;
+    const hasTrace = (h.assBatchNos&&h.assBatchNos.length) || h.adhesiveBatchNo || h.adhesiveExpiryDate || h.roomTemperature !== undefined;
     return '<tr><td class="log-td">'+h.ts+'</td><td class="fw-600">'+h.stage+'</td><td class="text-xs text-muted">'+(h.ws||'—')+'</td>'
       +'<td style="color:var(--accent);font-weight:600">'+(h.operator||'—')+'</td>'
       +'<td class="font-mono">'+(h.qty!=null?h.qty:'—')+'</td>'
@@ -9463,6 +9463,12 @@ function viewTraceabilityAt(varName, idx){
   }
   if(h.adhesiveExpiryDate){
     lines.push('<div class="text-muted">Adhesive Expiry Date</div><div class="fw-600">'+dateOnly(h.adhesiveExpiryDate)+'</div>');
+  }
+  // Room Temperature (°C) — check explicitly for !== undefined (not truthy)
+  // so a legitimate 0 °C reading isn't dropped from the display. Value is
+  // already Number-typed at storage time so we can format it directly.
+  if(h.roomTemperature !== undefined && h.roomTemperature !== null){
+    lines.push('<div class="text-muted">Room Temperature</div><div class="fw-600">'+h.roomTemperature+' &deg;C</div>');
   }
   document.getElementById('traceabilityDetailBody').innerHTML = '<div style="display:grid;grid-template-columns:180px 1fr;row-gap:8px">'+lines.join('')+'</div>';
   document.getElementById('traceabilityDetailModal').classList.add('open');
@@ -9604,6 +9610,7 @@ function renderStageEntryForm(){
   const adhesiveBlock = stageWantsAdhesive(st)
     ? '<div class="form-row"><div class="form-group"><label class="form-label">Adhesive Physical Batch No. <span class="text-xs text-muted">(optional)</span></label><input type="text" class="form-input" id="ce_adhesive_batch" placeholder="Adhesive batch number"></div>'
       + '<div class="form-group"><label class="form-label">Adhesive Expiry Date <span class="text-xs text-muted">(optional)</span></label><input type="date" class="form-input" id="ce_adhesive_expiry"></div></div>'
+      + '<div class="form-row"><div class="form-group"><label class="form-label">Room Temperature <span class="text-xs text-muted">(°C, optional)</span></label><input type="number" step="0.1" min="-40" max="80" class="form-input" id="ce_room_temp" placeholder="e.g. 24.5" title="Room temperature at time of Fabrication — affects adhesive curing. Optional traceability field."></div></div>'
     : '';
 
   document.getElementById('stageEntryFormBody').innerHTML=ctxBanner+shiftSelector+shiftSummary
@@ -9693,6 +9700,10 @@ async function submitStageEntry(btn){
   const assBatchNos = stageWantsAssBatch(st) ? _stageEntryAssBatches.slice() : undefined;
   const adhesiveBatchNo = stageWantsAdhesive(st) ? (document.getElementById('ce_adhesive_batch')?.value.trim()||'') : '';
   const adhesiveExpiryDate = stageWantsAdhesive(st) ? (document.getElementById('ce_adhesive_expiry')?.value||'') : '';
+  // Room Temperature (°C) — optional Fabrication-stage traceability. Read
+  // as a string; the server parses to Number if non-empty and finite,
+  // ignores blank/invalid, so passing '' here is safe.
+  const roomTemperature = stageWantsAdhesive(st) ? (document.getElementById('ce_room_temp')?.value||'') : '';
 
   if(!operator){toast('Please select the operator who performed this work.','⚠');return;}
   if(!qty||qty<=0){toast('Enter a valid completed quantity.','⚠');return;}
@@ -9703,7 +9714,7 @@ async function submitStageEntry(btn){
   const originalBtnText = btn ? btn.textContent : '';
   if(btn){ btn.disabled=true; btn.textContent='Saving to server…'; }
   try{
-    await apiSubmitStageEntry(b.lineId, { stage:st, qty, operator, shift, remark, assBatchNos, adhesiveBatchNo, adhesiveExpiryDate });
+    await apiSubmitStageEntry(b.lineId, { stage:st, qty, operator, shift, remark, assBatchNos, adhesiveBatchNo, adhesiveExpiryDate, roomTemperature });
   } catch(err){
     toast('Could not save this entry to the server: '+err.message,'⚠');
     if(btn){ btn.disabled=false; btn.textContent=originalBtnText||'✓ Submit to QC Queue'; }
@@ -9729,6 +9740,14 @@ async function submitStageEntry(btn){
   if(assBatchNos && assBatchNos.length) historyEntry.assBatchNos = assBatchNos;
   if(adhesiveBatchNo) historyEntry.adhesiveBatchNo = adhesiveBatchNo;
   if(adhesiveExpiryDate) historyEntry.adhesiveExpiryDate = adhesiveExpiryDate;
+  // Room Temperature (°C) — parse to Number so downstream display / audit
+  // trail don't have to worry about string vs number. Mirrors the server's
+  // productionEngine.submitStageEntry logic exactly so local and server
+  // history entries look identical after refresh.
+  if(roomTemperature !== '' && roomTemperature !== null && roomTemperature !== undefined){
+    const n = Number(roomTemperature);
+    if(Number.isFinite(n)) historyEntry.roomTemperature = n;
+  }
   sd.history.push(historyEntry);
 
   // Shift log — global record for analytics

@@ -285,10 +285,39 @@ router.put('/:id', requireRole('admin', 'superadmin'), async (req, res) => {
   }
 });
 
-// DELETE /api/dms-documents/:id — permanent deletion. No soft-delete
-// for now; audit trail entries elsewhere still reference doc_no for
+// DELETE /api/dms-documents/:id — permanent deletion. Permission model:
+// superadmin can delete any document; admin can only delete documents
+// whose dept matches their own department (so a Maintenance admin can
+// delete Maintenance docs but not Production docs). Any other role gets
+// a 403 up-front. This mirrors the "each department admin manages their
+// department's documents" workflow — a Production admin managing a
+// Maintenance SOP would be an authority mismatch. No soft-delete for
+// now; audit trail entries elsewhere still reference doc_no for
 // compliance history if needed.
-router.delete('/:id', requireRole('admin', 'superadmin'), async (req, res) => {
+router.delete('/:id', async (req, res) => {
+  const u = req.user;
+  if (!u) return res.status(401).json({ error: 'not authenticated' });
+  const isSuperadmin = u.role === 'superadmin';
+  const isAdmin = u.role === 'admin';
+  if (!isSuperadmin && !isAdmin) {
+    return res.status(403).json({ error: 'Only admins can delete documents' });
+  }
+  // For non-superadmin, look up the doc's dept and enforce the match
+  // before deleting. Kept as a single SELECT + DELETE round-trip rather
+  // than DELETE...RETURNING with a guard because we want a clear "not
+  // found" (404) vs "wrong department" (403) distinction in the error.
+  const { rows: existing } = await pool.query(
+    'SELECT dept FROM dms_documents WHERE id = $1',
+    [req.params.id]
+  );
+  if (!existing[0]) return res.status(404).json({ error: 'Document not found' });
+  if (!isSuperadmin) {
+    if (!u.department || u.department !== existing[0].dept) {
+      return res.status(403).json({
+        error: 'You can only delete documents in your own department (' + (u.department || '—') + '). This document belongs to: ' + (existing[0].dept || '—'),
+      });
+    }
+  }
   const { rowCount } = await pool.query('DELETE FROM dms_documents WHERE id = $1', [req.params.id]);
   if (!rowCount) return res.status(404).json({ error: 'Document not found' });
   res.json({ ok: true, id: req.params.id });

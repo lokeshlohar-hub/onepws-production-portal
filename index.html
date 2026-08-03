@@ -19930,6 +19930,58 @@ function dmsIsAdmin(){
   return true; // Admin always has full access in this demo
 }
 
+// Delete permission — mirrors the backend's DELETE gate exactly, so a
+// button we show is a button that will actually work when clicked. Master
+// Admin (superadmin) can delete any document; department admins can only
+// delete documents whose dept matches their department (a Maintenance admin
+// deleting a Production SOP would be an authority mismatch). Returns false
+// for viewer / operator roles and any other unrecognized role — the button
+// won't render in the row for them.
+function canDeleteDmsDocument(d){
+  if(!CURRENT_USER || !d) return false;
+  if(CURRENT_USER.role === 'superadmin') return true;
+  if(CURRENT_USER.role !== 'admin') return false;
+  return !!(CURRENT_USER.department && d.dept && CURRENT_USER.department === d.dept);
+}
+
+// Confirm + call /api/dms-documents/:id DELETE, then update local state
+// and audit trail. The server does its own permission re-check on every
+// call, so a stale UI or someone poking at the API directly can't skip
+// the department gate — the button just optimizes for showing the delete
+// option only when it will actually succeed.
+async function deleteDmsDocument(docId){
+  const d = DB.dmsDocuments.find(x=>x.id===docId);
+  if(!d){ toast('Document not found.','⚠'); return; }
+  if(!canDeleteDmsDocument(d)){
+    // Should be unreachable — button doesn't render — but defensive check
+    // in case someone pastes into the console or the UI gets stale.
+    toast('You do not have permission to delete this document.','⚠');
+    return;
+  }
+  const proceed = confirm(
+    'Delete document "' + d.name + '" ('+ (d.docNo||d.id) + ')?\n\n'+
+    'Department: ' + (d.dept||'—') + '\n'+
+    'This is permanent — the document, its revision history, and its access log will be removed. This is recorded in the Audit Trail.'
+  );
+  if(!proceed) return;
+  try{
+    await apiDeleteDmsDocument(docId);
+    DB.dmsDocuments = DB.dmsDocuments.filter(x=>x.id!==docId);
+    const ts = new Date().toISOString().replace('T',' ').slice(0,16);
+    const actor = CURRENT_USER ? (CURRENT_USER.fullName||CURRENT_USER.username||'Admin') : 'Admin';
+    DB.auditLog.unshift({ts, user:actor, action:'Delete', module:'DMS',
+      entity:d.docNo||d.id, field:'Document', old:d.name+' | '+(d.dept||'—')+' | '+(d.category||'—'),
+      nw:'(deleted)', ip:'192.168.1.1'});
+    toast('✓ Document "'+d.name+'" deleted and recorded in the Audit Trail.','✓');
+    renderDmsFolderTree(); renderDmsKPIs(); renderDmsList();
+  } catch(err){
+    // The server re-checks the department gate; if the caller's role changed
+    // between page-load and now (e.g. they were demoted in another tab), the
+    // 403 surfaces here with the server's exact error text.
+    toast('Delete failed: '+err.message,'⚠');
+  }
+}
+
 function fillDmsDeptSelects(){
   // Populate both the upload form select and the filter dropdown from M.dmsDepts
   const opts = M.dmsDepts.map(d=>`<option value="${d.name}">${d.icon} ${d.name}</option>`).join('');
@@ -20110,9 +20162,10 @@ function renderDmsList(){
       <div class="text-xs text-muted">${latestRev.revDate}</div>
       <div>${dmsStatusBadge(d.status)}</div>
       <div style="display:flex;gap:4px" onclick="event.stopPropagation()">
-        <button class="btn btn-outline btn-sm" onclick="openDmsDetail('${d.id}')">View</button>
-        <button class="btn btn-success btn-sm" onclick="simulateDownload('${d.id}')">⬇</button>
-        ${isAdmin?`<button class="btn btn-sm" style="background:var(--accent-light);color:var(--accent);border:1px solid #bfdbfe" onclick="openDmsEdit('${d.id}')">✏</button>`:''}
+        <button class="btn btn-outline btn-sm" onclick="openDmsDetail('${d.id}')" title="View complete document details">View</button>
+        <button class="btn btn-success btn-sm" onclick="simulateDownload('${d.id}')" title="Download this document">⬇</button>
+        ${isAdmin?`<button class="btn btn-sm" style="background:var(--accent-light);color:var(--accent);border:1px solid #bfdbfe" onclick="openDmsEdit('${d.id}')" title="Upload a new revision of this document">✏</button>`:''}
+        ${canDeleteDmsDocument(d)?`<button class="btn btn-danger btn-sm" onclick="deleteDmsDocument('${d.id}')" title="Delete this document (${d.dept} — ${d.name})">🗑</button>`:''}
       </div>
     </div>`;
   }).join('');
@@ -20642,6 +20695,72 @@ function exportDCI(){
   a.download='ONEPWS_DCI_'+new Date().toISOString().split('T')[0]+'.csv';a.click();
   toast('Document Control Index exported as CSV.','📥');
 }
+
+// Global icon-tooltip bootstrap — auto-adds native `title` attributes to
+// icon-only buttons/anchors so hovering surfaces a plain-English label
+// without the user needing to guess what the emoji or symbol means. Set
+// only when the element's visible text content is exactly one of the
+// known icons AND there isn't already an explicit title (any hand-set
+// title always wins). A MutationObserver reruns the sweep for any
+// subtree inserted after load, which matters because most of the app's
+// buttons are built dynamically by render functions that fire long
+// after DOMContentLoaded — a one-shot on-load walk would miss almost
+// all of them.
+(function initIconTooltips(){
+  const ICON_TITLES = {
+    '🗑': 'Delete',
+    '✏': 'Edit',
+    '👁': 'View details',
+    '📄': 'Export as PDF',
+    '📧': 'Send email',
+    '📷': 'Capture photo',
+    '📎': 'Attach file',
+    '🔔': 'View notifications',
+    '⚙': 'Settings',
+    '🔒': 'Admin-only',
+    '⬇': 'Download',
+    '📥': 'Export / download',
+    '📤': 'Upload',
+    '➕': 'Add new',
+    '❌': 'Close',
+    '×':  'Close',
+    '🔍': 'Search',
+    '🖨': 'Print',
+    '💾': 'Save',
+    '↻':  'Refresh',
+    '⚠': 'Warning',
+    'ℹ': 'Info',
+  };
+  function applyTooltip(el){
+    if(!el || el.hasAttribute('title')) return;
+    // Strip Unicode variation selectors (U+FE0F etc.) that some emoji
+    // fonts append so the key lookup matches the map's plain-icon keys.
+    const txt = (el.textContent || '').replace(/[\uFE00-\uFE0F]/g,'').trim();
+    if(txt && ICON_TITLES[txt]){
+      el.setAttribute('title', ICON_TITLES[txt]);
+    }
+  }
+  function scan(root){
+    if(!root || !root.querySelectorAll) return;
+    root.querySelectorAll('button, .modal-close, .btn, a').forEach(applyTooltip);
+  }
+  if(document.readyState !== 'loading'){
+    scan(document.body || document.documentElement);
+  } else {
+    document.addEventListener('DOMContentLoaded', ()=>scan(document.body), {once:true});
+  }
+  const observer = new MutationObserver(mutations => {
+    for(const m of mutations){
+      for(const n of m.addedNodes){
+        if(n.nodeType === 1) scan(n); // 1 = ELEMENT_NODE
+      }
+    }
+  });
+  const target = document.body || document.documentElement;
+  if(target){
+    observer.observe(target, {childList:true, subtree:true});
+  }
+})();
 
 window.addEventListener('DOMContentLoaded',()=>{
   buildFY();fillMasterSelects();

@@ -8518,9 +8518,41 @@ const ASS_BATCH_STAGE_NAMES = new Set(['beam saw','cnc','cutting','cnc machining
 // Stage where the optional Adhesive Physical Batch No. / Adhesive Expiry
 // Date traceability fields apply.
 const ADHESIVE_STAGE_NAMES = new Set(['a.s.s. fabrication']);
+// Stage where the mandatory Material Finish dropdown applies. Multiple
+// spellings covered so a Process Groups admin rename (final polishing vs
+// final polish vs the A.S.S.-prefixed variants) doesn't silently break
+// the traceability field. If they rename to something outside this set,
+// add the new name here — server-side mirror in productionEngine.js.
+const FINISH_STAGE_NAMES = new Set(['a.s.s. final polishing', 'a.s.s. final polish', 'final polishing', 'final polish']);
+// Fixed options for Material Finish. Same three server-side (whitelisted
+// in productionEngine.js) so a direct API call can't smuggle in free text.
+const MATERIAL_FINISH_OPTIONS = ['Matte', 'Semi Gloss', 'Gloss'];
 
 function stageWantsAssBatch(st){ return ASS_BATCH_STAGE_NAMES.has(String(st||'').trim().toLowerCase()); }
 function stageWantsAdhesive(st){ return ADHESIVE_STAGE_NAMES.has(String(st||'').trim().toLowerCase()); }
+function stageWantsFinish(st){ return FINISH_STAGE_NAMES.has(String(st||'').trim().toLowerCase()); }
+
+// Returns the most recently recorded Material Finish for this component
+// by walking every history entry across every Final-Polishing-eligible
+// stage and returning the last one carrying a materialFinish. Used by the
+// Route Card and Handover Notification renders — those show a single
+// definitive finish per component rather than a per-entry list.
+function getLatestMaterialFinish(b){
+  if(!b || !b.stageData) return '';
+  let latest = '';
+  let latestTs = '';
+  for(const stage of Object.keys(b.stageData)){
+    if(!stageWantsFinish(stage)) continue;
+    const history = b.stageData[stage].history || [];
+    for(const h of history){
+      if(h.materialFinish && (!latestTs || (h.ts||'') > latestTs)){
+        latest = h.materialFinish;
+        latestTs = h.ts || '';
+      }
+    }
+  }
+  return latest;
+}
 
 // Returns the name of the last actual production stage in a component's
 // routing sequence (skipping trailing QC gate entries), or null if the
@@ -9041,6 +9073,7 @@ async function openHandoverNotifyModal(autoOpened){
     item: b.item,
     description: b.description || '',
     colorFinish: b.colorFinish || '—',
+    materialFinish: getLatestMaterialFinish(b),
     size,
     totalQty: b.qty,
     handoverQty: sd.qcApproved,
@@ -9102,7 +9135,7 @@ async function openHandoverNotifyModal(autoOpened){
       return '<tr>'
         +'<td style="'+tdBase+bb+';text-align:center">'+c.sr+'</td>'
         +'<td class="fw-600" style="'+tdBase+bb+'">'+c.item+(c.description?'<div style="font-size:10.5px;font-weight:500;color:#4b5563">'+c.description+'</div>':'')+'</td>'
-        +'<td style="'+tdBase+bb+'">'+c.colorFinish+'</td>'
+        +'<td style="'+tdBase+bb+'">'+c.colorFinish+(c.materialFinish?'<div style="font-size:10.5px;font-weight:500;color:#065f46;margin-top:2px">Applied: '+c.materialFinish+'</div>':'')+'</td>'
         +'<td style="'+tdBase+bb+'">'+c.size+'</td>'
         +'<td class="font-mono" style="'+tdBase+bb+';text-align:right">'+c.totalQty+'</td>'
         +'<td class="font-mono" style="'+tdBase+bb+';text-align:right">'+c.handoverQty+'</td>'
@@ -9185,6 +9218,7 @@ async function openHandoverNotifyModal(autoOpened){
     const asciiSize        = String(c.size).replace(/—/g, asciiDash).replace(/×/g, 'x');
     return   '  # '+c.sr+'. '+c.item+(c.description?' — '+c.description:'')+'\n'
       + '    Color / Finish   : '+asciiColorFinish+'\n'
+      + (c.materialFinish ? '    Applied Finish   : '+c.materialFinish+'\n' : '')
       + '    Size / Dimensions: '+asciiSize+'\n'
       + '    Total Qty        : '+c.totalQty+'\n'
       + '    Handover Qty     : '+c.handoverQty+'\n'
@@ -9429,7 +9463,7 @@ function renderComponentHistory(){
       : h.shift==='day'||h.action?.includes('Completed')
         ? '<span class="shift-badge-day">☀️ Day</span>'
         : '';
-    const hasTrace = (h.assBatchNos&&h.assBatchNos.length) || h.adhesiveBatchNo || h.adhesiveExpiryDate || h.roomTemperature !== undefined;
+    const hasTrace = (h.assBatchNos&&h.assBatchNos.length) || h.adhesiveBatchNo || h.adhesiveExpiryDate || h.roomTemperature !== undefined || h.materialFinish;
     return '<tr><td class="log-td">'+h.ts+'</td><td class="fw-600">'+h.stage+'</td><td class="text-xs text-muted">'+(h.ws||'—')+'</td>'
       +'<td style="color:var(--accent);font-weight:600">'+(h.operator||'—')+'</td>'
       +'<td class="font-mono">'+(h.qty!=null?h.qty:'—')+'</td>'
@@ -9469,6 +9503,11 @@ function viewTraceabilityAt(varName, idx){
   // already Number-typed at storage time so we can format it directly.
   if(h.roomTemperature !== undefined && h.roomTemperature !== null){
     lines.push('<div class="text-muted">Room Temperature</div><div class="fw-600">'+h.roomTemperature+' &deg;C</div>');
+  }
+  // Material Finish — one of Matte / Semi Gloss / Gloss, recorded at Final
+  // Polishing. Format-safe since server-side validated the whitelist.
+  if(h.materialFinish){
+    lines.push('<div class="text-muted">Material Finish</div><div class="fw-600">'+h.materialFinish+'</div>');
   }
   document.getElementById('traceabilityDetailBody').innerHTML = '<div style="display:grid;grid-template-columns:180px 1fr;row-gap:8px">'+lines.join('')+'</div>';
   document.getElementById('traceabilityDetailModal').classList.add('open');
@@ -9612,6 +9651,16 @@ function renderStageEntryForm(){
       + '<div class="form-group"><label class="form-label">Adhesive Expiry Date <span class="text-xs text-muted">(optional)</span></label><input type="date" class="form-input" id="ce_adhesive_expiry"></div></div>'
       + '<div class="form-row"><div class="form-group"><label class="form-label">Room Temperature <span class="text-xs text-muted">(°C, optional)</span></label><input type="number" step="0.1" min="-40" max="80" class="form-input" id="ce_room_temp" placeholder="e.g. 24.5" title="Room temperature at time of Fabrication — affects adhesive curing. Optional traceability field."></div></div>'
     : '';
+  // Material Finish — MANDATORY dropdown, Final Polishing only. Fixed options
+  // (Matte / Semi Gloss / Gloss). Client blocks submit if left blank; server
+  // enforces the same rule + whitelist as defense in depth.
+  const finishBlock = stageWantsFinish(st)
+    ? '<div class="form-row"><div class="form-group"><label class="form-label">Material Finish <span class="req">*</span></label>'
+      + '<select class="form-select" id="ce_material_finish" title="Actual surface finish applied at Final Polishing — mandatory for traceability">'
+      + '<option value="">-- Select finish --</option>'
+      + MATERIAL_FINISH_OPTIONS.map(f=>'<option value="'+f+'">'+f+'</option>').join('')
+      + '</select></div></div>'
+    : '';
 
   document.getElementById('stageEntryFormBody').innerHTML=ctxBanner+shiftSelector+shiftSummary
     +'<div class="form-grid">'
@@ -9622,7 +9671,7 @@ function renderStageEntryForm(){
     +'<div class="form-group"><label class="form-label">Completed Qty <span class="req">*</span> <span class="text-xs text-muted">('+unit+')</span></label>'
     +'<input type="number" class="form-input" id="ce_qty" min="1" max="'+pend+'" placeholder="Max '+pend+' '+unit.toLowerCase()+'">'
     +'<span class="form-hint">'+unit+' basis. Max: '+pend+'. Partial entries allowed.</span></div>'
-    +assBatchBlock+adhesiveBlock
+    +assBatchBlock+adhesiveBlock+finishBlock
     +'<div class="form-group"><label class="form-label">Remarks</label><textarea class="form-textarea" id="ce_remark" style="height:50px"></textarea></div>'
     +'</div><div style="display:flex;gap:8px;margin-top:12px"><button class="btn btn-primary" onclick="submitStageEntry(this)">&#10003; Submit to QC Queue</button></div>';
   if(stageWantsAssBatch(st)) renderAssBatchList();
@@ -9704,6 +9753,15 @@ async function submitStageEntry(btn){
   // as a string; the server parses to Number if non-empty and finite,
   // ignores blank/invalid, so passing '' here is safe.
   const roomTemperature = stageWantsAdhesive(st) ? (document.getElementById('ce_room_temp')?.value||'') : '';
+  // Material Finish — mandatory at Final Polishing. Block submit with a
+  // clear toast if left blank; server also rejects but this catches it
+  // before a network round-trip. Non-Final-Polishing stages don't send
+  // anything (empty string) — server ignores.
+  const materialFinish = stageWantsFinish(st) ? (document.getElementById('ce_material_finish')?.value||'') : '';
+  if(stageWantsFinish(st) && !materialFinish){
+    toast('Material Finish is required at Final Polishing. Select Matte, Semi Gloss, or Gloss before submitting.','⚠');
+    return;
+  }
 
   if(!operator){toast('Please select the operator who performed this work.','⚠');return;}
   if(!qty||qty<=0){toast('Enter a valid completed quantity.','⚠');return;}
@@ -9714,7 +9772,7 @@ async function submitStageEntry(btn){
   const originalBtnText = btn ? btn.textContent : '';
   if(btn){ btn.disabled=true; btn.textContent='Saving to server…'; }
   try{
-    await apiSubmitStageEntry(b.lineId, { stage:st, qty, operator, shift, remark, assBatchNos, adhesiveBatchNo, adhesiveExpiryDate, roomTemperature });
+    await apiSubmitStageEntry(b.lineId, { stage:st, qty, operator, shift, remark, assBatchNos, adhesiveBatchNo, adhesiveExpiryDate, roomTemperature, materialFinish });
   } catch(err){
     toast('Could not save this entry to the server: '+err.message,'⚠');
     if(btn){ btn.disabled=false; btn.textContent=originalBtnText||'✓ Submit to QC Queue'; }
@@ -9747,6 +9805,13 @@ async function submitStageEntry(btn){
   if(roomTemperature !== '' && roomTemperature !== null && roomTemperature !== undefined){
     const n = Number(roomTemperature);
     if(Number.isFinite(n)) historyEntry.roomTemperature = n;
+  }
+  // Material Finish — same whitelist guard as server-side so local and
+  // server history entries stay identical. Blank materialFinish on non-
+  // Final-Polishing stages is a no-op; the mandatory check above blocks
+  // Final Polishing submits with blank finish before we reach this point.
+  if(materialFinish && MATERIAL_FINISH_OPTIONS.indexOf(materialFinish) >= 0){
+    historyEntry.materialFinish = materialFinish;
   }
   sd.history.push(historyEntry);
 
@@ -10934,6 +10999,11 @@ function openRouteCardForLine(lineId, projId){
   const drawingRef = isWood
     ? (p.wood && p.wood.drawing) || ''
     : (p.ext  && p.ext.drawing)  || '';
+  // Most recently applied Material Finish across every Final-Polishing
+  // history entry on this component. Empty string if this component has
+  // never gone through Final Polishing or the finish wasn't recorded (for
+  // components produced before the field existed).
+  const latestFinish = getLatestMaterialFinish(b);
 
   // IMS reference tick-mark set from Sheet 1. If the portal component's
   // specialChars list contains any of these (case-insensitive), we tick it;
@@ -11078,7 +11148,7 @@ function openRouteCardForLine(lineId, projId){
       </tr>
       <tr>
         <td class="lbl">Component</td><td><b>${b.item||''}</b>${b.description?' <span style="color:#4b5563;font-weight:600">— '+b.description+'</span>':''}</td>
-        <td class="lbl">Material / Finish</td><td>${b.colorFinish||'—'}</td>
+        <td class="lbl">Material / Finish</td><td>${b.colorFinish||'—'}${latestFinish?' <span style="color:#065f46;font-weight:700">&#8226; Applied: '+latestFinish+'</span>':''}</td>
         <td class="lbl">Drawing Ref / Rev No</td><td>${drawingRef||''}</td>
       </tr>
       <tr>
@@ -11150,7 +11220,7 @@ function openRouteCardForLine(lineId, projId){
       <tr>
         <td class="lbl">Project No</td><td>${p.sap||''}</td>
         <td class="lbl">Customer</td><td>${p.customer||''}</td>
-        <td class="lbl">Component</td><td><b>${b.item||''}</b>${b.description?' <span style="color:#4b5563;font-weight:600">— '+b.description+'</span>':''}</td>
+        <td class="lbl">Component</td><td><b>${b.item||''}</b>${b.description?' <span style="color:#4b5563;font-weight:600">— '+b.description+'</span>':''}${latestFinish?' <span style="color:#065f46;font-weight:700">&#8226; Applied: '+latestFinish+'</span>':''}</td>
         <td class="lbl">Total Qty</td><td>${b.qty||''} ${b.uom||''}</td>
       </tr>
     </table>

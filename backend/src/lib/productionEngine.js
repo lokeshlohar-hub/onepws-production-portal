@@ -321,7 +321,7 @@ async function processQcDecision(lineId, { stageName, approveQty, rejectQty, dis
 
 // Operator submits a completed quantity at a stage — moves it from "pending"
 // into "awaiting QC" (qc_queue). Mirrors the frontend's submitStageEntry().
-async function submitStageEntry(lineId, { stageName, qty, operator, shift, remark, assBatchNos, adhesiveBatchNo, adhesiveExpiryDate, roomTemperature }) {
+async function submitStageEntry(lineId, { stageName, qty, operator, shift, remark, assBatchNos, adhesiveBatchNo, adhesiveExpiryDate, roomTemperature, materialFinish }) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -358,6 +358,26 @@ async function submitStageEntry(lineId, { stageName, qty, operator, shift, remar
     if (roomTemperature !== undefined && roomTemperature !== null && roomTemperature !== '') {
       const n = Number(roomTemperature);
       if (Number.isFinite(n)) historyEntry.roomTemperature = n;
+    }
+    // Material Finish — mandatory dropdown at Final Polishing stage. Must be
+    // one of the three whitelisted values (Matte / Semi Gloss / Gloss). Server
+    // enforces both the mandatory-ness AND the whitelist here — a direct API
+    // call that skips the frontend dropdown can't sneak in a free-text value.
+    // Non-Final-Polishing stages silently ignore materialFinish if it comes
+    // through so a client that always sends it does no harm.
+    const FINAL_POLISHING_STAGES = new Set(['a.s.s. final polishing', 'a.s.s. final polish', 'final polishing', 'final polish']);
+    const VALID_FINISHES = new Set(['Matte', 'Semi Gloss', 'Gloss']);
+    const isFinalPolishingStage = FINAL_POLISHING_STAGES.has(String(stageName || '').trim().toLowerCase());
+    if (isFinalPolishingStage) {
+      if (!materialFinish || !VALID_FINISHES.has(materialFinish)) {
+        throw new Error('Material Finish is required at Final Polishing and must be one of: Matte, Semi Gloss, Gloss');
+      }
+      historyEntry.materialFinish = materialFinish;
+    } else if (materialFinish && VALID_FINISHES.has(materialFinish)) {
+      // If a valid finish came through on a non-Final-Polishing stage,
+      // still record it — defensive so future stages that legitimately
+      // capture finish don't need engine changes.
+      historyEntry.materialFinish = materialFinish;
     }
     sd.history.push(historyEntry);
 

@@ -209,10 +209,10 @@ router.get('/qc/queue', async (req, res) => {
 // POST /api/bom-lines/:lineId/stage-entry — operator submits completed qty at a stage
 // Body: { stage, qty, operator, shift, remark }
 router.post('/:lineId/stage-entry', requireRole('admin', 'superadmin'), async (req, res) => {
-  const { stage, qty, operator, shift, remark, assBatchNos, adhesiveBatchNo, adhesiveExpiryDate, roomTemperature } = req.body || {};
+  const { stage, qty, operator, shift, remark, assBatchNos, adhesiveBatchNo, adhesiveExpiryDate, roomTemperature, materialFinish } = req.body || {};
   if (!stage || !qty || !operator) return res.status(400).json({ error: 'stage, qty, and operator are required' });
   try {
-    const result = await engine.submitStageEntry(req.params.lineId, { stageName: stage, qty: Number(qty), operator, shift, remark, assBatchNos, adhesiveBatchNo, adhesiveExpiryDate, roomTemperature });
+    const result = await engine.submitStageEntry(req.params.lineId, { stageName: stage, qty: Number(qty), operator, shift, remark, assBatchNos, adhesiveBatchNo, adhesiveExpiryDate, roomTemperature, materialFinish });
     res.json({ ok: true, line: result.line });
   } catch (err) {
     res.status(400).json({ error: err.message });

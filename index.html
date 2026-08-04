@@ -143,6 +143,58 @@ thead th:hover{color:var(--accent)}
 tbody tr{border-bottom:1px solid var(--border);transition:background .1s}
 tbody tr:hover{background:var(--surface2)}
 tbody tr:last-child{border-bottom:none}
+
+/* ============ MASTER TRACKER — Sticky freeze panes (Phase 14 UX) ============
+   Excel-style freeze panes for the tracker only. Rules are scoped to
+   #trackerTable / #trackerTableWrap so no other table in the app is
+   affected. Contract:
+     - Wrapper is a fixed-height scroll container. Vertical scroll happens
+       inside it, so headers can stick to its top rather than the viewport.
+     - Both header rows stick to the top; the 2nd row's top offset is set
+       via a CSS custom property computed at render time from the actual
+       first-row height (so font/padding changes don't break the layout).
+     - The Project No column (data td:first-child + header th:first-child)
+       sticks to the left with a subtle right-shadow separator.
+     - Backgrounds are opaque on every sticky cell so tbody content doesn't
+       show through as it scrolls under them. tr:hover extends to the sticky
+       column so the row highlight still reads as a single row visually.
+     - Existing colored header cells (Wood Production green, Extrusion accent)
+       keep their inline-style backgrounds; sticky positioning just adds on
+       top without overriding the color. */
+#trackerTableWrap {
+  /* 240px accounts for top bar + tabs + card padding + count footer +
+     page margin. Adjust if the app chrome ever grows. */
+  max-height: calc(100vh - 240px);
+  overflow: auto;
+}
+#trackerTable thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
+#trackerTable thead tr:nth-child(2) th {
+  top: var(--tracker-first-row-h, 34px);
+  z-index: 3;
+}
+#trackerTable tbody td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--surface);
+  box-shadow: 2px 0 4px -2px rgba(0,0,0,.12);
+}
+#trackerTable tbody tr:hover td:first-child {
+  background: var(--surface2);
+}
+/* Top-left corner cell (Project No header, rowspan=2) is the intersection
+   of the frozen row and frozen column — needs the highest z-index so it
+   sits above both when both sticky axes are engaged. */
+#trackerTable thead th:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 5;
+  box-shadow: 2px 0 4px -2px rgba(0,0,0,.12);
+}
 tbody td{padding:9px 12px;vertical-align:middle;white-space:nowrap}
 .badge{display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap}
 .badge-complete{background:var(--green-light);color:var(--green)}.badge-running{background:var(--accent-light);color:var(--accent)}.badge-delayed{background:var(--red-light);color:var(--red)}.badge-planning{background:var(--purple-light);color:var(--purple)}.badge-hold{background:var(--yellow-light);color:var(--yellow)}
@@ -823,8 +875,8 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
   </div>
 
   <div class="card" style="border-radius:0 0 var(--radius) var(--radius);border-top:2px solid var(--accent)">
-    <div class="table-wrap">
-      <table>
+    <div class="table-wrap" id="trackerTableWrap">
+      <table id="trackerTable">
         <thead>
         <tr>
           <th rowspan="2">Project No</th><th rowspan="2">Type</th><th rowspan="2">Category</th><th rowspan="2">Customer</th><th rowspan="2">PM</th>
@@ -7413,7 +7465,31 @@ function renderTracker(){
   });
   document.getElementById('trackerBody').innerHTML='';
   rows.forEach(r=>document.getElementById('trackerBody').appendChild(r));
+  updateTrackerStickyOffset();
 }
+
+// Master Tracker sticky freeze-panes offset — Phase 14. Measures the
+// first header row's rendered height and writes it to a CSS custom
+// property (--tracker-first-row-h). The second header row's `top` value
+// reads that variable so the sub-header row sits exactly beneath the
+// main header row when both are sticky-pinned to the scroll container.
+// Robust to font-size, padding, or letter-spacing changes.
+function updateTrackerStickyOffset(){
+  const firstRow = document.querySelector('#trackerTable thead tr:first-child');
+  if(!firstRow) return;
+  // requestAnimationFrame so we read after layout finishes settling —
+  // otherwise offsetHeight may return 0 on the very first render call
+  // when the table body was just replaced.
+  requestAnimationFrame(()=>{
+    const h = firstRow.offsetHeight;
+    if(h > 0) document.documentElement.style.setProperty('--tracker-first-row-h', h + 'px');
+  });
+}
+window.addEventListener('resize', ()=>{
+  // Only measure when the tracker is actually visible — no work when
+  // the user is on Dashboard or another page.
+  if(document.getElementById('trackerTable')?.offsetParent) updateTrackerStickyOffset();
+});
 // ------ NEW PROJECT — saves to DB and instantly visible in tracker ------
 function initNewProj(){
   _editingProjectId = null;

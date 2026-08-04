@@ -140,6 +140,72 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text-prim
 table{width:100%;border-collapse:collapse;font-size:12.5px}
 thead th{background:var(--surface2);padding:9px 12px;text-align:left;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;color:var(--text-muted);border-bottom:2px solid var(--border);white-space:nowrap;cursor:pointer;user-select:none}
 thead th:hover{color:var(--accent)}
+/* ============ ADMIN PANEL — Section landing (Phase 15) ============
+   Tile grid + sub-group headers used on the Admin section landing pages.
+   Scoped by class names — no leakage into any other page. */
+.admin-breadcrumb {
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.admin-subgroup-header {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  color: var(--text-muted);
+  margin: 16px 0 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.admin-subgroup-header:first-child {
+  margin-top: 4px;
+}
+.admin-tile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.admin-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all .12s;
+  text-align: left;
+  font-family: inherit;
+  min-height: 84px;
+}
+.admin-tile:hover {
+  background: var(--accent-light);
+  border-color: var(--accent);
+  transform: translateY(-1px);
+  box-shadow: 0 3px 8px -3px rgba(0,0,0,.12);
+}
+.admin-tile-icon {
+  font-size: 22px;
+  line-height: 1;
+}
+.admin-tile-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.3;
+}
+
 tbody tr{border-bottom:1px solid var(--border);transition:background .1s}
 tbody tr:hover{background:var(--surface2)}
 tbody tr:last-child{border-bottom:none}
@@ -2713,35 +2779,10 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
   <div class="admin-grid">
     <div class="card admin-sidebar" style="height:fit-content">
       <div class="card-header"><div class="card-title">⚙ Admin Sections</div></div>
-      <div class="card-body" style="padding:6px 8px">
-        <div class="nav-item active" data-superadmin-only="1" onclick="renderAdmin('users',this)">👤 User & Permission Management</div>
-        <div class="nav-item" data-superadmin-only="1" onclick="renderAdmin('backendstatus',this)">🔌 Backend Connection Status</div>
-        <div class="nav-item" onclick="renderAdmin('stages',this)">🔧 Production Stages</div>
-        <div class="nav-item" onclick="renderAdmin('tat',this)">⏱ TAT Rules</div>
-        <div class="nav-item" onclick="renderAdmin('pm',this)">👔 Project Managers</div>
-        <div class="nav-item" onclick="renderAdmin('eng',this)">🔩 Engineers</div>
-        <div class="nav-item" onclick="renderAdmin('types',this)">🏷 Product Types</div>
-        <div class="nav-item" onclick="renderAdmin('cats',this)">📂 Categories</div>
-        <div class="nav-item" onclick="renderAdmin('bom',this)">📦 BOM Components</div>
-        <div class="nav-item" onclick="renderAdmin('routing',this)">🗺 BOM Routing Rules</div>
-        <div class="nav-item" onclick="renderAdmin('processgroups',this)">🏭 Process Groups</div>
-        <div class="nav-item" onclick="renderAdmin('handoverrecipients',this)">📧 Handover Recipients</div>
-        <div class="nav-item" onclick="renderAdmin('cycletime',this)">⏱ Cycle Time Master</div>
-        <div class="nav-item" onclick="renderAdmin('machines',this)">⚙️ Machine Master</div>
-        <div class="nav-item" onclick="renderAdmin('delay',this)">⚠️ Delay Categories</div>
-        <div class="nav-item" onclick="renderAdmin('rejcat',this)">⛔ Rejection Categories</div>
-        <div class="nav-item" onclick="renderAdmin('specialchar',this)">🏷 Special Characteristics</div>
-        <div class="nav-item" onclick="renderAdmin('projcert',this)">📜 Project Certifications</div>
-        <div class="nav-item" onclick="renderAdmin('operators',this)">👷 Operator Master</div>
-        <div class="nav-section-title">MAINTENANCE</div>
-        <div class="nav-item" onclick="renderAdmin('technicians',this)">🔧 Technician Master</div>
-        <div class="nav-item" onclick="renderAdmin('qcinspectors',this)">🔍 QC Inspector Master</div>
-        <div class="nav-item" onclick="renderAdmin('breakdowncat',this)">⚙️ Breakdown Categories</div>
-        <div class="nav-item" onclick="renderAdmin('utility',this)">⚡ Utility Equipment Master</div>
-        <div class="nav-item" onclick="renderAdmin('handtools',this)">🛠 Hand Tool Master</div>
-        <div class="nav-section-title">DOCUMENT MANAGEMENT</div>
-        <div class="nav-item" onclick="renderAdmin('dmsdepts',this)">📁 Document Departments</div>
-        <div class="nav-item" onclick="renderAdmin('dmsorigins',this)">🏷 Document Origins</div>
+      <div class="card-body" style="padding:6px 8px" id="adminSidebarNav">
+        <!-- Phase 15: populated dynamically by populateAdminSidebar() based on
+             the logged-in user's role + department. Master Admin sees all 5
+             sections; department admins see only their assigned section. -->
       </div>
     </div>
     <div id="adminContent"></div>
@@ -3927,7 +3968,7 @@ const M = {
   calibrationFrequencies:[1,3,6,12,24], // months
   calibrationDepartments:['Production','Quality','Maintenance'],
   // Departments available when creating an Admin user account (Admin-editable)
-  userDepartments:['Production','Maintenance','Quality','Planning','Store','HR','Purchase','Other'],
+  userDepartments:['Production','Maintenance','Quality','Document','Planning','Store','HR','Purchase','Other'],
   // Machine Tool Inventory & Tool Life Management
   toolCategories:['Router Tools','Drill Bits','CNC Cutting Tools','Saw Blades','Edge Banding Cutters','PU Spray Nozzles','Buffing Wheels','Other'],
   toolDiscardReasons:['Worn Out','Broken / Damaged','End of Life','Lost','Other'],
@@ -6302,7 +6343,7 @@ function nav(pg,el){
   if(pg==='calibration')initCalibration();
   if(pg==='audit')renderAudit();
   if(pg==='analytics'){ renderAnalytics(); renderShiftAnalytics(); }
-  if(pg==='admin')renderAdmin('users',null);
+  if(pg==='admin')openAdminPanel();
   if(pg==='newproject')initNewProj();
   if(pg==='dms')initDMS();
   if(pg==='todo')renderTodoList();
@@ -17340,19 +17381,254 @@ function renderAudit(){
 }
 
 // ------ ADMIN PANEL ------
+// ============ ADMIN PANEL — Section grouping (Phase 15) ============
+// The Admin Panel is organized into 5 top-level sections. Each section
+// maps to a user "department" (or superadmin-only for user management).
+// A department admin can access only their section's landing page and
+// its leaf items; Master Admin (superadmin) can access all sections.
+//
+// Sub-groups organize the leaf items within a section into logical
+// clusters — for example Production Management contains four sub-groups
+// (Production Planning, Name Management, BOM Management, Project Masters).
+// Sub-group titles are just visual headers on the landing page; each
+// leaf item still opens its own existing admin render (getAdminHTML)
+// unchanged. This is a UI restructuring layer — none of the existing
+// admin render functions are modified.
+const ADMIN_SECTIONS = [
+  { key:'usermgmt', title:'User & Permission Management', icon:'👤',
+    dept:null,  // null dept = Master Admin only
+    subGroups:[
+      { title:null, items:[
+        { key:'users',         title:'User & Permission Management', icon:'👤' },
+        { key:'backendstatus', title:'Backend Connection Status',    icon:'🔌' },
+      ]}
+    ]
+  },
+  { key:'production', title:'Production Management', icon:'🏭',
+    dept:'Production',
+    subGroups:[
+      { title:'Production Planning', items:[
+        { key:'stages', title:'Production Stages', icon:'🔧' },
+        { key:'tat',    title:'TAT Rules',         icon:'⏱' },
+        { key:'delay',  title:'Delay Categories',  icon:'⚠️' },
+      ]},
+      { title:'Name Management', items:[
+        { key:'pm',                  title:'Project Managers',    icon:'👔' },
+        { key:'eng',                 title:'Engineers',           icon:'🔩' },
+        { key:'operators',           title:'Operator Master',     icon:'👷' },
+        { key:'handoverrecipients',  title:'Handover Recipients', icon:'📧' },
+      ]},
+      { title:'BOM Management', items:[
+        { key:'bom',           title:'BOM Components',    icon:'📦' },
+        { key:'routing',       title:'BOM Routing Rules', icon:'🗺' },
+        { key:'processgroups', title:'Process Groups',    icon:'🏭' },
+        { key:'cycletime',     title:'Cycle Time Master', icon:'⏱' },
+      ]},
+      { title:'Project Masters', items:[
+        { key:'types',       title:'Product Types',           icon:'🏷' },
+        { key:'cats',        title:'Categories',              icon:'📂' },
+        { key:'specialchar', title:'Special Characteristics', icon:'🏷' },
+        { key:'projcert',    title:'Project Certifications',  icon:'📜' },
+      ]},
+    ]
+  },
+  { key:'maintenance', title:'Maintenance Management', icon:'⚙️',
+    dept:'Maintenance',
+    subGroups:[
+      { title:null, items:[
+        { key:'machines',     title:'Machine Master',           icon:'⚙️' },
+        { key:'technicians',  title:'Technician Master',        icon:'🔧' },
+        { key:'breakdowncat', title:'Breakdown Categories',     icon:'⚠️' },
+        { key:'utility',      title:'Utility Equipment Master', icon:'⚡' },
+        { key:'handtools',    title:'Hand Tool Master',         icon:'🛠' },
+      ]}
+    ]
+  },
+  { key:'quality', title:'Quality Management', icon:'🔍',
+    dept:'Quality',
+    subGroups:[
+      { title:null, items:[
+        { key:'qcinspectors', title:'QC Inspector Master', icon:'🔍' },
+        { key:'rejcat',       title:'Rejection Categories', icon:'⛔' },
+      ]}
+    ]
+  },
+  { key:'document', title:'Document Management', icon:'📁',
+    dept:'Document',
+    subGroups:[
+      { title:null, items:[
+        { key:'dmsdepts',   title:'Document Departments', icon:'📁' },
+        { key:'dmsorigins', title:'Document Origins',     icon:'🏷' },
+      ]}
+    ]
+  },
+];
+
+// Currently-viewed section (landing) and leaf. Section is set whenever
+// a landing renders; leaf is set only when a specific admin master is
+// being viewed inside a section. Legacy `_adminSec` (leaf key) still
+// used by internal re-render triggers — kept for backward compat.
+let _adminActiveSection = null;
+let _adminActiveLeaf = null;
+
+function getAdminSectionByKey(sectionKey){
+  return ADMIN_SECTIONS.find(s => s.key === sectionKey) || null;
+}
+
+function getAdminLeafInfo(leafKey){
+  for(const s of ADMIN_SECTIONS){
+    for(const g of s.subGroups){
+      const item = g.items.find(i => i.key === leafKey);
+      if(item) return { section:s, group:g, item };
+    }
+  }
+  return null;
+}
+
+// Access gate: superadmin sees everything; admin sees their department's
+// section; every other role sees nothing in the admin panel.
+function canAccessAdminSection(sectionKey, user){
+  user = user || CURRENT_USER;
+  if(!user) return false;
+  if(user.role === 'superadmin') return true;
+  if(user.role !== 'admin') return false;
+  const section = getAdminSectionByKey(sectionKey);
+  if(!section) return false;
+  if(section.dept === null) return false; // user-mgmt is master-only
+  return user.department === section.dept;
+}
+
+function getAccessibleAdminSections(user){
+  return ADMIN_SECTIONS.filter(s => canAccessAdminSection(s.key, user));
+}
+
+// Populates the sidebar dynamically based on current user's role +
+// department. Replaces the flat 27-item list. Called on admin panel
+// entry and whenever the current user changes (login/logout).
+function populateAdminSidebar(){
+  const nav = document.getElementById('adminSidebarNav');
+  if(!nav) return;
+  const sections = getAccessibleAdminSections(CURRENT_USER);
+  if(!sections.length){
+    nav.innerHTML = '<div class="text-sm text-muted" style="padding:12px;text-align:center;line-height:1.5">No admin sections assigned.<br>Contact Master Admin to be assigned a department.</div>';
+    return;
+  }
+  nav.innerHTML = sections.map(s => {
+    const isActive = s.key === _adminActiveSection;
+    return `<div class="nav-item${isActive?' active':''}" onclick="renderAdminSection('${s.key}',this)">${s.icon} ${s.title}</div>`;
+  }).join('');
+}
+
+// Renders the section landing page — a grid of tiles per sub-group,
+// with sub-group headers when a group has a title. Each tile is an
+// existing admin leaf; clicking opens that leaf via renderAdmin().
+function renderAdminSection(sectionKey, el){
+  if(!canAccessAdminSection(sectionKey)){
+    toast('You do not have permission to access this section.','⚠');
+    return;
+  }
+  _adminActiveSection = sectionKey;
+  _adminActiveLeaf = null;
+  document.querySelectorAll('.admin-sidebar .nav-item').forEach(n=>n.classList.remove('active'));
+  if(el) el.classList.add('active');
+  else {
+    document.querySelectorAll('.admin-sidebar .nav-item').forEach(n=>{
+      const onc = n.getAttribute('onclick')||'';
+      if(onc.includes("'"+sectionKey+"'")) n.classList.add('active');
+    });
+  }
+  document.getElementById('adminContent').innerHTML = getAdminSectionLandingHTML(sectionKey);
+}
+
+function getAdminSectionLandingHTML(sectionKey){
+  const section = getAdminSectionByKey(sectionKey);
+  if(!section) return '<div class="card"><div class="card-body">Section not found.</div></div>';
+  const groupsHTML = section.subGroups.map(g => {
+    const tilesHTML = g.items.map(item =>
+      `<button class="admin-tile" onclick="renderAdmin('${item.key}',this)">
+        <div class="admin-tile-icon">${item.icon}</div>
+        <div class="admin-tile-title">${item.title}</div>
+      </button>`
+    ).join('');
+    const headerHTML = g.title ? `<div class="admin-subgroup-header">${g.title}</div>` : '';
+    return headerHTML + `<div class="admin-tile-grid">${tilesHTML}</div>`;
+  }).join('');
+  return `<div class="card">
+    <div class="card-header">
+      <div>
+        <div class="card-title">${section.icon} ${section.title}${lockBadge('ADMIN ONLY')}</div>
+        <div class="text-xs text-muted" style="margin-top:2px">Pick a master to manage.</div>
+      </div>
+    </div>
+    <div class="card-body">${groupsHTML}</div>
+  </div>`;
+}
+
+// Main entry point for opening the Admin Panel. Populates sidebar +
+// lands on first accessible section. Replaces the old direct
+// renderAdmin('users') call — that only worked for Master Admin and
+// silently redirected department admins.
+function openAdminPanel(){
+  populateAdminSidebar();
+  const accessible = getAccessibleAdminSections(CURRENT_USER);
+  if(accessible.length){
+    // If we're re-entering the panel and had a previous active section,
+    // land back on that if the user still has access. Otherwise fall
+    // through to the first accessible section.
+    const remember = _adminActiveSection && canAccessAdminSection(_adminActiveSection)
+      ? _adminActiveSection
+      : accessible[0].key;
+    renderAdminSection(remember, null);
+  } else {
+    document.getElementById('adminContent').innerHTML =
+      '<div class="card"><div class="card-body"><div class="text-sm text-muted" style="text-align:center;padding:24px">No admin sections assigned to your account.<br>Contact Master Admin to be assigned to a department.</div></div></div>';
+  }
+}
+
 function renderAdmin(sec,el){
+  // Look up the parent section for this leaf; if the leaf is a known
+  // admin item in ADMIN_SECTIONS, enforce section access + render with
+  // a breadcrumb. Legacy code paths that call renderAdmin() with an
+  // unknown sec key fall through to the original behavior below.
+  const leafInfo = getAdminLeafInfo(sec);
+  if(leafInfo){
+    if(!canAccessAdminSection(leafInfo.section.key)){
+      toast('You do not have permission to access '+leafInfo.item.title+'.','⚠');
+      const accessible = getAccessibleAdminSections(CURRENT_USER);
+      if(accessible.length) renderAdminSection(accessible[0].key, null);
+      return;
+    }
+    _adminActiveSection = leafInfo.section.key;
+    _adminActiveLeaf = sec;
+    _adminSec = sec; // legacy compat — data-refresh triggers still use it
+    // Highlight the parent SECTION in the sidebar (not the leaf — leaves
+    // are opened from tiles, not from the sidebar in the new model).
+    document.querySelectorAll('.admin-sidebar .nav-item').forEach(n=>n.classList.remove('active'));
+    document.querySelectorAll('.admin-sidebar .nav-item').forEach(n=>{
+      const onc = n.getAttribute('onclick')||'';
+      if(onc.includes("'"+leafInfo.section.key+"'")) n.classList.add('active');
+    });
+    // Prefix the admin content with a breadcrumb + back button
+    const breadcrumb =
+      `<div class="admin-breadcrumb">
+        <button class="btn btn-outline btn-sm" onclick="renderAdminSection('${leafInfo.section.key}',null)" style="height:26px;padding:2px 10px;font-size:11.5px">← ${leafInfo.section.icon} ${leafInfo.section.title}</button>
+        <span style="color:var(--text-muted);margin:0 4px">›</span>
+        ${leafInfo.group.title ? `<span style="color:var(--text-muted);font-size:12px">${leafInfo.group.title}</span><span style="color:var(--text-muted);margin:0 4px">›</span>` : ''}
+        <span style="font-weight:600;color:var(--text);font-size:13px">${leafInfo.item.icon} ${leafInfo.item.title}</span>
+      </div>`;
+    document.getElementById('adminContent').innerHTML = breadcrumb + getAdminHTML(sec);
+    return;
+  }
+  // Fallback path — sec doesn't match any registered leaf. Keeps
+  // backward compat with any legacy call (e.g. a spec key that hasn't
+  // been added to ADMIN_SECTIONS yet). No breadcrumb; no access check.
   if(sec==='users' && (!CURRENT_USER || CURRENT_USER.role!=='superadmin')){
     toast('User & Permission Management is available to Master Admin only.','⚠');
-    sec='pm'; // fall back to a harmless section rather than leaving the panel blank
+    return;
   }
   _adminSec=sec;
   document.querySelectorAll('.admin-sidebar .nav-item').forEach(n=>n.classList.remove('active'));
   if(el){el.classList.add('active');}
-  else{
-    document.querySelectorAll('.admin-sidebar .nav-item').forEach(n=>{
-      if(n.getAttribute('onclick')&&n.getAttribute('onclick').includes("'"+sec+"'"))n.classList.add('active');
-    });
-  }
   document.getElementById('adminContent').innerHTML=getAdminHTML(sec);
 }
 

@@ -3526,6 +3526,70 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
 </div>
 
 <!-- PROCESS GROUP ADD/EDIT MODAL -->
+<!-- ADMIN AUTHENTICATION MODAL — Phase 16.
+     Client-side UX barrier for department admin sections. Shown when a
+     department admin user tries to open Production/Maintenance/Quality/
+     Document Management. Master Admin (superadmin) bypasses. See the
+     inline SECURITY NOTE comment in verifyAdminPassword() for the scope
+     of what this actually protects against. -->
+<div class="modal-overlay" id="adminAuthModal">
+  <div class="modal" style="max-width:440px">
+    <div class="modal-header">
+      <div class="modal-title" id="adminAuthTitle">🔐 Admin Access Required</div>
+      <button class="modal-close" onclick="closeAdminAuthModal()">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="alert alert-info" id="adminAuthMessage" style="font-size:12.5px;margin-bottom:14px">
+        Enter the admin password to unlock this section for editing.
+      </div>
+      <input type="hidden" id="adminAuth_dept">
+      <div class="form-group" style="margin-bottom:0">
+        <label class="form-label">Admin Password <span class="req">*</span></label>
+        <input type="password" class="form-input" id="adminAuth_password" placeholder="Enter admin password" autocomplete="current-password" onkeydown="if(event.key==='Enter')submitAdminAuth()">
+        <div class="text-xs text-muted" id="adminAuth_hint" style="margin-top:6px">Session stays active for 20 minutes after successful authentication.</div>
+      </div>
+      <div id="adminAuth_error" style="display:none;margin-top:10px;padding:8px 10px;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;color:#b91c1c;font-size:12px"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeAdminAuthModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="submitAdminAuth()" id="adminAuth_submitBtn">🔓 Authenticate</button>
+    </div>
+  </div>
+</div>
+
+<!-- DEPARTMENT ADMIN PASSWORD SETUP MODAL — Master Admin only.
+     Used to set or change a department's admin password. Reachable
+     from Admin Panel > User & Permission Management > Department Admin
+     Passwords. -->
+<div class="modal-overlay" id="deptAdminPwdModal">
+  <div class="modal" style="max-width:500px">
+    <div class="modal-header">
+      <div class="modal-title" id="deptAdminPwdTitle">🔑 Set Department Admin Password</div>
+      <button class="modal-close" onclick="closeMod('deptAdminPwdModal')">×</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="deptAdminPwd_dept">
+      <div class="alert alert-info" style="font-size:12px;margin-bottom:14px">This password will be required to unlock the corresponding department&rsquo;s Admin section. Passwords are hashed before storage.</div>
+      <div class="form-group">
+        <label class="form-label">Department</label>
+        <input type="text" class="form-input" id="deptAdminPwd_deptDisplay" readonly style="background:var(--surface2)">
+      </div>
+      <div class="form-group">
+        <label class="form-label">New Password <span class="req">*</span></label>
+        <input type="password" class="form-input" id="deptAdminPwd_newpw" placeholder="Enter new password (min 4 characters)" autocomplete="new-password">
+      </div>
+      <div class="form-group" style="margin-bottom:0">
+        <label class="form-label">Confirm New Password <span class="req">*</span></label>
+        <input type="password" class="form-input" id="deptAdminPwd_confirm" placeholder="Re-enter to confirm" autocomplete="new-password">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeMod('deptAdminPwdModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveDeptAdminPassword()">💾 Set Password</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="processGroupModal">
   <div class="modal" style="max-width:560px">
     <div class="modal-header">
@@ -5908,6 +5972,7 @@ function onLoginSuccess(isRestore){
 
 function logout(){
   if(!confirm('Log out of ONEPWS Production Portal?')) return;
+  endAllAdminSessions('user logout');
   CURRENT_USER=null;
   AUTH_TOKEN=null;
   try{ localStorage.removeItem('onepws_token'); }catch(e){}
@@ -6326,6 +6391,12 @@ function nav(pg,el){
   if(!hasPermission(pg, null, 'view')){
     toast('You do not have permission to access this module. Contact your Master Admin.','⚠');
     return;
+  }
+  // Phase 16 — clear active admin auth sessions when leaving Admin Panel.
+  // Session lifetime spec: TTL OR until the user leaves the Admin Panel /
+  // logs out. If they come back they must re-authenticate.
+  if(pg !== 'admin' && Object.keys(_adminSessions).length){
+    endAllAdminSessions('left admin panel');
   }
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   const p=document.getElementById('page-'+pg);if(p)p.classList.add('active');
@@ -17381,6 +17452,305 @@ function renderAudit(){
 }
 
 // ------ ADMIN PANEL ------
+// ============ ADMIN PANEL — Department Auth Layer (Phase 16) ============
+// SECURITY NOTE — please read.
+// This is a client-side UX barrier, NOT a security wall. Password hashes
+// are stored in admin_config JSONB and shipped to every client; a user with
+// browser DevTools can read them, bypass the modal, or call underlying
+// admin_config API endpoints directly. The gate stops well-meaning
+// department users from accidentally clicking into master data — nothing
+// more. A real security implementation would require server-side session
+// tokens verified on every mutation endpoint (see Option A in the design
+// discussion). Do not treat this feature as protection against a
+// determined insider or auditor.
+const ADMIN_SESSION_TTL_MS = 20 * 60 * 1000;       // 20-minute session
+const ADMIN_MAX_FAILED_ATTEMPTS = 5;
+const ADMIN_LOCKOUT_MS = 5 * 60 * 1000;            // 5-minute lockout
+const ADMIN_AUTH_DEPTS = ['Production','Maintenance','Quality','Document'];
+
+// In-memory session store — deliberately not persisted. Cleared on
+// logout, page reload, and when the user navigates away from the Admin
+// Panel (see nav() hook). Maps department name → expiry timestamp (ms).
+const _adminSessions = {};
+
+// Callback queued while the auth modal is open. Called with no args on
+// successful authentication; the modal handler wires it up.
+let _adminAuthPendingCallback = null;
+
+function ensureDeptAdminAuth(){
+  if(!M.deptAdminAuth || typeof M.deptAdminAuth !== 'object') M.deptAdminAuth = {};
+  ADMIN_AUTH_DEPTS.forEach(d => {
+    if(!M.deptAdminAuth[d]) M.deptAdminAuth[d] = { passwordHash:null, failedAttempts:0, lockedUntil:null };
+  });
+}
+
+// SHA-256 hex digest via Web Crypto. Async because subtle.digest is async.
+// Used only to avoid storing raw passwords in admin_config JSONB.
+async function sha256Hex(str){
+  const data = new TextEncoder().encode(str||'');
+  const hashBuf = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
+// True if the user has an active auth session for this section's dept.
+// Superadmin bypasses always. Sections without a dept (user-mgmt, master-
+// only) are gated by role check elsewhere, not by this function.
+function hasActiveAdminSession(sectionKey){
+  if(!CURRENT_USER) return false;
+  if(CURRENT_USER.role === 'superadmin') return true;
+  const section = getAdminSectionByKey(sectionKey);
+  if(!section || !section.dept) return false;
+  // If no password has been set for this dept yet, skip the gate — the
+  // Master Admin needs to visit User & Permission > Department Admin
+  // Passwords to set one. A visible warning surfaces in the section
+  // landing header until then.
+  ensureDeptAdminAuth();
+  const auth = M.deptAdminAuth[section.dept];
+  if(auth && !auth.passwordHash) return true;
+  const expiry = _adminSessions[section.dept];
+  return !!(expiry && expiry > Date.now());
+}
+
+function startAdminSession(dept){
+  _adminSessions[dept] = Date.now() + ADMIN_SESSION_TTL_MS;
+  const ts = new Date().toISOString().replace('T',' ').slice(0,16);
+  const untilTs = new Date(_adminSessions[dept]).toISOString().replace('T',' ').slice(0,16);
+  DB.auditLog.unshift({ts, user:CURRENT_USER?.username||'unknown', action:'Admin Login', module:'Admin Auth',
+    entity:dept, field:'Session', old:'', nw:'Session started, valid until '+untilTs, ip:'192.168.1.1'});
+}
+
+function endAllAdminSessions(reason){
+  const cleared = Object.keys(_adminSessions);
+  cleared.forEach(d => delete _adminSessions[d]);
+  if(cleared.length){
+    const ts = new Date().toISOString().replace('T',' ').slice(0,16);
+    DB.auditLog.unshift({ts, user:CURRENT_USER?.username||'unknown', action:'Admin Logout', module:'Admin Auth',
+      entity:cleared.join(','), field:'Session', old:'Active', nw:'Cleared ('+reason+')', ip:'192.168.1.1'});
+  }
+}
+
+async function verifyAdminPassword(dept, password){
+  ensureDeptAdminAuth();
+  const auth = M.deptAdminAuth[dept];
+  if(!auth) return { ok:false, error:'Unknown department.' };
+  const now = Date.now();
+  if(auth.lockedUntil && auth.lockedUntil > now){
+    const remainMs = auth.lockedUntil - now;
+    const remainMin = Math.ceil(remainMs / 60000);
+    return { ok:false, locked:true, error:'This admin account is locked due to too many failed attempts. Try again in '+remainMin+' minute'+(remainMin===1?'':'s')+', or ask Master Admin to unlock.' };
+  }
+  if(!auth.passwordHash){
+    return { ok:false, error:'No admin password has been set for '+dept+' yet. Master Admin must set one first (User & Permission > Department Admin Passwords).' };
+  }
+  const hash = await sha256Hex(password);
+  if(hash === auth.passwordHash){
+    auth.failedAttempts = 0;
+    auth.lockedUntil = null;
+    persistAdminConfig('deptAdminAuth');
+    return { ok:true };
+  }
+  // Failed attempt — increment counter, lock if threshold hit.
+  auth.failedAttempts = (auth.failedAttempts||0) + 1;
+  const ts = new Date().toISOString().replace('T',' ').slice(0,16);
+  DB.auditLog.unshift({ts, user:CURRENT_USER?.username||'unknown', action:'Admin Login Failed', module:'Admin Auth',
+    entity:dept, field:'Password attempt', old:'', nw:'Failed attempt '+auth.failedAttempts+' of '+ADMIN_MAX_FAILED_ATTEMPTS, ip:'192.168.1.1'});
+  if(auth.failedAttempts >= ADMIN_MAX_FAILED_ATTEMPTS){
+    auth.lockedUntil = now + ADMIN_LOCKOUT_MS;
+    persistAdminConfig('deptAdminAuth');
+    DB.auditLog.unshift({ts, user:CURRENT_USER?.username||'unknown', action:'Admin Account Locked', module:'Admin Auth',
+      entity:dept, field:'Lockout', old:'', nw:'Locked for '+Math.round(ADMIN_LOCKOUT_MS/60000)+' minutes after '+ADMIN_MAX_FAILED_ATTEMPTS+' failed attempts', ip:'192.168.1.1'});
+    return { ok:false, locked:true, error:'Too many failed attempts. This admin account is locked for '+Math.round(ADMIN_LOCKOUT_MS/60000)+' minutes.' };
+  }
+  persistAdminConfig('deptAdminAuth');
+  const remaining = ADMIN_MAX_FAILED_ATTEMPTS - auth.failedAttempts;
+  return { ok:false, error:'Incorrect password. '+remaining+' attempt'+(remaining===1?'':'s')+' remaining before lockout.' };
+}
+
+// Shows the auth modal for a given dept. Calls onSuccess() when the user
+// authenticates. Called from renderAdminSection when a section requires
+// auth and there's no active session yet.
+function openAdminAuthModal(dept, onSuccess){
+  ensureDeptAdminAuth();
+  const auth = M.deptAdminAuth[dept];
+  document.getElementById('adminAuth_dept').value = dept;
+  document.getElementById('adminAuthTitle').textContent = '🔐 Admin Access — '+dept+' Management';
+  document.getElementById('adminAuth_password').value = '';
+  document.getElementById('adminAuth_error').style.display = 'none';
+  const msgEl = document.getElementById('adminAuthMessage');
+  const submitBtn = document.getElementById('adminAuth_submitBtn');
+  submitBtn.disabled = false;
+  submitBtn.textContent = '🔓 Authenticate';
+  const now = Date.now();
+  if(auth && auth.lockedUntil && auth.lockedUntil > now){
+    const remainMin = Math.ceil((auth.lockedUntil - now)/60000);
+    msgEl.className = 'alert alert-danger';
+    msgEl.innerHTML = '⛔ <b>Locked.</b> This admin account is locked due to too many failed attempts. Try again in '+remainMin+' minute'+(remainMin===1?'':'s')+', or ask Master Admin to unlock via User &amp; Permission &gt; Department Admin Passwords.';
+    document.getElementById('adminAuth_password').disabled = true;
+    submitBtn.disabled = true;
+  } else if(auth && !auth.passwordHash){
+    msgEl.className = 'alert alert-warn';
+    msgEl.innerHTML = '⚠ <b>No admin password set.</b> Master Admin must set the password for '+dept+' before this section can be gated. Access is currently ungated — you can proceed without a password.';
+    document.getElementById('adminAuth_password').disabled = true;
+    submitBtn.textContent = '➡ Proceed';
+    submitBtn.onclick = () => {
+      closeAdminAuthModal();
+      if(onSuccess) onSuccess();
+    };
+    _adminAuthPendingCallback = onSuccess;
+    document.getElementById('adminAuthModal').classList.add('open');
+    return;
+  } else {
+    msgEl.className = 'alert alert-info';
+    msgEl.innerHTML = 'Enter the admin password to unlock <b>'+dept+' Management</b> for editing. Session stays active for '+Math.round(ADMIN_SESSION_TTL_MS/60000)+' minutes after successful authentication.';
+    document.getElementById('adminAuth_password').disabled = false;
+    submitBtn.onclick = submitAdminAuth;
+  }
+  _adminAuthPendingCallback = onSuccess;
+  document.getElementById('adminAuthModal').classList.add('open');
+  setTimeout(()=>document.getElementById('adminAuth_password').focus(), 60);
+}
+
+function closeAdminAuthModal(){
+  document.getElementById('adminAuthModal').classList.remove('open');
+  _adminAuthPendingCallback = null;
+}
+
+async function submitAdminAuth(){
+  const dept = document.getElementById('adminAuth_dept').value;
+  const pw = document.getElementById('adminAuth_password').value;
+  if(!pw){
+    const errEl = document.getElementById('adminAuth_error');
+    errEl.textContent = 'Enter the password.';
+    errEl.style.display = 'block';
+    return;
+  }
+  const submitBtn = document.getElementById('adminAuth_submitBtn');
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Checking…';
+  const result = await verifyAdminPassword(dept, pw);
+  if(result.ok){
+    startAdminSession(dept);
+    const cb = _adminAuthPendingCallback;
+    closeAdminAuthModal();
+    toast('✓ '+dept+' admin session unlocked.','✓');
+    if(cb) cb();
+  } else {
+    const errEl = document.getElementById('adminAuth_error');
+    errEl.textContent = result.error;
+    errEl.style.display = 'block';
+    submitBtn.disabled = false;
+    submitBtn.textContent = '🔓 Authenticate';
+    if(result.locked){
+      document.getElementById('adminAuth_password').disabled = true;
+      submitBtn.disabled = true;
+    }
+  }
+}
+
+// Master Admin: set / change a department's admin password.
+function openDeptAdminPwdModal(dept){
+  document.getElementById('deptAdminPwd_dept').value = dept;
+  document.getElementById('deptAdminPwd_deptDisplay').value = dept + ' Management';
+  document.getElementById('deptAdminPwd_newpw').value = '';
+  document.getElementById('deptAdminPwd_confirm').value = '';
+  const auth = (M.deptAdminAuth||{})[dept];
+  document.getElementById('deptAdminPwdTitle').textContent = (auth && auth.passwordHash ? '🔑 Change' : '🔑 Set') + ' Department Admin Password';
+  document.getElementById('deptAdminPwdModal').classList.add('open');
+  setTimeout(()=>document.getElementById('deptAdminPwd_newpw').focus(), 60);
+}
+
+async function saveDeptAdminPassword(){
+  if(!CURRENT_USER || CURRENT_USER.role !== 'superadmin'){
+    toast('Only Master Admin can set department admin passwords.','⚠');
+    return;
+  }
+  const dept = document.getElementById('deptAdminPwd_dept').value;
+  const newpw = document.getElementById('deptAdminPwd_newpw').value;
+  const confirm = document.getElementById('deptAdminPwd_confirm').value;
+  if(!newpw || newpw.length < 4){ toast('Password must be at least 4 characters.','⚠'); return; }
+  if(newpw !== confirm){ toast('Password and confirmation do not match.','⚠'); return; }
+  ensureDeptAdminAuth();
+  M.deptAdminAuth[dept].passwordHash = await sha256Hex(newpw);
+  M.deptAdminAuth[dept].failedAttempts = 0;
+  M.deptAdminAuth[dept].lockedUntil = null;
+  persistAdminConfig('deptAdminAuth');
+  // Clear any active session for this dept so the new password takes
+  // effect on next access. Prevents an ex-authenticated department admin
+  // from continuing to use their old session after their password rotates.
+  delete _adminSessions[dept];
+  const ts = new Date().toISOString().replace('T',' ').slice(0,16);
+  DB.auditLog.unshift({ts, user:CURRENT_USER.username||'admin', action:'Admin Password Set', module:'Admin Auth',
+    entity:dept, field:'Password', old:'', nw:'Password updated by Master Admin', ip:'192.168.1.1'});
+  closeMod('deptAdminPwdModal');
+  toast('✓ '+dept+' admin password updated.','✓');
+  if(_adminActiveLeaf === 'deptadminpasswords') renderAdmin('deptadminpasswords', null);
+}
+
+function unlockDeptAdmin(dept){
+  if(!CURRENT_USER || CURRENT_USER.role !== 'superadmin'){
+    toast('Only Master Admin can unlock department admin accounts.','⚠');
+    return;
+  }
+  ensureDeptAdminAuth();
+  M.deptAdminAuth[dept].failedAttempts = 0;
+  M.deptAdminAuth[dept].lockedUntil = null;
+  persistAdminConfig('deptAdminAuth');
+  const ts = new Date().toISOString().replace('T',' ').slice(0,16);
+  DB.auditLog.unshift({ts, user:CURRENT_USER.username||'admin', action:'Admin Account Unlocked', module:'Admin Auth',
+    entity:dept, field:'Lockout', old:'Locked', nw:'Cleared by Master Admin', ip:'192.168.1.1'});
+  toast('✓ '+dept+' admin lockout cleared.','✓');
+  if(_adminActiveLeaf === 'deptadminpasswords') renderAdmin('deptadminpasswords', null);
+}
+
+// Master Admin's Department Admin Passwords admin page.
+function getDeptAdminPasswordsAdmin(){
+  ensureDeptAdminAuth();
+  const rows = ADMIN_AUTH_DEPTS.map(d => {
+    const auth = M.deptAdminAuth[d];
+    const isSet = !!(auth && auth.passwordHash);
+    const now = Date.now();
+    const isLocked = !!(auth && auth.lockedUntil && auth.lockedUntil > now);
+    const sessionActive = !!(_adminSessions[d] && _adminSessions[d] > now);
+    let statusBadge;
+    if(isLocked){
+      const remainMin = Math.ceil((auth.lockedUntil - now)/60000);
+      statusBadge = '<span class="badge" style="background:#fef2f2;color:#b91c1c">🔒 Locked ('+remainMin+'m)</span>';
+    } else if(!isSet){
+      statusBadge = '<span class="badge" style="background:#fef3c7;color:#92400e">⚠ No password set</span>';
+    } else if(sessionActive){
+      const remainMin = Math.max(1, Math.ceil((_adminSessions[d] - now)/60000));
+      statusBadge = '<span class="badge" style="background:var(--green-light);color:var(--green)">✓ Active session ('+remainMin+'m left)</span>';
+    } else {
+      statusBadge = '<span class="badge" style="background:var(--surface2);color:var(--text-muted)">🔑 Set — no active session</span>';
+    }
+    const failedCount = auth && auth.failedAttempts ? auth.failedAttempts : 0;
+    return `<tr>
+      <td class="fw-600">${d} Management</td>
+      <td>${statusBadge}</td>
+      <td class="text-sm">${failedCount ? failedCount+' / '+ADMIN_MAX_FAILED_ATTEMPTS : '—'}</td>
+      <td style="display:flex;gap:4px;flex-wrap:wrap">
+        <button class="btn btn-primary btn-sm" onclick="openDeptAdminPwdModal('${d}')">🔑 ${isSet?'Change':'Set'} Password</button>
+        ${isLocked ? '<button class="btn btn-danger btn-sm" onclick="unlockDeptAdmin(\''+d+'\')">🔓 Unlock</button>' : ''}
+      </td>
+    </tr>`;
+  }).join('');
+  return `<div class="card">
+    <div class="card-header">
+      <div>
+        <div class="card-title">🔑 Department Admin Passwords${lockBadge('MASTER ADMIN ONLY')}</div>
+        <div class="text-xs text-muted" style="margin-top:2px">Set the passwords that department admins must enter to unlock their Admin section. Session lasts ${Math.round(ADMIN_SESSION_TTL_MS/60000)} minutes; account locks for ${Math.round(ADMIN_LOCKOUT_MS/60000)} minutes after ${ADMIN_MAX_FAILED_ATTEMPTS} failed attempts.</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="alert alert-warn mb-3" style="font-size:12px"><b>Security note.</b> This is a client-side UX barrier, not a security wall. It stops honest department users from accidentally editing masters, but a determined user with browser DevTools can bypass it. Do not treat it as protection against a malicious insider or an auditor.</div>
+      <table>
+        <thead><tr><th>Department</th><th style="width:220px">Status</th><th style="width:130px">Failed attempts</th><th style="width:280px">Actions</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
 // ============ ADMIN PANEL — Section grouping (Phase 15) ============
 // The Admin Panel is organized into 5 top-level sections. Each section
 // maps to a user "department" (or superadmin-only for user management).
@@ -17399,8 +17769,9 @@ const ADMIN_SECTIONS = [
     dept:null,  // null dept = Master Admin only
     subGroups:[
       { title:null, items:[
-        { key:'users',         title:'User & Permission Management', icon:'👤' },
-        { key:'backendstatus', title:'Backend Connection Status',    icon:'🔌' },
+        { key:'users',                title:'User & Permission Management', icon:'👤' },
+        { key:'deptadminpasswords',   title:'Department Admin Passwords',   icon:'🔑' },
+        { key:'backendstatus',        title:'Backend Connection Status',    icon:'🔌' },
       ]}
     ]
   },
@@ -17537,6 +17908,21 @@ function renderAdminSection(sectionKey, el){
       if(onc.includes("'"+sectionKey+"'")) n.classList.add('active');
     });
   }
+  // Phase 16 — client-side auth gate. If this section requires a dept
+  // admin password and no active session exists, show the auth modal
+  // instead of the landing page. On successful authentication the
+  // callback re-invokes renderAdminSection which now passes the gate.
+  const section = getAdminSectionByKey(sectionKey);
+  if(section && section.dept && !hasActiveAdminSession(sectionKey)){
+    document.getElementById('adminContent').innerHTML = `<div class="card"><div class="card-body" style="text-align:center;padding:36px 20px">
+      <div style="font-size:38px;margin-bottom:10px">🔐</div>
+      <div style="font-size:15px;font-weight:600;margin-bottom:6px">${section.icon} ${section.title}</div>
+      <div class="text-sm text-muted" style="margin-bottom:16px">This section is protected. Enter the admin password to unlock.</div>
+      <button class="btn btn-primary" onclick="openAdminAuthModal('${section.dept}', ()=>renderAdminSection('${sectionKey}',null))">🔓 Unlock ${section.title}</button>
+    </div></div>`;
+    openAdminAuthModal(section.dept, () => renderAdminSection(sectionKey, null));
+    return;
+  }
   document.getElementById('adminContent').innerHTML = getAdminSectionLandingHTML(sectionKey);
 }
 
@@ -17596,6 +17982,14 @@ function renderAdmin(sec,el){
       toast('You do not have permission to access '+leafInfo.item.title+'.','⚠');
       const accessible = getAccessibleAdminSections(CURRENT_USER);
       if(accessible.length) renderAdminSection(accessible[0].key, null);
+      return;
+    }
+    // Phase 16 — leaf-path auth gate. Even if the sidebar and landing
+    // are past their gates, someone poking at renderAdmin() from the
+    // console shouldn't be able to skip the popup for their dept. Route
+    // through renderAdminSection which handles the modal.
+    if(leafInfo.section.dept && !hasActiveAdminSession(leafInfo.section.key)){
+      renderAdminSection(leafInfo.section.key, null);
       return;
     }
     _adminActiveSection = leafInfo.section.key;
@@ -17809,6 +18203,7 @@ function getAdminHTML(sec){
     </div>`;
 
   if(sec==='users') return getUserPermissionAdmin();
+  if(sec==='deptadminpasswords') return getDeptAdminPasswordsAdmin();
   if(sec==='backendstatus') return getBackendStatusAdmin();
 
   return '<div class="card"><div class="card-body"><div class="text-muted text-sm">Section under construction.</div></div></div>';

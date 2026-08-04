@@ -18211,15 +18211,32 @@ function delStage(i){ delStageConfig(i); }
 function addStage(){ addStageConfig(); }
 
 
+// Look up a workstation/resource by id across BOTH masters. Used wherever
+// the code needs to render or validate an id that could belong to either
+// Machine Master or Process-Only Master. Returns null if not found.
+function findResourceById(id){
+  if(!id) return null;
+  const mach = M.workstations.find(w=>w.id===id);
+  if(mach) return { ...mach, kind:'machine', icon:'🔧' };
+  const proc = (M.processOnlyWorkstations||[]).find(p=>p.id===id);
+  if(proc) return { ...proc, kind:'process-only', icon:'⚙️' };
+  return null;
+}
+
 function getOperatorAdmin(){
-  // Group operators by workstation
+  ensureProcessOnlyWorkstations();
+  // Group operators by workstation. Applies uniformly to machines and
+  // process-only resources — both live in M.operators keyed by id.
   const wsMap = {};
-  M.workstations.forEach(w => wsMap[w.id] = {ws:w, ops:[]});
+  M.workstations.forEach(w => wsMap[w.id] = {ws:w, ops:[], kind:'machine'});
+  (M.processOnlyWorkstations||[]).forEach(p => wsMap[p.id] = {ws:p, ops:[], kind:'process-only'});
   M.operators.forEach((op,i) => {
     if(wsMap[op.workstation]) wsMap[op.workstation].ops.push({...op, idx:i});
   });
 
-  const wsBlocks = M.workstations.map(w => {
+  // Renders one resource block. Used for both kinds — differs only in
+  // the icon and accent color so admins can tell them apart at a glance.
+  function resourceBlock(w, kind){
     const ops = wsMap[w.id]?.ops || [];
     const opRows = ops.map(op =>
       '<div style="display:flex;align-items:center;gap:6px;padding:5px 0;border-bottom:1px solid var(--border)">'
@@ -18230,54 +18247,73 @@ function getOperatorAdmin(){
       +'</div>'
     ).join('');
     const canAdd = ops.length < 3;
+    const icon = kind==='process-only' ? '⚙️' : '🔧';
     return '<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:10px">'
       +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">'
+        +'<span style="font-size:14px">'+icon+'</span>'
         +'<span style="font-family:\'Space Grotesk\',sans-serif;font-size:13px;font-weight:700;flex:1">'+w.name+'</span>'
         +'<span style="font-size:11px;color:var(--text-muted)">'+ops.length+'/3 operators assigned</span>'
         +(canAdd?'<button class="btn btn-primary btn-sm" onclick="addOperatorToWS(\''+w.id+'\')">+ Add Operator</button>':'<span style="font-size:10.5px;color:var(--text-muted);background:var(--surface2);padding:2px 8px;border-radius:4px">Max 3 reached</span>')
       +'</div>'
       +(opRows||'<div style="font-size:11.5px;color:var(--text-muted);font-style:italic;padding:4px 0">No operators assigned — click + Add Operator</div>')
     +'</div>';
-  }).join('');
+  }
+
+  const machineBlocks = M.workstations.map(w => resourceBlock(w, 'machine')).join('');
+  const processBlocks = (M.processOnlyWorkstations||[]).map(p => resourceBlock(p, 'process-only')).join('');
+  const machineSection = machineBlocks
+    ? '<div style="font-size:11px;font-weight:700;color:var(--blue);text-transform:uppercase;letter-spacing:.5px;margin:6px 0 10px">🔧 Machine Resources <span class="text-xs text-muted" style="font-weight:400;text-transform:none;letter-spacing:0">(from Machine Master)</span></div>'
+      + machineBlocks
+    : '';
+  const processSection = processBlocks
+    ? '<div style="font-size:11px;font-weight:700;color:var(--purple);text-transform:uppercase;letter-spacing:.5px;margin:16px 0 10px">⚙️ Process-Only Resources <span class="text-xs text-muted" style="font-weight:400;text-transform:none;letter-spacing:0">(from Process-Only Master)</span></div>'
+      + processBlocks
+    : (M.workstations.length ? '<div class="text-sm text-muted" style="margin-top:16px;padding:12px;background:var(--surface2);border-radius:8px">No process-only resources yet. Add them via Admin &rarr; Process Groups &rarr; Process-Only Master to make them assignable here.</div>' : '');
 
   return '<div class="card">'
     +'<div class="card-header">'
-      +'<div class="card-title">&#128119; Operator Master — Workstation Assignment'+lockBadge('ADMIN ONLY')+'</div>'
+      +'<div class="card-title">&#128119; Operator Master — Resource Assignment'+lockBadge('ADMIN ONLY')+'</div>'
       +'<button class="btn btn-outline btn-sm" onclick="addOperatorGlobal()">+ Add New Operator Name</button>'
     +'</div>'
     +'<div class="card-body">'
     +'<div class="alert alert-info mb-3" style="font-size:12px">'
-      +'Assign up to <strong>3 operators</strong> per workstation. On the Daily Capacity screen, a dropdown will show only the assigned operators for each machine — no free-text entry. '
-      +'Helper count (number input) remains separate.'
+      +'Assign up to <strong>3 operators</strong> per resource. On the Stage-wise Production Updates screen, the Operator dropdown will show only the assigned operators for that stage&rsquo;s group. Machine Resources are managed in Machine Master; Process-Only Resources in Admin &rarr; Process Groups &rarr; Process-Only Master.'
     +'</div>'
-    +wsBlocks
+    +machineSection
+    +processSection
     +'</div></div>';
 }
 
 function addOperatorToWS(wsId){
-  const name=prompt('Operator name for '+( M.workstations.find(w=>w.id===wsId)?.name||wsId)+':');
+  const res = findResourceById(wsId);
+  const label = res ? res.name : wsId;
+  const name=prompt('Operator name for '+label+':');
   if(!name||!name.trim())return;
   const existing=M.operators.filter(o=>o.workstation===wsId);
-  if(existing.length>=3){toast('Maximum 3 operators per workstation allowed.','&#9888;');return;}
+  if(existing.length>=3){toast('Maximum 3 operators per resource allowed.','&#9888;');return;}
   const seq=existing.length+1;
   M.operators.push({name:name.trim(), workstation:wsId, seq});
   renderAdmin('operators',null);
-  toast('Operator "'+name.trim()+'" assigned to workstation.','&#10003;');
+  toast('Operator "'+name.trim()+'" assigned to '+label+'.','&#10003;');
   persistAdminConfig('operators');
 }
 
 function addOperatorGlobal(){
   const name=prompt('New operator name:');
   if(!name||!name.trim())return;
-  const wsId=prompt('Workstation ID (e.g. hp, bs1, bs2, cnc1, cnc2, eb1, eb2, mb, pu, meb, cl):');
-  if(!wsId||!M.workstations.find(w=>w.id===wsId.trim())){
-    toast('Invalid workstation ID. Check Admin > Machine Master for IDs.','&#9888;');return;
+  const wsId=prompt('Resource ID (machine ID from Machine Master OR process-only ID from Process-Only Master — visible in the URL when editing, or use the + Add Operator button on the right resource block instead):');
+  if(!wsId) return;
+  const wsIdTrim = wsId.trim();
+  const res = findResourceById(wsIdTrim);
+  if(!res){
+    toast('Invalid resource ID. Check Admin > Machine Master or Process-Only Master for IDs. Easier: use the + Add Operator button on the specific resource block.','&#9888;');
+    return;
   }
-  const existing=M.operators.filter(o=>o.workstation===wsId.trim());
-  if(existing.length>=3){toast('Max 3 operators already assigned to this workstation.','&#9888;');return;}
-  M.operators.push({name:name.trim(), workstation:wsId.trim(), seq:existing.length+1});
+  const existing=M.operators.filter(o=>o.workstation===wsIdTrim);
+  if(existing.length>=3){toast('Max 3 operators already assigned to '+res.name+'.','&#9888;');return;}
+  M.operators.push({name:name.trim(), workstation:wsIdTrim, seq:existing.length+1});
   renderAdmin('operators',null);
-  toast('Operator "'+name.trim()+'" added.','&#10003;');
+  toast('Operator "'+name.trim()+'" added to '+res.name+'.','&#10003;');
   persistAdminConfig('operators');
 }
 
@@ -18291,7 +18327,9 @@ function saveOperator(i){
 }
 
 function delOperator(i){
-  if(confirm('Delete operator "'+M.operators[i].name+'" from '+( M.workstations.find(w=>w.id===M.operators[i].workstation)?.name||M.operators[i].workstation)+'?')){
+  const res = findResourceById(M.operators[i].workstation);
+  const label = res ? res.name : M.operators[i].workstation;
+  if(confirm('Delete operator "'+M.operators[i].name+'" from '+label+'?')){
     const nm=M.operators[i].name;
     const wsId=M.operators[i].workstation;
     M.operators.splice(i,1);

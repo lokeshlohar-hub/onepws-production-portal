@@ -10770,10 +10770,13 @@ function buildFutureSchedule(shiftHours){
         if(!wsIds.length) return;
         // Phase 17 — Primary Capacity Machine gate. Machine Blocking Gantt
         // now blocks only the specific machine assigned in Routing Rules
-        // for this component+step. If none is assigned, skip — spec says
-        // blank means "don't block anything for this stage" (not fall
-        // back to first machine). Production execution is unaffected.
-        const primaryMachineId = getPrimaryMachineForRouteStep(b.item, stepIdx);
+        // for this component+step. Lookup keys by stage NAME in the master
+        // routing so it stays correct even if b.route was snapshotted
+        // before Primary Machines existed or if master routing was
+        // edited after the project was created. Blank → skip (spec: don't
+        // fall back to first machine in group). Production execution is
+        // unaffected.
+        const primaryMachineId = getPrimaryMachineForRouteStep(b.item, step);
         if(!primaryMachineId) return;
         // Verify the assigned primary still exists in Machine Master
         // (admin could have deleted it after assigning). If missing, skip.
@@ -10892,8 +10895,9 @@ function buildMachineSchedule(){
         if(!wsIds.length) return;
         // Phase 17 — same Primary Capacity Machine gate as buildFutureSchedule
         // so the execution-view Gantt tab reads the same intent as future
-        // planning. Blank primary → skip.
-        const primaryMachineId = getPrimaryMachineForRouteStep(b.item, stepIdx);
+        // planning. Lookup by stage NAME (see getPrimaryMachineForRouteStep).
+        // Blank primary → skip.
+        const primaryMachineId = getPrimaryMachineForRouteStep(b.item, step);
         if(!primaryMachineId) return;
         if(!M.workstations.some(w => w.id === primaryMachineId)) return;
         const isBoard = isBoardStage(step);
@@ -18699,13 +18703,29 @@ function getMachinesForProcessGroup(groupName){
   return memberIds.filter(id => M.workstations.some(w => w.id === id));
 }
 
-// Lookup the primary machine assigned to a specific step of a component's
-// route. Returns workstation id if set, else null. Used by the Machine
-// Blocking scheduler in buildFutureSchedule / buildMachineSchedule.
-function getPrimaryMachineForRouteStep(comp, stepIdx){
+// Looks up the Primary Capacity Machine assigned to a specific step of a
+// component's routing. Keyed by STAGE NAME in the master routing
+// (M.componentRouting[comp]) — NOT by position in the calling BOM line's
+// b.route. Rationale: b.route is a snapshot taken at project creation
+// and can drift from the master routing (project created before
+// Primary Machines existed, master routing edited after snapshot, etc.).
+// Positional lookup breaks in those cases. Name lookup stays correct
+// because M.routingPrimaryMachines is aligned to master routing by
+// construction (saveComponentRouting writes them together).
+//
+// If the same stage appears twice in the master routing (rare), the
+// first occurrence's primary is used — acceptable for the "which
+// physical machine to book in Gantt" question since both occurrences
+// would presumably use the same machine anyway.
+// Returns workstation id or null (blank / not found / stage not in master).
+function getPrimaryMachineForRouteStep(comp, stageName){
+  if(!comp || !stageName) return null;
+  const master = M.componentRouting[comp] || [];
+  const idx = master.indexOf(stageName);
+  if(idx < 0) return null;
   ensureRoutingPrimaryMachines(comp);
   const arr = M.routingPrimaryMachines[comp] || [];
-  return arr[stepIdx] || null;
+  return arr[idx] || null;
 }
 
 function getRoutingAdmin(){

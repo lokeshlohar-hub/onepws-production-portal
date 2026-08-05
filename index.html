@@ -1521,6 +1521,7 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
           <option value="16">Double Shift (16h)</option>
         </select>
         <button class="btn btn-primary btn-sm" onclick="renderBlockingTab()">🔄 Recalculate</button>
+        <button class="btn btn-outline btn-sm" onclick="openGanttDiagnostic()" title="Show why each BOM stage is or isn't creating a Gantt reservation">🔍 Diagnose</button>
         <button class="btn btn-outline btn-sm" onclick="exportBlockingCSV()">📥 Export CSV</button>
       </div>
     </div>
@@ -18713,6 +18714,11 @@ function getMachinesForProcessGroup(groupName){
 // because M.routingPrimaryMachines is aligned to master routing by
 // construction (saveComponentRouting writes them together).
 //
+// Match is normalized (trim + lowercase) so a legacy project's b.route
+// entry like "hot press " still resolves against the canonicalized
+// master's "Hot Press" — silent lookup failure was one of the reservation
+// drop causes surfaced by the Gantt diagnostic report.
+//
 // If the same stage appears twice in the master routing (rare), the
 // first occurrence's primary is used — acceptable for the "which
 // physical machine to book in Gantt" question since both occurrences
@@ -18721,11 +18727,225 @@ function getMachinesForProcessGroup(groupName){
 function getPrimaryMachineForRouteStep(comp, stageName){
   if(!comp || !stageName) return null;
   const master = M.componentRouting[comp] || [];
-  const idx = master.indexOf(stageName);
+  const target = String(stageName).trim().toLowerCase();
+  const idx = master.findIndex(s => String(s||'').trim().toLowerCase() === target);
   if(idx < 0) return null;
   ensureRoutingPrimaryMachines(comp);
   const arr = M.routingPrimaryMachines[comp] || [];
   return arr[idx] || null;
+}
+
+// ============ MACHINE BLOCKING DIAGNOSTIC (Phase 17.1) ============
+// Mirrors every skip condition in buildFutureSchedule to explain, per
+// project × BOM line × routing stage, whether a reservation is created
+// or dropped and why. Called from the "Diagnose Machine Blocking"
+// button in the Blocking tab UI so admins can see immediately which
+// gap is blocking reservations — the most common cause historically
+// has been missing entries in Cycle Time Master.
+
+function generateGanttDiagnosticReport(){
+  const rows = [];
+  const summary = {
+    total: 0,
+    reserved: 0,
+    dropped: {
+      'No process group / no workstations': 0,
+      'No Primary Machine assigned': 0,
+      'Primary Machine deleted from Machine Master': 0,
+      'Cycle Time not set': 0,
+      'Planned Qty is 0': 0,
+    },
+  };
+  DB.projects.forEach(p => {
+    const planStart = projectPlanStartDate(p);
+    (p.bom||[]).forEach(b => {
+      ensureBomLineStructure(b);
+      const boardQty = b.boardQty ?? Math.ceil((b.qty||1)/Math.max(1,b.componentsPerBoard||8));
+      (b.route||[]).forEach((step, stepIdx) => {
+        summary.total++;
+        const row = {
+          projSap: p.sap, item: b.item, step, stepIdx,
+          primaryMachineId: null, primaryMachineName: '—',
+          planStart, planQty: '—', cyclePerUnit: '—',
+          reserved: false, reason: '',
+        };
+        // Skip 1: process group has no workstations at all
+        const wsIds = M.stageToWorkstation[step] || [];
+        if(!wsIds.length){
+          row.reason = 'No process group / no workstations';
+          summary.dropped[row.reason]++;
+          rows.push(row);
+          return;
+        }
+        // Skip 2: no primary machine assigned in Routing Rules
+        const primaryMachineId = getPrimaryMachineForRouteStep(b.item, step);
+        if(!primaryMachineId){
+          row.reason = 'No Primary Machine assigned';
+          summary.dropped[row.reason]++;
+          rows.push(row);
+          return;
+        }
+        row.primaryMachineId = primaryMachineId;
+        // Skip 3: primary machine deleted from Machine Master
+        const machine = M.workstations.find(w => w.id === primaryMachineId);
+        if(!machine){
+          row.primaryMachineName = '(deleted: '+primaryMachineId+')';
+          row.reason = 'Primary Machine deleted from Machine Master';
+          summary.dropped[row.reason]++;
+          rows.push(row);
+          return;
+        }
+        row.primaryMachineName = machine.name;
+        // Skip 4: planQty is 0
+        const isBoard = isBoardStage(step);
+        const planQty = isBoard ? boardQty : (b.qty||1);
+        row.planQty = planQty;
+        if(planQty <= 0){
+          row.reason = 'Planned Qty is 0';
+          summary.dropped[row.reason]++;
+          rows.push(row);
+          return;
+        }
+        // Skip 5: cycle time missing (the historically most common cause)
+        const cyclePerUnit = (M.componentCycleTime[b.item]||{})[step];
+        if(!cyclePerUnit){
+          row.reason = 'Cycle Time not set';
+          summary.dropped[row.reason]++;
+          rows.push(row);
+          return;
+        }
+        row.cyclePerUnit = cyclePerUnit;
+        row.reserved = true;
+        summary.reserved++;
+        rows.push(row);
+      });
+    });
+  });
+  return { rows, summary };
+}
+
+// Convenience — computes an approximate cycle time per unit from the
+// Machine Master's daily capacity for the primary machine assigned to
+// each component × stage that's missing a cycle time today. Formula:
+// 480 min / cap = min/unit. Only fills GAPS — never overwrites an
+// existing value. Admin opts in via the diagnostic modal.
+function autoFillMissingCycleTimes(){
+  let filled = 0;
+  const filledDetails = [];
+  DB.projects.forEach(p => {
+    (p.bom||[]).forEach(b => {
+      (b.route||[]).forEach(step => {
+        if((M.componentCycleTime[b.item]||{})[step]) return; // already set
+        const primaryId = getPrimaryMachineForRouteStep(b.item, step);
+        if(!primaryId) return;
+        const machine = M.workstations.find(w => w.id === primaryId);
+        if(!machine || !machine.cap || machine.cap<=0) return;
+        const minPerUnit = Math.max(0.5, Math.round((480 / machine.cap) * 10) / 10);
+        if(!M.componentCycleTime[b.item]) M.componentCycleTime[b.item] = {};
+        M.componentCycleTime[b.item][step] = minPerUnit;
+        filled++;
+        filledDetails.push({ comp: b.item, step, machine: machine.name, cap: machine.cap, minPerUnit });
+      });
+    });
+  });
+  if(filled) persistAdminConfig('componentCycleTime');
+  return { filled, filledDetails };
+}
+
+function openGanttDiagnostic(){
+  const report = generateGanttDiagnosticReport();
+  const s = report.summary;
+  const dropReasons = Object.entries(s.dropped).filter(([,n])=>n>0).map(([r,n])=>
+    '<div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 0;border-bottom:1px dashed var(--border)"><span>'+r+'</span><span style="font-weight:600;color:var(--red)">'+n+'</span></div>'
+  ).join('');
+  const rowsHTML = report.rows.map(r =>
+    '<tr style="'+(r.reserved?'':'background:#fef8f0')+'">'
+    +'<td class="text-sm">'+r.projSap+'</td>'
+    +'<td class="text-sm">'+r.item+'</td>'
+    +'<td class="text-sm">'+r.step+'</td>'
+    +'<td class="text-sm">'+r.primaryMachineName+'</td>'
+    +'<td class="text-sm">'+r.planStart+'</td>'
+    +'<td class="text-sm text-center">'+r.planQty+'</td>'
+    +'<td class="text-sm text-center">'+(r.cyclePerUnit==='—'?'<span class="text-muted">—</span>':r.cyclePerUnit+' min')+'</td>'
+    +'<td class="text-sm text-center">'+(r.reserved?'<span style="color:var(--green);font-weight:700">✓ YES</span>':'<span style="color:var(--red);font-weight:700">✗ NO</span>')+'</td>'
+    +'<td class="text-sm">'+(r.reason||'—')+'</td>'
+    +'</tr>'
+  ).join('');
+  const modalHTML =
+    '<div class="modal-overlay open" id="ganttDiagModal" onclick="if(event.target===this)closeMod(\'ganttDiagModal\')">'
+    +'<div class="modal" style="max-width:1180px;max-height:90vh;display:flex;flex-direction:column">'
+      +'<div class="modal-header">'
+        +'<div class="modal-title">🔍 Machine Blocking Diagnostic — Why reservations are (not) generated</div>'
+        +'<button class="modal-close" onclick="closeMod(\'ganttDiagModal\')">×</button>'
+      +'</div>'
+      +'<div class="modal-body" style="overflow:auto">'
+        +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">'
+          +'<div style="padding:12px;background:var(--surface);border-radius:8px;border:1px solid var(--border)">'
+            +'<div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;margin-bottom:8px">Summary</div>'
+            +'<div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0"><span>Total stages evaluated</span><span style="font-weight:700">'+s.total+'</span></div>'
+            +'<div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0;color:var(--green)"><span>Reservations created</span><span style="font-weight:700">'+s.reserved+'</span></div>'
+            +'<div style="display:flex;justify-content:space-between;font-size:13px;padding:4px 0;color:var(--red)"><span>Reservations dropped</span><span style="font-weight:700">'+(s.total-s.reserved)+'</span></div>'
+          +'</div>'
+          +'<div style="padding:12px;background:var(--surface);border-radius:8px;border:1px solid var(--border)">'
+            +'<div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;margin-bottom:8px">Drop reasons</div>'
+            +(dropReasons||'<div class="text-sm text-muted">No drops — everything scheduled.</div>')
+          +'</div>'
+        +'</div>'
+        +(s.dropped['Cycle Time not set']>0
+          ? '<div class="alert alert-warn" style="margin-bottom:14px;font-size:12px"><b>'+s.dropped['Cycle Time not set']+' stages dropped due to missing cycle time.</b> This is usually the biggest gap. Click below to auto-fill missing entries from the assigned Primary Machine\'s daily capacity (480 min ÷ cap = min/unit). Auto-fill never overwrites existing values.<br><button class="btn btn-primary btn-sm" style="margin-top:8px" onclick="runAutoFillCycleTimes()">⚡ Auto-fill missing Cycle Times</button></div>'
+          : '')
+        +'<div style="overflow:auto;max-height:50vh;border:1px solid var(--border);border-radius:8px">'
+          +'<table style="width:100%">'
+            +'<thead><tr>'
+              +'<th>Project</th><th>Component</th><th>Stage</th><th>Primary Machine</th>'
+              +'<th>Plan Start</th><th>Plan Qty</th><th>Cycle Time</th>'
+              +'<th>Reserved?</th><th>Reason (if NO)</th>'
+            +'</tr></thead>'
+            +'<tbody>'+(rowsHTML||'<tr><td colspan="9" class="text-center text-muted" style="padding:20px">No BOM stages found. Create a project first.</td></tr>')+'</tbody>'
+          +'</table>'
+        +'</div>'
+      +'</div>'
+      +'<div class="modal-footer">'
+        +'<button class="btn btn-outline" onclick="closeMod(\'ganttDiagModal\')">Close</button>'
+        +'<button class="btn btn-outline" onclick="exportGanttDiagnosticCSV()">📥 Export as CSV</button>'
+      +'</div>'
+    +'</div></div>';
+  // Remove any existing instance before opening a fresh one
+  const existing = document.getElementById('ganttDiagModal');
+  if(existing) existing.remove();
+  document.body.insertAdjacentHTML('beforeend', modalHTML);
+  // Stash the report on window so exportCSV + autoFill helpers can read it
+  window._lastGanttDiagReport = report;
+}
+
+function runAutoFillCycleTimes(){
+  const res = autoFillMissingCycleTimes();
+  if(res.filled === 0){
+    toast('No cycle times to fill — either all cycle times are set, or the missing entries have no Primary Machine capacity to derive from.','⚠');
+    return;
+  }
+  toast('✓ Filled '+res.filled+' cycle time entries. Re-running diagnostic…','✓');
+  closeMod('ganttDiagModal');
+  setTimeout(()=>{
+    if(_lastSched || typeof renderBlockingTab==='function') renderBlockingTab();
+    openGanttDiagnostic();
+  }, 200);
+}
+
+function exportGanttDiagnosticCSV(){
+  const report = window._lastGanttDiagReport || generateGanttDiagnosticReport();
+  const header = ['Project','Component','Stage','Primary Machine','Plan Start','Plan Qty','Cycle Time (min)','Reserved','Reason'];
+  const csv = [header.join(',')].concat(report.rows.map(r => [
+    r.projSap, r.item, r.step, r.primaryMachineName, r.planStart,
+    r.planQty, r.cyclePerUnit, r.reserved?'YES':'NO', r.reason||''
+  ].map(v => '"'+String(v).replace(/"/g,'""')+'"').join(','))).join('\n');
+  const blob = new Blob([csv], {type:'text/csv'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'machine-blocking-diagnostic-'+new Date().toISOString().slice(0,10)+'.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 function getRoutingAdmin(){

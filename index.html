@@ -8879,8 +8879,20 @@ function bomTraitsText(b){
 let _bomLineIdSeq = 1; // monotonically increasing — guarantees uniqueness even for lines created in the same tick
 
 function ensureBomLineStructure(b){
-  if(!b.route){
-    b.route = (M.componentRouting[b.item]||[]).slice();
+  // Repopulate b.route from master routing when the line was created
+  // before the routing rule existed (b.route was saved as an empty
+  // array). The historical `if(!b.route)` check missed this because
+  // an empty array is truthy — projects created without a matching
+  // routing rule stayed stuck at 0 stages even after admin added the
+  // rule later. Now we also refresh when b.route is empty but the
+  // master has entries.
+  if(!Array.isArray(b.route) || b.route.length === 0){
+    const masterRoute = M.componentRouting[b.item] || [];
+    if(masterRoute.length > 0){
+      b.route = masterRoute.slice();
+    } else if(!Array.isArray(b.route)){
+      b.route = [];
+    }
   }
   // Unique identity for this specific BOM line instance. Needed because the
   // automatic rework logic below can create multiple lines that share the same

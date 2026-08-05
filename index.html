@@ -4120,6 +4120,15 @@ const M = {
   // Blocking engine uses to compute BOM Qty x Cycle Time = required machine-minutes.
   // Defaults are derived from each workstation's stated daily capacity (480min / cap) so they
   // start internally consistent with the Capacity Planning module; Admin can refine per component.
+  // Primary Capacity Machine per routing step — Phase 17. Parallel to
+  // componentRouting: same keys (component name), value is an array the
+  // same length as the routing, each slot holds either a workstation id
+  // (M.workstations) or null (blank = "skip machine blocking for this
+  // stage in the Gantt"). Production execution ignores this entirely;
+  // it's used only by buildFutureSchedule / buildMachineSchedule to pick
+  // which physical machine gets blocked in the Machine Blocking Gantt.
+  // Empty on first load — Admin fills in per component/stage.
+  routingPrimaryMachines:{},
   componentCycleTime:{
     'Table Top':     {'Hot Press':20,'Cutting':13,'CNC Machining':18.5,'Edge Banding':10.4,'In-Process QC':3,'Final QC':3},
     'Table Top 2':   {'Hot Press':20,'Cutting':13,'CNC Machining':18.5,'Edge Banding':10.4,'In-Process QC':3,'Final QC':3},
@@ -10759,6 +10768,16 @@ function buildFutureSchedule(shiftHours){
       b.route.forEach((step, stepIdx)=>{
         const wsIds = M.stageToWorkstation[step]||[];
         if(!wsIds.length) return;
+        // Phase 17 — Primary Capacity Machine gate. Machine Blocking Gantt
+        // now blocks only the specific machine assigned in Routing Rules
+        // for this component+step. If none is assigned, skip — spec says
+        // blank means "don't block anything for this stage" (not fall
+        // back to first machine). Production execution is unaffected.
+        const primaryMachineId = getPrimaryMachineForRouteStep(b.item, stepIdx);
+        if(!primaryMachineId) return;
+        // Verify the assigned primary still exists in Machine Master
+        // (admin could have deleted it after assigning). If missing, skip.
+        if(!M.workstations.some(w => w.id === primaryMachineId)) return;
         const isBoard = isBoardStage(step);
         // PLANNING MODE: use full planned qty — not remaining
         const planQty = isBoard ? boardQty : (b.qty||1);
@@ -10767,7 +10786,7 @@ function buildFutureSchedule(shiftHours){
         const minutesNeeded = planQty * cyclePerUnit;
         demand.push({
           projId:p.id, projSap:p.sap, daysToTAT, planStart, customer:p.customer,
-          item:b.item, step, stepIdx, wsId:wsIds[0],
+          item:b.item, step, stepIdx, wsId:primaryMachineId,
           qty:planQty, minutesNeeded, isBoard,
           isFuture: true // flag: this is a planning block, not actual progress
         });
@@ -10871,6 +10890,12 @@ function buildMachineSchedule(){
         const sd=b.stageData[step];
         const wsIds = M.stageToWorkstation[step]||[];
         if(!wsIds.length) return;
+        // Phase 17 — same Primary Capacity Machine gate as buildFutureSchedule
+        // so the execution-view Gantt tab reads the same intent as future
+        // planning. Blank primary → skip.
+        const primaryMachineId = getPrimaryMachineForRouteStep(b.item, stepIdx);
+        if(!primaryMachineId) return;
+        if(!M.workstations.some(w => w.id === primaryMachineId)) return;
         const isBoard = isBoardStage(step);
         const schedQty = isBoard
           ? Math.max(0,(b.boardQty ?? Math.ceil(b.qty/Math.max(1,b.componentsPerBoard||8)))-sd.completed)
@@ -10881,7 +10906,7 @@ function buildMachineSchedule(){
         demand.push({
           proj:p, projId:p.id, projSap:p.sap, daysToTAT,
           planStart:today, customer:p.customer,
-          item:b.item, step, stepIdx, wsId:wsIds[0],
+          item:b.item, step, stepIdx, wsId:primaryMachineId,
           qty:schedQty, minutesNeeded:schedQty*cyclePerUnit, isBoard
         });
       });
@@ -18646,6 +18671,43 @@ function migrateRoutingToProcessGroups(){
   renderAdmin('processgroups',null);
 }
 
+// Ensures M.routingPrimaryMachines[comp] is an array with the same
+// length as M.componentRouting[comp] — pad with nulls if the routing
+// grew (added stations) or truncate if it shrank. Called from every
+// admin function that mutates routing so the parallel array stays
+// aligned with the routing array.
+function ensureRoutingPrimaryMachines(comp){
+  if(!M.routingPrimaryMachines || typeof M.routingPrimaryMachines !== 'object') M.routingPrimaryMachines = {};
+  const routeLen = (M.componentRouting[comp]||[]).length;
+  const arr = M.routingPrimaryMachines[comp];
+  if(!Array.isArray(arr)){
+    M.routingPrimaryMachines[comp] = new Array(routeLen).fill(null);
+    return;
+  }
+  if(arr.length < routeLen){
+    while(arr.length < routeLen) arr.push(null);
+  } else if(arr.length > routeLen){
+    arr.length = routeLen;
+  }
+}
+
+// Returns the workstation IDs of every machine (from M.workstations only —
+// not process-only resources) that's currently assigned to this process
+// group. Used to filter the Primary Capacity Machine dropdown options.
+function getMachinesForProcessGroup(groupName){
+  const memberIds = M.stageToWorkstation[groupName] || [];
+  return memberIds.filter(id => M.workstations.some(w => w.id === id));
+}
+
+// Lookup the primary machine assigned to a specific step of a component's
+// route. Returns workstation id if set, else null. Used by the Machine
+// Blocking scheduler in buildFutureSchedule / buildMachineSchedule.
+function getPrimaryMachineForRouteStep(comp, stepIdx){
+  ensureRoutingPrimaryMachines(comp);
+  const arr = M.routingPrimaryMachines[comp] || [];
+  return arr[stepIdx] || null;
+}
+
 function getRoutingAdmin(){
   const comps = M.bomComponents;
   // Build using DOM to avoid quote mixing in onclick
@@ -18653,7 +18715,7 @@ function getRoutingAdmin(){
   container.className='card';
   container.innerHTML='<div class="card-header"><div class="card-title">🗺 BOM Component Routing Rules'+lockBadge('ADMIN ONLY')+'</div></div>'
     +'<div class="card-body">'
-    +'<div class="alert alert-info mb-3" style="font-size:12px">Define the fixed workstation routing sequence for each component type. Selecting a component in New Project Entry will automatically display its predefined routing — no manual selection required.</div>'
+    +'<div class="alert alert-info mb-3" style="font-size:12px">Define the fixed workstation routing sequence for each component type. Selecting a component in New Project Entry will automatically display its predefined routing — no manual selection required.<br><b>Primary Capacity Machine</b> (optional) is used only by the Machine Blocking Gantt to decide which physical machine to book. Production execution still lets the operator pick any machine in the group; leaving this blank simply skips that stage in Gantt forecasting.</div>'
     +'<div id="routing_blocks"></div>'
     +'</div>';
   setTimeout(()=>{
@@ -18661,7 +18723,9 @@ function getRoutingAdmin(){
     if(!rb)return;
     rb.innerHTML='';
     comps.forEach((comp,ci)=>{
+      ensureRoutingPrimaryMachines(comp);
       const routes=M.componentRouting[comp]||[];
+      const primaries=M.routingPrimaryMachines[comp]||[];
       const block=document.createElement('div');
       block.style.cssText='background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:12px';
       block.id='cr_block_'+ci;
@@ -18684,10 +18748,10 @@ function getRoutingAdmin(){
       saveBtn.onclick=()=>saveComponentRouting(comp,ci);
       hdr.appendChild(title);hdr.appendChild(countBadge);hdr.appendChild(addBtn);hdr.appendChild(saveBtn);
       block.appendChild(hdr);
-      // Steps row
+      // Steps row — each step is a vertical two-select stack (Process Group + Primary Capacity Machine)
       const stepsDiv=document.createElement('div');
       stepsDiv.id='cr_steps_'+ci;
-      stepsDiv.style.cssText='display:flex;flex-wrap:wrap;gap:6px;align-items:center;min-height:34px';
+      stepsDiv.style.cssText='display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start;min-height:34px';
       if(!routes.length){
         const ph=document.createElement('div');
         ph.style.cssText='font-size:12px;color:var(--text-muted);font-style:italic';
@@ -18697,16 +18761,19 @@ function getRoutingAdmin(){
         routes.forEach((r,ri)=>{
           if(ri>0){
             const arr=document.createElement('span');
-            arr.style.cssText='color:var(--text-muted);font-size:14px;font-weight:700';
+            arr.style.cssText='color:var(--text-muted);font-size:14px;font-weight:700;padding-top:8px';
             arr.textContent='→';
             stepsDiv.appendChild(arr);
           }
           const stepWrap=document.createElement('div');
-          stepWrap.style.cssText='display:flex;align-items:center;gap:3px';
+          stepWrap.style.cssText='display:flex;flex-direction:column;gap:3px;background:var(--surface2);padding:6px;border-radius:6px;min-width:200px';
           stepWrap.id='cr_step_'+ci+'_'+ri;
+          // Row 1: process group selector + delete X
+          const topRow=document.createElement('div');
+          topRow.style.cssText='display:flex;align-items:center;gap:3px';
           const sel=document.createElement('select');
           sel.className='form-input';
-          sel.style.cssText='height:28px;min-width:160px;font-size:12px';
+          sel.style.cssText='height:28px;flex:1;font-size:12px';
           sel.id='cr_sel_'+ci+'_'+ri;
           M.routing.forEach(ws=>{
             const opt=document.createElement('option');
@@ -18714,11 +18781,41 @@ function getRoutingAdmin(){
             if(ws===r)opt.selected=true;
             sel.appendChild(opt);
           });
+          // When user picks a different process group, refresh the
+          // Primary Capacity Machine dropdown to show only that group's
+          // machines. Selection is reset to blank since the old choice
+          // may not belong to the new group.
+          sel.onchange = () => refreshRoutingPrimaryMachineDropdown(ci, ri);
           const delBtn=document.createElement('button');
           delBtn.style.cssText='border:none;background:none;color:var(--red);cursor:pointer;font-size:18px;padding:0 2px;line-height:1';
           delBtn.title='Remove step';delBtn.textContent='×';
           delBtn.onclick=()=>removeRoutingStep(comp,ci,ri);
-          stepWrap.appendChild(sel);stepWrap.appendChild(delBtn);
+          topRow.appendChild(sel);topRow.appendChild(delBtn);
+          // Row 2: Primary Capacity Machine selector
+          const primaryLabel=document.createElement('div');
+          primaryLabel.style.cssText='font-size:9.5px;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.3px;margin-top:2px';
+          primaryLabel.textContent='Primary Capacity Machine (optional)';
+          const primarySel=document.createElement('select');
+          primarySel.className='form-input';
+          primarySel.style.cssText='height:26px;font-size:11.5px;background:#fff';
+          primarySel.id='cr_primary_'+ci+'_'+ri;
+          const primaryMachines = getMachinesForProcessGroup(r);
+          const currentPrimary = primaries[ri] || '';
+          const blankOpt=document.createElement('option');
+          blankOpt.value='';blankOpt.textContent='— None (skip in Gantt) —';
+          primarySel.appendChild(blankOpt);
+          primaryMachines.forEach(mid => {
+            const machine = M.workstations.find(w=>w.id===mid);
+            if(!machine) return;
+            const opt=document.createElement('option');
+            opt.value=machine.id;
+            opt.textContent=machine.name;
+            if(machine.id === currentPrimary) opt.selected = true;
+            primarySel.appendChild(opt);
+          });
+          stepWrap.appendChild(topRow);
+          stepWrap.appendChild(primaryLabel);
+          stepWrap.appendChild(primarySel);
           stepsDiv.appendChild(stepWrap);
         });
       }
@@ -18729,9 +18826,36 @@ function getRoutingAdmin(){
   return container.outerHTML;
 }
 
+// Rebuilds the Primary Capacity Machine <select> at (ci, ri) after the
+// user changes the Process Group in that step's stage selector. Called
+// only from getRoutingAdmin's onchange handler — no re-render of the
+// full routing admin needed.
+function refreshRoutingPrimaryMachineDropdown(ci, ri){
+  const stageSel = document.getElementById('cr_sel_'+ci+'_'+ri);
+  const primarySel = document.getElementById('cr_primary_'+ci+'_'+ri);
+  if(!stageSel || !primarySel) return;
+  const groupName = stageSel.value;
+  const machines = getMachinesForProcessGroup(groupName);
+  primarySel.innerHTML = '';
+  const blankOpt = document.createElement('option');
+  blankOpt.value=''; blankOpt.textContent='— None (skip in Gantt) —';
+  primarySel.appendChild(blankOpt);
+  machines.forEach(mid => {
+    const machine = M.workstations.find(w=>w.id===mid);
+    if(!machine) return;
+    const opt = document.createElement('option');
+    opt.value = machine.id;
+    opt.textContent = machine.name;
+    primarySel.appendChild(opt);
+  });
+  // Reset to blank — the old primary is unlikely to belong to the new group
+  primarySel.value = '';
+}
+
 function addRoutingStep(comp, ci){
   if(!M.componentRouting[comp]) M.componentRouting[comp]=[];
   M.componentRouting[comp].push(M.routing[0]);
+  ensureRoutingPrimaryMachines(comp);
   renderAdmin('routing',null);
   toast('Step added to '+comp,'✓');
 }
@@ -18739,6 +18863,10 @@ function addRoutingStep(comp, ci){
 function removeRoutingStep(comp, ci, ri){
   if(!M.componentRouting[comp]) return;
   M.componentRouting[comp].splice(ri,1);
+  // Keep primary machines in sync — splice the same index so subsequent
+  // steps' primary assignments remain paired with their stages.
+  ensureRoutingPrimaryMachines(comp);
+  M.routingPrimaryMachines[comp].splice(ri,1);
   renderAdmin('routing',null);
   toast('Step removed','✓');
 }
@@ -18747,13 +18875,27 @@ function saveComponentRouting(comp, ci){
   if(!M.componentRouting[comp]) M.componentRouting[comp]=[];
   const steps = document.querySelectorAll('[id^="cr_sel_'+ci+'_"]');
   const newRoutes=[];
-  steps.forEach(sel=>{ if(sel.value) newRoutes.push(sel.value); });
+  const newPrimaries=[];
+  steps.forEach((sel, idx) => {
+    if(!sel.value) return;
+    newRoutes.push(sel.value);
+    const pSel = document.getElementById('cr_primary_'+ci+'_'+idx);
+    newPrimaries.push(pSel && pSel.value ? pSel.value : null);
+  });
+  const oldRoute = (M.componentRouting[comp]||[]).join(' → ');
   M.componentRouting[comp]=newRoutes;
+  if(!M.routingPrimaryMachines) M.routingPrimaryMachines={};
+  M.routingPrimaryMachines[comp]=newPrimaries;
+  // Audit trail — includes primary machines named alongside stages
+  const primaryNames = newPrimaries.map(pid => pid ? (M.workstations.find(w=>w.id===pid)?.name||pid) : '—');
+  const routeWithPrimary = newRoutes.map((s, i) => s + (primaryNames[i]!=='—' ? ' ['+primaryNames[i]+']' : '')).join(' → ');
   const ts=new Date().toISOString().replace('T',' ').slice(0,16);
-  DB.auditLog.unshift({ts,user:'Admin',action:'Update',module:'Routing',entity:comp,field:'routing',old:'—',nw:newRoutes.join(' → '),ip:'192.168.1.1'});
+  DB.auditLog.unshift({ts,user:'Admin',action:'Update',module:'Routing',entity:comp,field:'routing',old:oldRoute||'—',nw:routeWithPrimary,ip:'192.168.1.1'});
   renderAdmin('routing',null);
-  toast('Routing for "'+comp+'" saved: '+newRoutes.length+' stations','✓');
+  const withPrimaryCount = newPrimaries.filter(x=>x).length;
+  toast('Routing for "'+comp+'" saved: '+newRoutes.length+' stations, '+withPrimaryCount+' with primary machine','✓');
   persistAdminConfig('componentRouting');
+  persistAdminConfig('routingPrimaryMachines');
 }
 
 

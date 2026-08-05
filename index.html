@@ -1232,6 +1232,25 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
       </div>
     </div>
 
+    <!-- MODE TOGGLE — single-component (existing) vs batch entry (Phase 18).
+         Batch mode surfaces one screen where an operator can complete
+         many BOM lines at the same stage in one submission. Server calls
+         still go through the same submitStageEntry endpoint per line,
+         so history / traceability / rework / cascade all fire exactly
+         as they do in single-component mode. -->
+    <div class="card mb-4">
+      <div class="card-body" style="padding:8px 12px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <span class="text-xs text-muted" style="font-weight:600;margin-right:6px">Entry Mode:</span>
+        <button class="btn btn-sm" id="modeSingleBtn" onclick="setStageUpdateMode('single')" style="background:var(--accent);color:#fff;border:none">🧩 Single Component</button>
+        <button class="btn btn-outline btn-sm" id="modeBatchBtn" onclick="setStageUpdateMode('batch')">⚡ Batch Entry</button>
+        <span class="text-xs text-muted" style="margin-left:auto" id="modeHint">Component-wise entry. Pick a component below to begin.</span>
+      </div>
+    </div>
+
+    <!-- SINGLE-COMPONENT MODE — existing behavior. Wrapped so Batch mode
+         can hide it via display:none without touching the render code. -->
+    <div id="singleModeArea">
+
     <!-- STEP 1: BOM COMPONENT PICKER -->
     <div class="card mb-4">
       <div class="card-header">
@@ -1335,6 +1354,83 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
       <div class="card-body" style="padding:8px 12px" id="autoCapLog">
         <div class="text-sm text-muted">Complete a production stage to see automatic workstation capacity updates here.</div>
       </div>
+    </div>
+  </div>
+  </div><!-- /singleModeArea -->
+
+  <!-- BATCH ENTRY MODE — Phase 18. One-screen submission for all BOM lines
+       pending at a chosen (stage, machine). Fires per-line submitStageEntry
+       calls under the hood so history / traceability / rework / board→
+       component cascade / handover eligibility all fire per line, exactly
+       as they do in single-component mode. -->
+  <div id="batchModeArea" style="display:none">
+    <div class="card mb-4">
+      <div class="card-header">
+        <div>
+          <div class="card-title">⚡ Batch Production Entry</div>
+          <div class="text-xs text-muted" style="margin-top:2px">Complete multiple BOM lines at the same stage in one submission. Machine / operator / shift / date / remarks entered once and applied to every selected line. Each line still writes its own history entry.</div>
+        </div>
+      </div>
+      <div class="card-body" style="padding:12px 14px">
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Stage <span class="req">*</span></label>
+            <select class="form-input" id="batchStage" onchange="onBatchStageChange()">
+              <option value="">-- Select a stage --</option>
+            </select>
+            <div class="text-xs text-muted" style="margin-top:3px">Only stages with pending work in this project are listed.</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Machine</label>
+            <select class="form-input" id="batchMachine" onchange="onBatchMachineChange()"></select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Operator <span class="req">*</span></label>
+            <select class="form-input" id="batchOperator"></select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Shift <span class="req">*</span></label>
+            <select class="form-input" id="batchShift">
+              <option value="day">🌞 Day Shift</option>
+              <option value="night">🌙 Night Shift</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Date <span class="req">*</span></label>
+            <input type="date" class="form-input" id="batchDate">
+          </div>
+        </div>
+        <!-- Traceability fields — only shown when stage requires them. Same
+             fields as single-component form, entered once for the batch. -->
+        <div id="batchTraceFields" style="display:none"></div>
+        <div class="form-group">
+          <label class="form-label">Remarks <span class="text-xs text-muted">(applied to all selected lines)</span></label>
+          <textarea class="form-textarea" id="batchRemark" rows="2" placeholder="Optional — one remark shared by every submitted line"></textarea>
+        </div>
+      </div>
+    </div>
+
+    <div class="card mb-4">
+      <div class="card-header">
+        <div>
+          <div class="card-title" id="batchTableTitle">Components Waiting at This Stage</div>
+          <div class="text-xs text-muted" style="margin-top:2px" id="batchTableSub">Pick a stage above to load the list.</div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <button class="btn btn-outline btn-sm" onclick="toggleBatchSelectAll()" id="batchSelectAllBtn" style="display:none">☑ Select All</button>
+          <button class="btn btn-success" onclick="submitBatchEntry()" id="batchSubmitBtn" style="display:none">✓ Submit Selected</button>
+        </div>
+      </div>
+      <div class="card-body" style="padding:0" id="batchTableWrap">
+        <div class="text-sm text-muted" style="padding:20px;text-align:center">Select a stage to see pending BOM lines.</div>
+      </div>
+    </div>
+
+    <div class="card mb-4" id="batchResultCard" style="display:none">
+      <div class="card-header"><div class="card-title" id="batchResultTitle">Batch Submission Results</div></div>
+      <div class="card-body" id="batchResultBody"></div>
     </div>
   </div>
 </div>
@@ -10076,6 +10172,385 @@ async function submitStageEntry(btn){
   renderBomComponentPicker(p); renderStageQcStatus(); renderActLog();
   if(typeof renderQcQueue==='function') renderQcQueue();
   toast(qty+' '+unit+' of "'+b.item+'" ['+shiftLabel+'] submitted for QC at '+st+'.','✓');
+}
+
+// ============ BATCH PRODUCTION ENTRY — Phase 18 ============
+// One-screen submission for multiple BOM lines pending at the same stage
+// within the currently-open project (CUR_PROJ). Each selected line still
+// goes through submitStageEntry per-line so history / traceability /
+// rework / board→component cascade / handover eligibility fire exactly
+// the same as they do in single-component mode. The only difference is
+// that machine / operator / shift / date / remarks / adhesive / room-
+// temperature / material-finish are entered once for the whole batch.
+
+// Session state for the batch-entry screen
+let _batchState = { rows: [], stage: '', machine: '', operator: '' };
+
+function setStageUpdateMode(mode){
+  const singleBtn = document.getElementById('modeSingleBtn');
+  const batchBtn = document.getElementById('modeBatchBtn');
+  const singleArea = document.getElementById('singleModeArea');
+  const batchArea = document.getElementById('batchModeArea');
+  const hint = document.getElementById('modeHint');
+  if(!singleBtn || !batchBtn) return;
+  if(mode === 'batch'){
+    singleBtn.className = 'btn btn-outline btn-sm';
+    singleBtn.style.background = '';
+    singleBtn.style.color = '';
+    batchBtn.className = 'btn btn-sm';
+    batchBtn.style.background = 'var(--accent)';
+    batchBtn.style.color = '#fff';
+    batchBtn.style.border = 'none';
+    singleArea.style.display = 'none';
+    batchArea.style.display = 'block';
+    if(hint) hint.textContent = 'One submission per stage — completes multiple BOM lines at once.';
+    initBatchEntryScreen();
+  } else {
+    batchBtn.className = 'btn btn-outline btn-sm';
+    batchBtn.style.background = '';
+    batchBtn.style.color = '';
+    batchBtn.style.border = '';
+    singleBtn.className = 'btn btn-sm';
+    singleBtn.style.background = 'var(--accent)';
+    singleBtn.style.color = '#fff';
+    singleBtn.style.border = 'none';
+    singleArea.style.display = 'block';
+    batchArea.style.display = 'none';
+    if(hint) hint.textContent = 'Component-wise entry. Pick a component below to begin.';
+  }
+}
+
+function initBatchEntryScreen(){
+  if(!CUR_PROJ){
+    document.getElementById('batchTableWrap').innerHTML = '<div class="text-sm text-muted" style="padding:20px;text-align:center">No project loaded.</div>';
+    return;
+  }
+  // Populate stage dropdown from stages that have at least one BOM line
+  // with pending work in this project. Board stages included — pendingQty
+  // handles both units.
+  const pendingByStage = {}; // stageName → array of BOM lines
+  (CUR_PROJ.bom||[]).forEach(b => {
+    ensureBomLineStructure(b);
+    (b.route||[]).forEach(st => {
+      if(pendingQty(b, st) > 0){
+        if(!pendingByStage[st]) pendingByStage[st] = [];
+        pendingByStage[st].push(b);
+      }
+    });
+  });
+  const sel = document.getElementById('batchStage');
+  const stages = Object.keys(pendingByStage).sort();
+  sel.innerHTML = '<option value="">-- Select a stage --</option>'
+    + stages.map(st => '<option value="'+st.replace(/"/g,'&quot;')+'">'+st+' ('+pendingByStage[st].length+' line'+(pendingByStage[st].length===1?'':'s')+' pending)</option>').join('');
+  // Default date to today
+  const dateInput = document.getElementById('batchDate');
+  if(!dateInput.value) dateInput.value = new Date().toISOString().slice(0,10);
+  // Reset state
+  _batchState = { rows: [], stage: '', machine: '', operator: '' };
+  document.getElementById('batchMachine').innerHTML = '';
+  document.getElementById('batchOperator').innerHTML = '';
+  document.getElementById('batchRemark').value = '';
+  document.getElementById('batchTraceFields').style.display = 'none';
+  document.getElementById('batchTraceFields').innerHTML = '';
+  document.getElementById('batchTableWrap').innerHTML = '<div class="text-sm text-muted" style="padding:20px;text-align:center">Select a stage above to load pending components.</div>';
+  document.getElementById('batchSelectAllBtn').style.display = 'none';
+  document.getElementById('batchSubmitBtn').style.display = 'none';
+  document.getElementById('batchResultCard').style.display = 'none';
+}
+
+function onBatchStageChange(){
+  const st = document.getElementById('batchStage').value;
+  _batchState.stage = st;
+  if(!st){
+    document.getElementById('batchMachine').innerHTML = '';
+    document.getElementById('batchOperator').innerHTML = '';
+    document.getElementById('batchTableWrap').innerHTML = '<div class="text-sm text-muted" style="padding:20px;text-align:center">Select a stage above to load pending components.</div>';
+    document.getElementById('batchSelectAllBtn').style.display = 'none';
+    document.getElementById('batchSubmitBtn').style.display = 'none';
+    return;
+  }
+  // Machine dropdown — same rules as single-mode (Phase 13 uniform model):
+  // resolve group members across M.workstations + M.processOnlyWorkstations,
+  // filter to active ones, show only machines (process-only handled by
+  // hiding machine dropdown when group is pure process-only).
+  const wsIds = M.stageToWorkstation[st] || [];
+  const machineWsIds = wsIds.filter(id => M.workstations.some(w => w.id === id));
+  const processWsIds = wsIds.filter(id => (M.processOnlyWorkstations||[]).some(p => p.id === id));
+  const activeMachines = machineWsIds.filter(id => {
+    const w = M.workstations.find(x => x.id === id);
+    return w && w.active !== false && w.maintenanceStatus !== 'breakdown';
+  });
+  const activeProcess = processWsIds.filter(id => {
+    const p = (M.processOnlyWorkstations||[]).find(x => x.id === id);
+    return p && p.active !== false;
+  });
+  const machineSel = document.getElementById('batchMachine');
+  const isProcessOnly = machineWsIds.length === 0;
+  if(isProcessOnly){
+    machineSel.innerHTML = '<option value="">Process-only stage — no machine assignment</option>';
+    machineSel.disabled = true;
+  } else {
+    machineSel.disabled = false;
+    machineSel.innerHTML = '<option value="">-- Select a machine --</option>'
+      + activeMachines.map(id => {
+          const w = M.workstations.find(x => x.id === id);
+          return '<option value="'+id+'">🔧 '+w.name+'</option>';
+        }).join('');
+  }
+  onBatchMachineChange(); // rebuilds operator dropdown too
+
+  // Traceability fields — only render the ones this stage needs. Same
+  // gate helpers used by single-component form so behavior stays aligned.
+  const trace = document.getElementById('batchTraceFields');
+  let traceHTML = '';
+  if(typeof stageWantsAssBatch === 'function' && stageWantsAssBatch(st)){
+    traceHTML += '<div class="form-group"><label class="form-label">A.S.S. Batch Numbers <span class="text-xs text-muted">(optional, comma-separated)</span></label><input type="text" class="form-input" id="batch_assBatchNos" placeholder="e.g. ABC-101, ABC-102"></div>';
+  }
+  if(typeof stageWantsAdhesive === 'function' && stageWantsAdhesive(st)){
+    traceHTML += '<div class="form-row">'
+      + '<div class="form-group"><label class="form-label">Adhesive Physical Batch No. <span class="text-xs text-muted">(optional)</span></label><input type="text" class="form-input" id="batch_adhesive_batch" placeholder="Adhesive batch number"></div>'
+      + '<div class="form-group"><label class="form-label">Adhesive Expiry Date <span class="text-xs text-muted">(optional)</span></label><input type="date" class="form-input" id="batch_adhesive_expiry"></div>'
+      + '</div>'
+      + '<div class="form-row"><div class="form-group"><label class="form-label">Room Temperature <span class="text-xs text-muted">(°C, optional)</span></label><input type="number" step="0.1" min="-40" max="80" class="form-input" id="batch_room_temp" placeholder="e.g. 24.5"></div></div>';
+  }
+  if(typeof stageWantsFinish === 'function' && stageWantsFinish(st)){
+    traceHTML += '<div class="form-row"><div class="form-group"><label class="form-label">Material Finish <span class="req">*</span></label>'
+      + '<select class="form-input" id="batch_material_finish">'
+      + '<option value="">-- Select finish --</option>'
+      + (MATERIAL_FINISH_OPTIONS||[]).map(f => '<option value="'+f+'">'+f+'</option>').join('')
+      + '</select><div class="text-xs text-muted" style="margin-top:3px">Applied to every line in this batch (mandatory).</div></div></div>';
+  }
+  trace.innerHTML = traceHTML;
+  trace.style.display = traceHTML ? 'block' : 'none';
+
+  refreshBatchComponentList();
+}
+
+function onBatchMachineChange(){
+  const st = _batchState.stage;
+  if(!st) return;
+  const machineId = document.getElementById('batchMachine').value;
+  _batchState.machine = machineId;
+  // Operator dropdown mirrors single-mode logic (Phase 13 uniform operator
+  // model — operators are keyed to the resource id whether machine or
+  // process-only). When a specific machine is picked, filter to that
+  // machine's operators. When process-only, use all operators keyed to
+  // any process-only resource in this stage's group.
+  const wsIds = M.stageToWorkstation[st] || [];
+  const machineWsIds = wsIds.filter(id => M.workstations.some(w => w.id === id));
+  const processWsIds = wsIds.filter(id => (M.processOnlyWorkstations||[]).some(p => p.id === id));
+  const isProcessOnly = machineWsIds.length === 0;
+  const opSel = document.getElementById('batchOperator');
+  let opNames = [];
+  if(isProcessOnly){
+    const activeProcess = processWsIds.filter(id => {
+      const p = (M.processOnlyWorkstations||[]).find(x => x.id === id);
+      return p && p.active !== false;
+    });
+    opNames = Array.from(new Set(
+      M.operators.filter(o => activeProcess.includes(o.workstation)).map(o => o.name)
+    )).sort((a,b)=>a.localeCompare(b));
+    if(!opNames.length){
+      // Fallback matches single-mode behavior
+      opNames = M.operators.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(o=>o.name);
+    }
+  } else if(machineId){
+    opNames = M.operators.filter(o => o.workstation === machineId).sort((a,b)=>a.seq-b.seq).map(o=>o.name);
+  }
+  opSel.innerHTML = '<option value="">-- Select operator --</option>'
+    + opNames.map(n => '<option value="'+n.replace(/"/g,'&quot;')+'">'+n+'</option>').join('');
+}
+
+function refreshBatchComponentList(){
+  const st = _batchState.stage;
+  const wrap = document.getElementById('batchTableWrap');
+  if(!st || !CUR_PROJ){
+    wrap.innerHTML = '<div class="text-sm text-muted" style="padding:20px;text-align:center">Select a stage above to load pending components.</div>';
+    document.getElementById('batchSelectAllBtn').style.display = 'none';
+    document.getElementById('batchSubmitBtn').style.display = 'none';
+    return;
+  }
+  // Collect all BOM lines in this project with pending work at this stage
+  const lines = (CUR_PROJ.bom||[]).filter(b => {
+    ensureBomLineStructure(b);
+    return (b.route||[]).includes(st) && pendingQty(b, st) > 0;
+  });
+  _batchState.rows = lines.map(b => ({
+    lineId: b.lineId,
+    item: b.item,
+    description: b.description || '',
+    isRework: !!b.isRework,
+    pending: pendingQty(b, st),
+    unit: stageUnit(b, st),
+    selected: false,
+    completedQty: pendingQty(b, st),  // default = pending; editable per row
+  }));
+  const isBoardStg = typeof isBoardStage === 'function' && isBoardStage(st);
+  const unitHint = isBoardStg ? 'boards' : 'components';
+  document.getElementById('batchTableTitle').textContent = 'Components Waiting at "' + st + '"';
+  document.getElementById('batchTableSub').textContent = _batchState.rows.length + ' line' + (_batchState.rows.length===1?'':'s') + ' pending — '+unitHint+' basis';
+  if(!_batchState.rows.length){
+    wrap.innerHTML = '<div class="text-sm text-muted" style="padding:20px;text-align:center">No BOM lines are currently pending at this stage.</div>';
+    document.getElementById('batchSelectAllBtn').style.display = 'none';
+    document.getElementById('batchSubmitBtn').style.display = 'none';
+    return;
+  }
+  wrap.innerHTML =
+    '<div style="overflow:auto">'
+    +'<table style="width:100%">'
+      +'<thead><tr>'
+        +'<th style="width:40px;text-align:center">✓</th>'
+        +'<th>Component</th>'
+        +'<th style="width:110px">Line ID</th>'
+        +'<th style="width:110px;text-align:center">Pending</th>'
+        +'<th style="width:130px;text-align:center">Completed Qty</th>'
+      +'</tr></thead>'
+      +'<tbody>'
+      + _batchState.rows.map((r, i) =>
+        '<tr>'
+        +'<td style="text-align:center"><input type="checkbox" class="batch-row-check" data-idx="'+i+'" onchange="onBatchRowToggle('+i+')"></td>'
+        +'<td><div class="fw-600">'+r.item+'</div>'+(r.description?'<div class="text-xs text-muted">'+r.description+'</div>':'')+(r.isRework?'<span class="badge" style="background:var(--red-light);color:var(--red);margin-left:4px">Rework</span>':'')+'</td>'
+        +'<td class="font-mono text-xs">'+r.lineId+'</td>'
+        +'<td class="text-center font-mono">'+r.pending+'</td>'
+        +'<td><input type="number" class="form-input batch-qty-input" data-idx="'+i+'" style="height:28px;text-align:center" min="0" max="'+r.pending+'" value="'+r.completedQty+'" onchange="onBatchQtyChange('+i+',this.value)"></td>'
+        +'</tr>'
+      ).join('')
+      +'</tbody>'
+    +'</table>'
+    +'</div>';
+  document.getElementById('batchSelectAllBtn').style.display = 'inline-flex';
+  document.getElementById('batchSubmitBtn').style.display = 'inline-flex';
+  updateBatchSubmitLabel();
+}
+
+function onBatchRowToggle(i){
+  const cb = document.querySelector('.batch-row-check[data-idx="'+i+'"]');
+  _batchState.rows[i].selected = !!(cb && cb.checked);
+  updateBatchSubmitLabel();
+}
+
+function onBatchQtyChange(i, val){
+  const n = Math.max(0, Math.min(_batchState.rows[i].pending, parseInt(val)||0));
+  _batchState.rows[i].completedQty = n;
+  const inp = document.querySelector('.batch-qty-input[data-idx="'+i+'"]');
+  if(inp) inp.value = n;
+}
+
+function toggleBatchSelectAll(){
+  const anyUnchecked = _batchState.rows.some(r => !r.selected);
+  _batchState.rows.forEach((r,i) => {
+    r.selected = anyUnchecked;
+    const cb = document.querySelector('.batch-row-check[data-idx="'+i+'"]');
+    if(cb) cb.checked = anyUnchecked;
+  });
+  updateBatchSubmitLabel();
+}
+
+function updateBatchSubmitLabel(){
+  const n = _batchState.rows.filter(r => r.selected).length;
+  const btn = document.getElementById('batchSubmitBtn');
+  const selAllBtn = document.getElementById('batchSelectAllBtn');
+  if(btn) btn.textContent = '✓ Submit ' + (n ? n + ' Selected' : 'Selected');
+  if(btn) btn.disabled = n === 0;
+  if(selAllBtn){
+    const anyUnchecked = _batchState.rows.some(r => !r.selected);
+    selAllBtn.textContent = anyUnchecked ? '☑ Select All' : '☐ Clear All';
+  }
+}
+
+async function submitBatchEntry(){
+  const st = _batchState.stage;
+  const selected = _batchState.rows.filter(r => r.selected);
+  if(!st){ toast('Select a stage first.','⚠'); return; }
+  if(!selected.length){ toast('Select at least one component.','⚠'); return; }
+  const machineId = document.getElementById('batchMachine').value;
+  const operator = document.getElementById('batchOperator').value;
+  const shift = document.getElementById('batchShift').value;
+  const date = document.getElementById('batchDate').value;
+  const remark = document.getElementById('batchRemark').value.trim();
+  const wsIds = M.stageToWorkstation[st] || [];
+  const machineWsIds = wsIds.filter(id => M.workstations.some(w => w.id === id));
+  const isProcessOnly = machineWsIds.length === 0;
+  if(!isProcessOnly && !machineId){ toast('Select a machine.','⚠'); return; }
+  if(!operator){ toast('Select an operator.','⚠'); return; }
+  if(!shift){ toast('Select a shift.','⚠'); return; }
+  if(!date){ toast('Select a date.','⚠'); return; }
+  // Read traceability fields (only if the current stage needs them)
+  const wantsAdh = typeof stageWantsAdhesive === 'function' && stageWantsAdhesive(st);
+  const wantsFin = typeof stageWantsFinish === 'function' && stageWantsFinish(st);
+  const wantsAss = typeof stageWantsAssBatch === 'function' && stageWantsAssBatch(st);
+  const adhesiveBatchNo = wantsAdh ? (document.getElementById('batch_adhesive_batch')?.value.trim() || '') : '';
+  const adhesiveExpiryDate = wantsAdh ? (document.getElementById('batch_adhesive_expiry')?.value || '') : '';
+  const roomTemperature = wantsAdh ? (document.getElementById('batch_room_temp')?.value || '') : '';
+  const materialFinish = wantsFin ? (document.getElementById('batch_material_finish')?.value || '') : '';
+  if(wantsFin && !materialFinish){
+    toast('Material Finish is required at Final Polishing.','⚠');
+    return;
+  }
+  const assBatchNos = wantsAss
+    ? (document.getElementById('batch_assBatchNos')?.value.trim().split(',').map(s=>s.trim()).filter(Boolean) || [])
+    : [];
+  // Fire sequentially — parallel would race server-side qc_queue updates
+  const results = [];
+  const btn = document.getElementById('batchSubmitBtn');
+  btn.disabled = true;
+  btn.textContent = 'Submitting…';
+  for(const row of selected){
+    if(row.completedQty <= 0){
+      results.push({ item: row.item, lineId: row.lineId, qty: row.completedQty, ok: false, error: 'Completed qty is 0 — nothing to submit.' });
+      continue;
+    }
+    try{
+      const payload = { stage: st, qty: row.completedQty, operator, shift, remark };
+      if(assBatchNos.length) payload.assBatchNos = assBatchNos;
+      if(adhesiveBatchNo) payload.adhesiveBatchNo = adhesiveBatchNo;
+      if(adhesiveExpiryDate) payload.adhesiveExpiryDate = adhesiveExpiryDate;
+      if(roomTemperature !== '') payload.roomTemperature = roomTemperature;
+      if(materialFinish) payload.materialFinish = materialFinish;
+      await apiSubmitStageEntry(row.lineId, payload);
+      results.push({ item: row.item, lineId: row.lineId, qty: row.completedQty, ok: true });
+    } catch(err){
+      results.push({ item: row.item, lineId: row.lineId, qty: row.completedQty, ok: false, error: err.message || String(err) });
+    }
+  }
+  // Refresh local state from server so pending qty + history counters reflect the submissions
+  try{ if(typeof loadProjectsFromServer === 'function') await loadProjectsFromServer(); }catch(e){}
+  const okCount = results.filter(r => r.ok).length;
+  const failCount = results.length - okCount;
+  showBatchResults(results, st);
+  if(okCount) toast('✓ Batch: '+okCount+' line(s) submitted to QC.'+(failCount?' '+failCount+' failed — see summary below.':''), okCount ? '✓' : '⚠');
+  // Refresh the batch screen so completed lines drop out of the pending list
+  initBatchEntryScreen();
+}
+
+function showBatchResults(results, st){
+  const card = document.getElementById('batchResultCard');
+  const title = document.getElementById('batchResultTitle');
+  const body = document.getElementById('batchResultBody');
+  const okCount = results.filter(r => r.ok).length;
+  const failCount = results.length - okCount;
+  title.textContent = 'Batch Submission Results — ' + st;
+  const rowsHTML = results.map(r =>
+    '<tr>'
+    +'<td>'+(r.ok ? '<span style="color:var(--green);font-weight:700">✓ OK</span>' : '<span style="color:var(--red);font-weight:700">✗ Fail</span>')+'</td>'
+    +'<td>'+r.item+'</td>'
+    +'<td class="font-mono text-xs">'+r.lineId+'</td>'
+    +'<td class="text-center font-mono">'+r.qty+'</td>'
+    +'<td class="text-sm">'+(r.ok ? 'Sent to QC queue' : r.error || 'Failed')+'</td>'
+    +'</tr>'
+  ).join('');
+  body.innerHTML =
+    '<div style="display:flex;gap:14px;margin-bottom:10px;font-size:13px">'
+    +'<div><b style="color:var(--green)">'+okCount+'</b> successful</div>'
+    +(failCount ? '<div><b style="color:var(--red)">'+failCount+'</b> failed</div>' : '')
+    +'</div>'
+    +'<table style="width:100%">'
+      +'<thead><tr><th style="width:70px">Status</th><th>Component</th><th style="width:110px">Line ID</th><th style="width:80px;text-align:center">Qty</th><th>Detail</th></tr></thead>'
+      +'<tbody>'+rowsHTML+'</tbody>'
+    +'</table>';
+  card.style.display = 'block';
+  // Scroll results into view so operator sees the outcome
+  setTimeout(()=>card.scrollIntoView({behavior:'smooth', block:'nearest'}), 100);
 }
 
 // ------ STEP 3 — IN-PROCESS QC QUEUE (project-wide) ------

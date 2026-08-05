@@ -18729,10 +18729,27 @@ function getPrimaryMachineForRouteStep(comp, stageName){
   const master = M.componentRouting[comp] || [];
   const target = String(stageName).trim().toLowerCase();
   const idx = master.findIndex(s => String(s||'').trim().toLowerCase() === target);
-  if(idx < 0) return null;
-  ensureRoutingPrimaryMachines(comp);
-  const arr = M.routingPrimaryMachines[comp] || [];
-  return arr[idx] || null;
+  if(idx >= 0){
+    ensureRoutingPrimaryMachines(comp);
+    const arr = M.routingPrimaryMachines[comp] || [];
+    const explicit = arr[idx];
+    // Verify the explicit assignment still exists in Machine Master before
+    // returning it. If it was deleted, fall through to the auto-default
+    // safety net below rather than returning a dangling id.
+    if(explicit && M.workstations.some(w => w.id === explicit)) return explicit;
+  }
+  // Phase 17.2 — single-machine safety net. Even if the admin hasn't
+  // explicitly set a primary (or if the stored primary points to a
+  // deleted machine, or if the stage name doesn't match the master
+  // routing), auto-fall-back to the sole machine when the process
+  // group has exactly one. This ensures the Gantt reservation is
+  // always generated for physically-obvious cases like "Cleaning →
+  // Cleaning Unit" without requiring every admin to open every routing
+  // rule and save. Multi-machine groups still return null (admin must
+  // pick explicitly — no arbitrary choice among alternatives).
+  const groupMachines = getMachinesForProcessGroup(stageName);
+  if(groupMachines.length === 1) return groupMachines[0];
+  return null;
 }
 
 // ============ MACHINE BLOCKING DIAGNOSTIC (Phase 17.1) ============
@@ -18750,7 +18767,6 @@ function generateGanttDiagnosticReport(){
     reserved: 0,
     dropped: {
       'No process group / no workstations': 0,
-      'No Primary Machine assigned': 0,
       'Primary Machine deleted from Machine Master': 0,
       'Cycle Time not set': 0,
       'Planned Qty is 0': 0,
@@ -18778,13 +18794,29 @@ function generateGanttDiagnosticReport(){
           return;
         }
         // Skip 2: no primary machine assigned in Routing Rules
+        // getPrimaryMachineForRouteStep now returns a single-machine
+        // auto-default (Phase 17.2) when the group has exactly one
+        // machine and no explicit assignment exists — so this branch
+        // now fires only when the group has 0 or 2+ machines and no
+        // explicit primary is set.
         const primaryMachineId = getPrimaryMachineForRouteStep(b.item, step);
         if(!primaryMachineId){
-          row.reason = 'No Primary Machine assigned';
-          summary.dropped[row.reason]++;
+          const groupMachines = getMachinesForProcessGroup(step);
+          row.reason = groupMachines.length === 0
+            ? 'Process group has no machines (only process-only resources)'
+            : 'No Primary Machine assigned (group has '+groupMachines.length+' machines — pick one in Routing Rules)';
+          summary.dropped[row.reason] = (summary.dropped[row.reason]||0) + 1;
           rows.push(row);
           return;
         }
+        // Detect if the returned id is an auto-default (no explicit
+        // save exists for this comp+step) so admins can see which rows
+        // are relying on the fallback vs which are explicitly assigned.
+        ensureRoutingPrimaryMachines(b.item);
+        const master = M.componentRouting[b.item] || [];
+        const masterIdx = master.findIndex(s => String(s||'').trim().toLowerCase() === String(step||'').trim().toLowerCase());
+        const explicit = masterIdx >= 0 ? (M.routingPrimaryMachines[b.item]||[])[masterIdx] : null;
+        row.autoDefaulted = !explicit;
         row.primaryMachineId = primaryMachineId;
         // Skip 3: primary machine deleted from Machine Master
         const machine = M.workstations.find(w => w.id === primaryMachineId);
@@ -18863,7 +18895,7 @@ function openGanttDiagnostic(){
     +'<td class="text-sm">'+r.projSap+'</td>'
     +'<td class="text-sm">'+r.item+'</td>'
     +'<td class="text-sm">'+r.step+'</td>'
-    +'<td class="text-sm">'+r.primaryMachineName+'</td>'
+    +'<td class="text-sm">'+r.primaryMachineName + (r.autoDefaulted ? ' <span style="color:var(--green);font-weight:600">(auto)</span>' : '')+'</td>'
     +'<td class="text-sm">'+r.planStart+'</td>'
     +'<td class="text-sm text-center">'+r.planQty+'</td>'
     +'<td class="text-sm text-center">'+(r.cyclePerUnit==='—'?'<span class="text-muted">—</span>':r.cyclePerUnit+' min')+'</td>'
@@ -19034,13 +19066,22 @@ function getRoutingAdmin(){
           // Row 2: Primary Capacity Machine selector
           const primaryLabel=document.createElement('div');
           primaryLabel.style.cssText='font-size:9.5px;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.3px;margin-top:2px';
-          primaryLabel.textContent='Primary Capacity Machine (optional)';
+          const primaryMachines = getMachinesForProcessGroup(r);
+          // Phase 17.2 — if the group has exactly one machine, auto-default the
+          // primary to that machine (rather than "None"). Admin can still switch
+          // to "None" from the dropdown if they truly want to skip this stage
+          // in the Gantt, but the default now reflects the physically-obvious
+          // choice for single-machine groups. Multi-machine groups (Beam Saw,
+          // CNC etc.) still require manual selection — no auto-default there.
+          const savedPrimary = primaries[ri] || '';
+          const autoDefaulted = !savedPrimary && primaryMachines.length === 1;
+          const currentPrimary = savedPrimary || (autoDefaulted ? primaryMachines[0] : '');
+          primaryLabel.textContent = 'Primary Capacity Machine' + (autoDefaulted ? ' (auto)' : ' (optional)');
+          if(autoDefaulted) primaryLabel.style.color = 'var(--green)';
           const primarySel=document.createElement('select');
           primarySel.className='form-input';
           primarySel.style.cssText='height:26px;font-size:11.5px;background:#fff';
           primarySel.id='cr_primary_'+ci+'_'+ri;
-          const primaryMachines = getMachinesForProcessGroup(r);
-          const currentPrimary = primaries[ri] || '';
           const blankOpt=document.createElement('option');
           blankOpt.value='';blankOpt.textContent='— None (skip in Gantt) —';
           primarySel.appendChild(blankOpt);
@@ -19069,7 +19110,9 @@ function getRoutingAdmin(){
 // Rebuilds the Primary Capacity Machine <select> at (ci, ri) after the
 // user changes the Process Group in that step's stage selector. Called
 // only from getRoutingAdmin's onchange handler — no re-render of the
-// full routing admin needed.
+// full routing admin needed. If the new group has exactly one machine,
+// auto-selects it (Phase 17.2). Multi-machine groups reset to blank so
+// the user makes a conscious choice.
 function refreshRoutingPrimaryMachineDropdown(ci, ri){
   const stageSel = document.getElementById('cr_sel_'+ci+'_'+ri);
   const primarySel = document.getElementById('cr_primary_'+ci+'_'+ri);
@@ -19088,8 +19131,24 @@ function refreshRoutingPrimaryMachineDropdown(ci, ri){
     opt.textContent = machine.name;
     primarySel.appendChild(opt);
   });
-  // Reset to blank — the old primary is unlikely to belong to the new group
-  primarySel.value = '';
+  // Auto-default: if exactly one machine, pre-select it; otherwise blank.
+  if(machines.length === 1){
+    primarySel.value = machines[0];
+    // Update the label above this select to show "(auto)" and green tint.
+    // The label is the previousElementSibling of the select in getRoutingAdmin's DOM.
+    const label = primarySel.previousElementSibling;
+    if(label && label.tagName === 'DIV'){
+      label.textContent = 'Primary Capacity Machine (auto)';
+      label.style.color = 'var(--green)';
+    }
+  } else {
+    primarySel.value = '';
+    const label = primarySel.previousElementSibling;
+    if(label && label.tagName === 'DIV'){
+      label.textContent = 'Primary Capacity Machine (optional)';
+      label.style.color = 'var(--text-muted)';
+    }
+  }
 }
 
 function addRoutingStep(comp, ci){

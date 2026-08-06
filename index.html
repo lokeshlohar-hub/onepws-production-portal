@@ -9404,17 +9404,49 @@ function renderBomComponentPicker(p){
         const idx = bom.indexOf(b); // real index in the full bom for selectBomComponent
         const totalDone = b.route.length ? (b.stageData[b.route[b.route.length-1]]?.qcApproved || 0) : 0;
         const totalRej = (b.route||[]).reduce((s, st) => s + (b.stageData[st]?.qcRejected || 0), 0);
-        const pending = Math.max(0, b.qty - totalDone);
         const activeStage = currentActiveStageOfLine(b);
         const nextStage = activeStage ? (b.route[b.route.indexOf(activeStage)+1] || '— Final —') : '—';
+        // Phase 18 Round 4 fix — Pending must be per-current-stage, not
+        // per-line-lifetime. Server enforces per-stage: eligibleInputQty
+        // minus that stage's completed. If we display b.qty-totalDone
+        // instead, users think they can submit even when previous batch
+        // is stuck in qc_queue awaiting inspection — and get "0 available
+        // at this stage" from the server. Also surface the awaiting-QC
+        // state as its own visual so the confusion is resolved.
+        let pending = 0;
+        let awaitingQc = 0;
+        if(activeStage){
+          const elig = typeof eligibleInputQty === 'function' ? eligibleInputQty(b, activeStage) : b.qty;
+          const sd = b.stageData[activeStage] || {completed:0, qcQueue:0};
+          pending = Math.max(0, elig - (sd.completed || 0));
+          awaitingQc = sd.qcQueue || 0;
+        }
         const sizeStr = [b.l, b.w, b.t].filter(v => v).map(v => v+'').join(' × ');
         const isComplete = !activeStage;
+        // A row is un-actionable-for-production when (a) it's complete OR
+        // (b) it's fully in qc_queue with nothing left to submit at this
+        // stage. In case (b) we disable the checkbox and show "Awaiting QC"
+        // so the supervisor knows to go to Quality Control for it.
+        const isAwaitingQcOnly = !isComplete && pending === 0 && awaitingQc > 0;
         // Same-stage constraint — disable checkbox if a lock is set and
-        // this row's stage doesn't match. Complete lines are always disabled.
-        const canSelect = !isComplete && (!_bomSelState.lockedStage || _bomSelState.lockedStage === activeStage);
+        // this row's stage doesn't match. Complete + awaiting-QC-only lines are always disabled.
+        const canSelect = !isComplete && !isAwaitingQcOnly && (!_bomSelState.lockedStage || _bomSelState.lockedStage === activeStage);
         const isChecked = _bomSelState.selectedLineIds.has(b.lineId);
         const tooltip = isComplete ? 'Component is complete' :
-          (!canSelect ? 'Different stage (currently at "'+activeStage+'"). Clear selection to change locked stage.' : '');
+          (isAwaitingQcOnly ? awaitingQc+' pcs already at '+activeStage+' — waiting for QC approval before you can submit more' :
+          (!canSelect ? 'Different stage (currently at "'+activeStage+'"). Clear selection to change locked stage.' : ''));
+        // Current-stage cell — shows the stage name, plus "Awaiting QC (N)"
+        // subtitle when there are pcs in qcQueue at this stage.
+        let currentStageCell;
+        if(isComplete){
+          currentStageCell = '<span class="badge badge-complete">Complete</span>';
+        } else if(isAwaitingQcOnly){
+          currentStageCell = '<div class="text-xs">'+activeStage+'</div><div style="font-size:10.5px;color:#b45309"><b>&#128269; Awaiting QC ('+awaitingQc+')</b></div>';
+        } else if(awaitingQc > 0){
+          currentStageCell = '<div class="text-xs">'+activeStage+'</div><div style="font-size:10.5px;color:#b45309">&#128269; '+awaitingQc+' at QC</div>';
+        } else {
+          currentStageCell = activeStage;
+        }
         return '<tr' + (!canSelect && !isChecked ? ' style="opacity:.5"' : '') + '>'
           + '<td style="text-align:center">'
             + '<input type="checkbox" class="stage-bom-check" data-lineid="'+b.lineId+'" data-stage="'+(activeStage||'').replace(/"/g,'&quot;')+'"'
@@ -9432,7 +9464,7 @@ function renderBomComponentPicker(p){
           + '<td class="text-center font-mono text-success">'+totalDone+'</td>'
           + '<td class="text-center font-mono" style="color:'+(totalRej>0?'var(--red)':'inherit')+'">'+totalRej+'</td>'
           + '<td class="text-center font-mono fw-600">'+pending+'</td>'
-          + '<td class="text-xs">'+(isComplete ? '<span class="badge badge-complete">Complete</span>' : activeStage)+'</td>'
+          + '<td class="text-xs">'+currentStageCell+'</td>'
           + '<td class="text-xs text-muted">'+nextStage+'</td>'
           + '</tr>';
       }).join('')

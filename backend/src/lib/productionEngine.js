@@ -126,18 +126,25 @@ function isBoardStage(stageName) {
 function eligibleInputQty(line, stageName) {
   const idx = line.route.indexOf(stageName);
   if (idx < 0) return 0;
+  // Defensive numeric coercion — some columns can come back as strings from
+  // pg depending on the type (e.g. NUMERIC → string). A string "0" is truthy
+  // in JS and would short-circuit the || chain incorrectly. Coerce first.
+  const compRel = Number(line.components_released) || 0;
+  const origQty = Number(line.original_qty) || 0;
+  const qty = Number(line.qty) || 0;
 
   if (isBoardStage(stageName)) {
-    if (idx <= 0) return line.board_qty || 1;
+    const boardQty = Number(line.board_qty) || 1;
+    if (idx <= 0) return boardQty;
     const prevStage = line.route[idx - 1];
-    if (isBoardStage(prevStage)) return (line.stage_data[prevStage] || {}).qc_approved || 0;
-    return line.board_qty || 1;
+    if (isBoardStage(prevStage)) return Number((line.stage_data[prevStage] || {}).qc_approved) || 0;
+    return boardQty;
   }
-  if (idx <= 0) return line.components_released || line.original_qty || line.qty;
+  if (idx <= 0) return compRel || origQty || qty;
   const prevStage = line.route[idx - 1];
   const prevData = line.stage_data[prevStage] || {};
-  if (isSawStage(prevStage)) return line.components_released || 0;
-  return prevData.qc_approved || 0;
+  if (isSawStage(prevStage)) return compRel;
+  return Number(prevData.qc_approved) || 0;
 }
 
 // mirrors pendingQty()

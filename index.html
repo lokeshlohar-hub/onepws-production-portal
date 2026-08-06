@@ -1842,6 +1842,27 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
         <div class="card-body"><div class="chart-wrap" style="height:260px"><canvas id="rejChart"></canvas></div></div>
       </div>
     </div>
+    <!-- MODE TOGGLE — single QC inspection (existing) vs batch QC approval
+         (Phase 18 Round 2). Batch mode surfaces one screen where a QC
+         inspector picks a stage, sees every BOM line pending QC at that
+         stage, and approves multiple lines in one submission. Server
+         calls still go through apiSubmitQcDecision per line, so history
+         / rework / cascade / handover eligibility all fire per line
+         exactly as they do in single-inspection mode. Rejections still
+         go through the single-line modal (per-line disposition + category
+         + photo make batch reject impractical). -->
+    <div class="card mb-3">
+      <div class="card-body" style="padding:8px 12px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <span class="text-xs text-muted" style="font-weight:600;margin-right:6px">QC Mode:</span>
+        <button class="btn btn-sm" id="qcModeSingleBtn" onclick="setQcMode('single')" style="background:var(--accent);color:#fff;border:none">🔍 Single Inspect</button>
+        <button class="btn btn-outline btn-sm" id="qcModeBatchBtn" onclick="setQcMode('batch')">✓ Batch Approve</button>
+        <span class="text-xs text-muted" style="margin-left:auto" id="qcModeHint">Line-by-line inspection. Click Inspect on any queue row below.</span>
+      </div>
+    </div>
+
+    <!-- SINGLE-INSPECTION MODE — existing behavior. Wrapped so batch mode
+         can hide it via display:none without touching render code. -->
+    <div id="qcSingleModeArea">
     <div class="card mb-4">
       <div class="card-header">
         <div>
@@ -1856,6 +1877,90 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
           <thead><tr><th>Project</th><th>Component</th><th>Color / Finish &amp; Characteristics</th><th>Completed Stage</th><th>Qty in Queue</th><th>Next Stage</th><th>Action</th></tr></thead>
           <tbody id="qcQueueBody"></tbody>
         </table>
+      </div>
+    </div>
+    </div><!-- /qcSingleModeArea -->
+
+    <!-- BATCH APPROVE MODE — Phase 18 Round 2. Structurally parallel to
+         Batch Production Entry (Round 1): header form + components table +
+         results panel. Cross-project by default (QC is cross-project),
+         with a project filter dropdown to narrow scope when needed. -->
+    <div id="qcBatchModeArea" style="display:none">
+      <div class="card mb-4">
+        <div class="card-header">
+          <div>
+            <div class="card-title">✓ Batch QC Approval</div>
+            <div class="text-xs text-muted" style="margin-top:2px">Approve multiple BOM lines pending QC at the same stage in one submission. Inspector / instrument / shift / date / remarks entered once and applied to every approved line. Rejections still go through single-line inspection (per-line disposition, category, and photo required).</div>
+          </div>
+        </div>
+        <div class="card-body" style="padding:12px 14px">
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Stage <span class="req">*</span></label>
+              <select class="form-input" id="qcBatchStage" onchange="onQcBatchStageChange()">
+                <option value="">-- Select a stage --</option>
+              </select>
+              <div class="text-xs text-muted" style="margin-top:3px">Only stages with lines pending QC are listed.</div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Project filter</label>
+              <select class="form-input" id="qcBatchProjFilter" onchange="refreshQcBatchList()">
+                <option value="">All projects</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">QC Inspector <span class="req">*</span></label>
+              <select class="form-input" id="qcBatchInspector">
+                <option value="">-- Select inspector --</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Instrument <span class="text-xs text-muted">(optional)</span></label>
+              <input type="text" class="form-input" id="qcBatchInstrument" placeholder="e.g. Vernier Caliper VC-01">
+              <div class="text-xs text-muted" style="margin-top:3px">Free text — tag no. + name, if applicable.</div>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Shift <span class="req">*</span></label>
+              <select class="form-input" id="qcBatchShift">
+                <option value="day">🌞 Day Shift</option>
+                <option value="night">🌙 Night Shift</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Date <span class="req">*</span></label>
+              <input type="date" class="form-input" id="qcBatchDate">
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Remarks <span class="text-xs text-muted">(applied to every approved line)</span></label>
+            <textarea class="form-textarea" id="qcBatchRemark" rows="2" placeholder="Optional — one remark shared by every approved line"></textarea>
+          </div>
+        </div>
+      </div>
+
+      <div class="card mb-4">
+        <div class="card-header">
+          <div>
+            <div class="card-title" id="qcBatchTableTitle">Lines Awaiting QC at This Stage</div>
+            <div class="text-xs text-muted" style="margin-top:2px" id="qcBatchTableSub">Pick a stage above to load the list.</div>
+          </div>
+          <div style="display:flex;gap:6px;align-items:center">
+            <button class="btn btn-outline btn-sm" onclick="toggleQcBatchSelectAll()" id="qcBatchSelectAllBtn" style="display:none">☑ Select All</button>
+            <button class="btn btn-success" onclick="submitQcBatchApproval()" id="qcBatchSubmitBtn" style="display:none">✓ Approve Selected</button>
+          </div>
+        </div>
+        <div class="card-body" style="padding:0" id="qcBatchTableWrap">
+          <div class="text-sm text-muted" style="padding:20px;text-align:center">Select a stage to see pending QC lines.</div>
+        </div>
+      </div>
+
+      <div class="card mb-4" id="qcBatchResultCard" style="display:none">
+        <div class="card-header"><div class="card-title" id="qcBatchResultTitle">Batch Approval Results</div></div>
+        <div class="card-body" id="qcBatchResultBody"></div>
       </div>
     </div>
     <div class="card">
@@ -10873,6 +10978,298 @@ function processQcDecision(p, b, stageName, approveQty, rejectQty, disposition, 
   } else {
     toast('QC recorded: '+approveQty+' approved'+(rejectQty>0?', '+rejectQty+' → '+disposition+' ('+category+')':'')+' for "'+b.item+'"','✓');
   }
+}
+
+// ============ BATCH QC APPROVAL — Phase 18 Round 2 ============
+// One-screen batch approval for BOM lines pending QC at a chosen stage.
+// Cross-project by default (QC page is cross-project), with an optional
+// project filter to narrow scope. Rejections are NOT batched — they
+// still go through the single-line QC modal because each rejection
+// requires its own disposition, category, and photo. Each approve fires
+// apiSubmitQcDecision per line so history / rework / cascade / handover
+// eligibility all behave exactly the same as single-line inspection.
+
+let _qcBatchState = { stage:'', projFilter:'', rows:[] };
+
+function setQcMode(mode){
+  const singleBtn = document.getElementById('qcModeSingleBtn');
+  const batchBtn = document.getElementById('qcModeBatchBtn');
+  const singleArea = document.getElementById('qcSingleModeArea');
+  const batchArea = document.getElementById('qcBatchModeArea');
+  const hint = document.getElementById('qcModeHint');
+  if(!singleBtn || !batchBtn) return;
+  if(mode === 'batch'){
+    singleBtn.className = 'btn btn-outline btn-sm';
+    singleBtn.style.background = '';
+    singleBtn.style.color = '';
+    batchBtn.className = 'btn btn-sm';
+    batchBtn.style.background = 'var(--accent)';
+    batchBtn.style.color = '#fff';
+    batchBtn.style.border = 'none';
+    singleArea.style.display = 'none';
+    batchArea.style.display = 'block';
+    if(hint) hint.textContent = 'One submission approves N lines at the same stage. Rejections still go through single inspect.';
+    initQcBatchScreen();
+  } else {
+    batchBtn.className = 'btn btn-outline btn-sm';
+    batchBtn.style.background = '';
+    batchBtn.style.color = '';
+    batchBtn.style.border = '';
+    singleBtn.className = 'btn btn-sm';
+    singleBtn.style.background = 'var(--accent)';
+    singleBtn.style.color = '#fff';
+    singleBtn.style.border = 'none';
+    singleArea.style.display = 'block';
+    batchArea.style.display = 'none';
+    if(hint) hint.textContent = 'Line-by-line inspection. Click Inspect on any queue row below.';
+  }
+}
+
+function initQcBatchScreen(){
+  // Populate stage dropdown from stages that have at least one BOM line
+  // with qcQueue > 0 across all projects.
+  const pendingByStage = {}; // stage → array of {p,b,st,qty}
+  DB.projects.forEach(p => {
+    (p.bom||[]).forEach(b => {
+      ensureBomLineStructure(b);
+      (b.route||[]).forEach(st => {
+        const sd = b.stageData[st];
+        if(sd && sd.qcQueue > 0){
+          if(!pendingByStage[st]) pendingByStage[st] = [];
+          pendingByStage[st].push({ p, b, st, qty: sd.qcQueue });
+        }
+      });
+    });
+  });
+  const stageSel = document.getElementById('qcBatchStage');
+  const stages = Object.keys(pendingByStage).sort();
+  stageSel.innerHTML = '<option value="">-- Select a stage --</option>'
+    + stages.map(st => '<option value="'+st.replace(/"/g,'&quot;')+'">'+st+' ('+pendingByStage[st].length+' line'+(pendingByStage[st].length===1?'':'s')+' pending)</option>').join('');
+  // Project filter — populated with all projects that have anything pending
+  const projSet = new Set();
+  Object.values(pendingByStage).forEach(arr => arr.forEach(r => projSet.add(r.p.id)));
+  const projSel = document.getElementById('qcBatchProjFilter');
+  projSel.innerHTML = '<option value="">All projects</option>'
+    + Array.from(projSet).map(pid => {
+        const p = DB.projects.find(x => x.id === pid);
+        return p ? '<option value="'+pid+'">'+p.sap+' — '+(p.customer||'')+'</option>' : '';
+      }).filter(Boolean).join('');
+  // Inspector dropdown
+  const inspSel = document.getElementById('qcBatchInspector');
+  inspSel.innerHTML = '<option value="">-- Select inspector --</option>'
+    + (M.qcInspectors||[]).filter(q => q.active !== false).map(q => '<option value="'+q.name.replace(/"/g,'&quot;')+'">'+q.name+'</option>').join('');
+  // Default date to today
+  const dateInput = document.getElementById('qcBatchDate');
+  if(!dateInput.value) dateInput.value = new Date().toISOString().slice(0,10);
+  // Reset state
+  _qcBatchState = { stage:'', projFilter:'', rows:[] };
+  document.getElementById('qcBatchRemark').value = '';
+  document.getElementById('qcBatchInstrument').value = '';
+  document.getElementById('qcBatchTableWrap').innerHTML = '<div class="text-sm text-muted" style="padding:20px;text-align:center">Select a stage above to load pending QC lines.</div>';
+  document.getElementById('qcBatchSelectAllBtn').style.display = 'none';
+  document.getElementById('qcBatchSubmitBtn').style.display = 'none';
+  document.getElementById('qcBatchResultCard').style.display = 'none';
+}
+
+function onQcBatchStageChange(){
+  _qcBatchState.stage = document.getElementById('qcBatchStage').value;
+  refreshQcBatchList();
+}
+
+function refreshQcBatchList(){
+  const st = _qcBatchState.stage;
+  const projFilter = document.getElementById('qcBatchProjFilter').value;
+  _qcBatchState.projFilter = projFilter;
+  const wrap = document.getElementById('qcBatchTableWrap');
+  if(!st){
+    wrap.innerHTML = '<div class="text-sm text-muted" style="padding:20px;text-align:center">Select a stage above to load pending QC lines.</div>';
+    document.getElementById('qcBatchSelectAllBtn').style.display = 'none';
+    document.getElementById('qcBatchSubmitBtn').style.display = 'none';
+    return;
+  }
+  // Collect all BOM lines pending QC at this stage — apply project filter
+  const rows = [];
+  DB.projects.forEach(p => {
+    if(projFilter && p.id !== projFilter) return;
+    (p.bom||[]).forEach(b => {
+      ensureBomLineStructure(b);
+      if(!(b.route||[]).includes(st)) return;
+      const sd = b.stageData[st];
+      if(sd && sd.qcQueue > 0){
+        rows.push({
+          projId: p.id, projSap: p.sap, customer: p.customer||'',
+          lineId: b.lineId, item: b.item, description: b.description||'',
+          isRework: !!b.isRework, pending: sd.qcQueue, unit: b.uom||'pcs',
+          selected: false, approveQty: sd.qcQueue,
+        });
+      }
+    });
+  });
+  _qcBatchState.rows = rows;
+  document.getElementById('qcBatchTableTitle').textContent = 'Lines Awaiting QC at "' + st + '"';
+  document.getElementById('qcBatchTableSub').textContent = rows.length + ' line' + (rows.length===1?'':'s') + ' pending' + (projFilter?' (filtered by project)':' (all projects)');
+  if(!rows.length){
+    wrap.innerHTML = '<div class="text-sm text-muted" style="padding:20px;text-align:center">No BOM lines are currently pending QC at this stage.</div>';
+    document.getElementById('qcBatchSelectAllBtn').style.display = 'none';
+    document.getElementById('qcBatchSubmitBtn').style.display = 'none';
+    return;
+  }
+  wrap.innerHTML =
+    '<div style="overflow:auto">'
+    +'<table style="width:100%">'
+      +'<thead><tr>'
+        +'<th style="width:40px;text-align:center">✓</th>'
+        +'<th style="width:110px">Project</th>'
+        +'<th>Component</th>'
+        +'<th style="width:110px">Line ID</th>'
+        +'<th style="width:100px;text-align:center">Pending</th>'
+        +'<th style="width:130px;text-align:center">Approve Qty</th>'
+        +'<th style="width:110px;text-align:center">Reject</th>'
+      +'</tr></thead>'
+      +'<tbody>'
+      + rows.map((r, i) =>
+        '<tr>'
+        +'<td style="text-align:center"><input type="checkbox" class="qc-batch-row-check" data-idx="'+i+'" onchange="onQcBatchRowToggle('+i+')"></td>'
+        +'<td class="font-mono text-xs">'+r.projSap+(r.customer?'<div class="text-xs text-muted">'+r.customer+'</div>':'')+'</td>'
+        +'<td><div class="fw-600">'+r.item+'</div>'+(r.description?'<div class="text-xs text-muted">'+r.description+'</div>':'')+(r.isRework?'<span class="badge" style="background:#fef3c7;color:#92400e;font-size:9px;margin-left:4px">🔄 Rework</span>':'')+'</td>'
+        +'<td class="font-mono text-xs">'+r.lineId+'</td>'
+        +'<td class="text-center font-mono">'+r.pending+' '+r.unit+'</td>'
+        +'<td><input type="number" class="form-input qc-batch-qty-input" data-idx="'+i+'" style="height:28px;text-align:center" min="0" max="'+r.pending+'" value="'+r.approveQty+'" onchange="onQcBatchQtyChange('+i+',this.value)"></td>'
+        +'<td class="text-center"><button class="btn btn-outline btn-sm" style="height:26px;font-size:11px;padding:2px 8px" onclick="openQcInspect(\''+r.projId+'\',\''+r.lineId+'\',\''+st.replace(/'/g,"\\'")+'\')" title="Open single-line inspection to reject with disposition + category + photo">⛔ Reject…</button></td>'
+        +'</tr>'
+      ).join('')
+      +'</tbody>'
+    +'</table>'
+    +'</div>';
+  document.getElementById('qcBatchSelectAllBtn').style.display = 'inline-flex';
+  document.getElementById('qcBatchSubmitBtn').style.display = 'inline-flex';
+  updateQcBatchSubmitLabel();
+}
+
+function onQcBatchRowToggle(i){
+  const cb = document.querySelector('.qc-batch-row-check[data-idx="'+i+'"]');
+  _qcBatchState.rows[i].selected = !!(cb && cb.checked);
+  updateQcBatchSubmitLabel();
+}
+
+function onQcBatchQtyChange(i, val){
+  const n = Math.max(0, Math.min(_qcBatchState.rows[i].pending, parseInt(val)||0));
+  _qcBatchState.rows[i].approveQty = n;
+  const inp = document.querySelector('.qc-batch-qty-input[data-idx="'+i+'"]');
+  if(inp) inp.value = n;
+}
+
+function toggleQcBatchSelectAll(){
+  const anyUnchecked = _qcBatchState.rows.some(r => !r.selected);
+  _qcBatchState.rows.forEach((r,i) => {
+    r.selected = anyUnchecked;
+    const cb = document.querySelector('.qc-batch-row-check[data-idx="'+i+'"]');
+    if(cb) cb.checked = anyUnchecked;
+  });
+  updateQcBatchSubmitLabel();
+}
+
+function updateQcBatchSubmitLabel(){
+  const n = _qcBatchState.rows.filter(r => r.selected).length;
+  const btn = document.getElementById('qcBatchSubmitBtn');
+  const selAllBtn = document.getElementById('qcBatchSelectAllBtn');
+  if(btn){
+    btn.textContent = '✓ Approve ' + (n ? n + ' Selected' : 'Selected');
+    btn.disabled = n === 0;
+  }
+  if(selAllBtn){
+    const anyUnchecked = _qcBatchState.rows.some(r => !r.selected);
+    selAllBtn.textContent = anyUnchecked ? '☑ Select All' : '☐ Clear All';
+  }
+}
+
+async function submitQcBatchApproval(){
+  const st = _qcBatchState.stage;
+  const selected = _qcBatchState.rows.filter(r => r.selected);
+  if(!st){ toast('Select a stage first.','⚠'); return; }
+  if(!selected.length){ toast('Select at least one line to approve.','⚠'); return; }
+  const inspector = document.getElementById('qcBatchInspector').value;
+  const instrumentText = document.getElementById('qcBatchInstrument').value.trim();
+  const shift = document.getElementById('qcBatchShift').value;
+  const date = document.getElementById('qcBatchDate').value;
+  const remark = document.getElementById('qcBatchRemark').value.trim();
+  if(!inspector){ toast('Select a QC inspector.','⚠'); return; }
+  if(!shift){ toast('Select a shift.','⚠'); return; }
+  if(!date){ toast('Select a date.','⚠'); return; }
+  // Instrument payload — server accepts an object {tagNo,name,nextDueDate}
+  // or null. From batch text input, put the whole string in the name field
+  // so it flows through to history without needing a full instrument-master
+  // dropdown here (single-mode does that; batch keeps it lightweight).
+  const instrumentPayload = instrumentText ? { tagNo:'', name: instrumentText, nextDueDate: null } : null;
+  const results = [];
+  const btn = document.getElementById('qcBatchSubmitBtn');
+  const originalText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Approving…';
+  for(const row of selected){
+    if(row.approveQty <= 0){
+      results.push({ item: row.item, lineId: row.lineId, qty: row.approveQty, ok: false, error: 'Approve qty is 0 — nothing to submit.' });
+      continue;
+    }
+    try{
+      // Approve-only path — rejectQty=0, no disposition/category/photo
+      const payload = {
+        stage: st,
+        approveQty: row.approveQty,
+        rejectQty: 0,
+        disposition: null,
+        category: null,
+        qcPerson: inspector,
+        remarks: remark,
+        instrument: instrumentPayload,
+        photoData: null,
+      };
+      await apiSubmitQcDecision(row.lineId, payload);
+      results.push({ item: row.item, projSap: row.projSap, lineId: row.lineId, qty: row.approveQty, ok: true });
+    } catch(err){
+      results.push({ item: row.item, projSap: row.projSap, lineId: row.lineId, qty: row.approveQty, ok: false, error: err.message || String(err) });
+    }
+  }
+  // Refresh local state from server so QC queue counters reflect the approvals
+  try{ if(typeof loadProjectsFromServer === 'function') await loadProjectsFromServer(); }catch(e){}
+  const okCount = results.filter(r => r.ok).length;
+  const failCount = results.length - okCount;
+  showQcBatchResults(results, st);
+  if(okCount) toast('✓ Batch: '+okCount+' line(s) approved and advanced.'+(failCount?' '+failCount+' failed — see summary below.':''), okCount ? '✓' : '⚠');
+  // Refresh the batch screen so approved lines drop out of the pending list
+  initQcBatchScreen();
+  btn.disabled = false;
+  btn.textContent = originalText;
+}
+
+function showQcBatchResults(results, st){
+  const card = document.getElementById('qcBatchResultCard');
+  const title = document.getElementById('qcBatchResultTitle');
+  const body = document.getElementById('qcBatchResultBody');
+  const okCount = results.filter(r => r.ok).length;
+  const failCount = results.length - okCount;
+  title.textContent = 'Batch Approval Results — ' + st;
+  const rowsHTML = results.map(r =>
+    '<tr>'
+    +'<td>'+(r.ok ? '<span style="color:var(--green);font-weight:700">✓ OK</span>' : '<span style="color:var(--red);font-weight:700">✗ Fail</span>')+'</td>'
+    +'<td class="font-mono text-xs">'+(r.projSap||'')+'</td>'
+    +'<td>'+r.item+'</td>'
+    +'<td class="font-mono text-xs">'+r.lineId+'</td>'
+    +'<td class="text-center font-mono">'+r.qty+'</td>'
+    +'<td class="text-sm">'+(r.ok ? 'Approved and advanced' : r.error || 'Failed')+'</td>'
+    +'</tr>'
+  ).join('');
+  body.innerHTML =
+    '<div style="display:flex;gap:14px;margin-bottom:10px;font-size:13px">'
+    +'<div><b style="color:var(--green)">'+okCount+'</b> approved</div>'
+    +(failCount ? '<div><b style="color:var(--red)">'+failCount+'</b> failed</div>' : '')
+    +'</div>'
+    +'<table style="width:100%">'
+      +'<thead><tr><th style="width:70px">Status</th><th style="width:100px">Project</th><th>Component</th><th style="width:110px">Line ID</th><th style="width:80px;text-align:center">Qty</th><th>Detail</th></tr></thead>'
+      +'<tbody>'+rowsHTML+'</tbody>'
+    +'</table>';
+  card.style.display = 'block';
+  setTimeout(()=>card.scrollIntoView({behavior:'smooth', block:'nearest'}), 100);
 }
 
 // ------ REJECT & REWORK LOG (lives in Quality Control module) ------

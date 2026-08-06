@@ -10,6 +10,107 @@
 
 const { pool } = require('../db');
 
+// Self-healing helper — when a stage submit or QC decision hits a line
+// whose stage_data doesn't yet contain the target stage, this checks
+// whether the stage exists in the master componentRouting for the line's
+// item (admin_config JSONB). If yes, inserts the stage into line.route
+// at the correct master-order position and initializes an empty
+// stage_data entry, then persists the amended line inside the caller's
+// transaction so the submit proceeds normally.
+//
+// Also normalizes case + whitespace drift: if stage_data has the stage
+// under a slightly different key (e.g. "Din Rail Cutter" vs "Din rail
+// cutter"), rewrites to the requested spelling so the caller's
+// subsequent line.stage_data[stageName] lookup succeeds.
+//
+// Returns true if the line now has the stage (either it already did,
+// case-normalized, or it was newly added). Returns false only when the
+// stage isn't in master routing either — genuine "stage doesn't belong
+// to this line" case which the caller then errors on.
+async function ensureLineHasStage(client, line, stageName) {
+  console.log('[healStage] Called for line', line.line_id, 'item="' + line.item + '" stage="' + stageName + '"');
+  if (!stageName) { console.log('[healStage] no stageName; returning false'); return false; }
+  const norm = String(stageName).trim().toLowerCase();
+  // Case-insensitive scan of existing stage_data first — most common
+  // healing scenario (canonicalization drift).
+  console.log('[healStage] Existing stage_data keys:', Object.keys(line.stage_data));
+  const existingKey = Object.keys(line.stage_data).find(
+    k => String(k).trim().toLowerCase() === norm
+  );
+  if (existingKey) {
+    console.log('[healStage] Found existing key by case-insensitive match:', existingKey);
+    if (existingKey !== stageName) {
+      // Rewrite under the requested spelling; preserve counters/history
+      line.stage_data[stageName] = line.stage_data[existingKey];
+      delete line.stage_data[existingKey];
+      const routeIdx = line.route.findIndex(
+        r => String(r).trim().toLowerCase() === norm
+      );
+      if (routeIdx >= 0) line.route[routeIdx] = stageName;
+      await client.query(
+        'UPDATE bom_lines SET route = $1, stage_data = $2 WHERE line_id = $3',
+        [JSON.stringify(line.route), JSON.stringify(line.stage_data), line.line_id]
+      );
+    }
+    return true;
+  }
+  // Not in stage_data — check master routing. Load admin_config's
+  // componentRouting for this line's item and see if the stage exists there.
+  // Item lookup is case-insensitive: if the config was keyed as "Din Rail"
+  // but the BOM line stored the item as "Din rail" (or vice versa), the
+  // strict-equality lookup would silently miss and the healing wouldn't
+  // fire. So we scan the config keys with a normalized comparison.
+  const cfgRes = await client.query(
+    "SELECT config_value FROM admin_config WHERE config_key = 'componentRouting'"
+  );
+  console.log('[healStage] admin_config query returned', cfgRes.rows.length, 'rows');
+  if (!cfgRes.rows.length) { console.log('[healStage] No componentRouting row in admin_config; returning false'); return false; }
+  const masterRoutings = cfgRes.rows[0].config_value || {};
+  console.log('[healStage] Master routing item keys:', Object.keys(masterRoutings));
+  const itemNorm = String(line.item || '').trim().toLowerCase();
+  const itemKey = Object.keys(masterRoutings).find(
+    k => String(k).trim().toLowerCase() === itemNorm
+  );
+  if (!itemKey) { console.log('[healStage] Item "' + line.item + '" (norm="' + itemNorm + '") not found in masterRoutings; returning false'); return false; }
+  console.log('[healStage] Matched item key:', itemKey);
+  const masterRoute = masterRoutings[itemKey];
+  if (!Array.isArray(masterRoute)) { console.log('[healStage] masterRoute is not an array:', typeof masterRoute); return false; }
+  console.log('[healStage] Master route for this item:', masterRoute);
+  const masterIdx = masterRoute.findIndex(
+    s => String(s).trim().toLowerCase() === norm
+  );
+  if (masterIdx < 0) { console.log('[healStage] Stage "' + stageName + '" not found in masterRoute; returning false'); return false; }
+  console.log('[healStage] Stage found in master at index', masterIdx);
+  const canonicalStageName = masterRoute[masterIdx];
+  // Find where to insert in line.route: after the previous master-order
+  // stage that already exists in line.route. Falls back to appending at
+  // end if no earlier master stage is found in the line's snapshot.
+  let insertAt = line.route.length;
+  for (let i = masterIdx - 1; i >= 0; i--) {
+    const prevMaster = masterRoute[i];
+    const prevIdx = line.route.findIndex(
+      r => String(r).trim().toLowerCase() === String(prevMaster).trim().toLowerCase()
+    );
+    if (prevIdx >= 0) { insertAt = prevIdx + 1; break; }
+  }
+  if (masterIdx === 0) insertAt = 0;
+  line.route.splice(insertAt, 0, canonicalStageName);
+  line.stage_data[canonicalStageName] = {
+    completed: 0, qc_queue: 0, qc_approved: 0, qc_rejected: 0,
+    rework: 0, scrap: 0, history: []
+  };
+  await client.query(
+    'UPDATE bom_lines SET route = $1, stage_data = $2 WHERE line_id = $3',
+    [JSON.stringify(line.route), JSON.stringify(line.stage_data), line.line_id]
+  );
+  // If the caller passed a name with a different casing from master, honor
+  // caller's spelling by aliasing (both keys point to the same object).
+  if (canonicalStageName !== stageName) {
+    line.stage_data[stageName] = line.stage_data[canonicalStageName];
+  }
+  return true;
+}
+
 // Stages that work in "boards" rather than individual components before the
 // board->component conversion happens. Hardcoded for Phase 1 since the
 // admin-configurable stage-type system (M.stageConfig) still lives only on
@@ -73,10 +174,7 @@ function withDefaults(line) {
 
 // mirrors applyBoardToComponentConversion()
 function applyBoardToComponentConversion(line, sawStageName, boardsApproved) {
-  // Use ?? not || so an explicit boardQty of 0 is preserved (means "this
-  // line shares its board with an earlier line — see cascadeSharedBoard
-  // in processQcDecision"). With ||, 0 was silently overridden to 1.
-  const boardQty = line.board_qty ?? 1;
+  const boardQty = line.board_qty || 1;
   const compQty = line.qty || 1;
   const ratio = compQty / boardQty;
   const newComponents = Math.round(boardsApproved * ratio);
@@ -88,68 +186,6 @@ function applyBoardToComponentConversion(line, sawStageName, boardsApproved) {
     qty: boardsApproved,
     action: `Conversion: ${boardsApproved} boards approved → ${newComponents} components released for downstream (ratio ${ratio.toFixed(2)})`,
   });
-}
-
-// Positional shared-board cascade — Phase 12. When the "owner" line B's
-// Beam Saw QC clears with boardsApproved boards approved, any consecutive
-// lines in the same segment following B with board_qty = 0 are "linked":
-// they share the same physical board (e.g. four SHUTTER components cut
-// from one optimized board). Cascading releases those linked components
-// downstream so operators only enter board counts on the owner line
-// while the linked lines' downstream routing becomes available
-// automatically. Stops at the first sibling with board_qty > 0 (which
-// is the next owner), or at the end of the segment. Returns the list of
-// linked lines that were updated so the caller can persist each.
-async function cascadeSharedBoard(client, ownerLine, ownerSawStage, boardsApproved) {
-  const { rows: segRows } = await client.query(
-    'SELECT * FROM bom_lines WHERE project_id = $1 AND seg = $2 ORDER BY line_id',
-    [ownerLine.project_id, ownerLine.seg]
-  );
-  const segLines = segRows.map(withDefaults);
-  const idx = segLines.findIndex((l) => l.line_id === ownerLine.line_id);
-  if (idx < 0) return [];
-  const cascaded = [];
-  for (let i = idx + 1; i < segLines.length; i++) {
-    const sibling = segLines[i];
-    // Only true zero counts as "linked". A missing/null board_qty falls
-    // back to the default in withDefaults, so it's never null here —
-    // treat undefined/null as owner-boundary too, to be safe.
-    if (sibling.board_qty !== 0) break;
-    // Proportional cascade: if only some of owner's boards approved,
-    // release a proportional share of the sibling's components. Owner
-    // approving all boards releases sibling in full. This lets a partial
-    // Beam Saw QC (e.g. 2 of 5 boards done) progress linked components
-    // partially too, which matches the "one board yielded some units of
-    // multiple part numbers" reality.
-    const ownerBoardQty = ownerLine.board_qty ?? 1;
-    const siblingCompQty = sibling.qty || 1;
-    const cascadeQty =
-      boardsApproved >= ownerBoardQty
-        ? siblingCompQty
-        : Math.floor(siblingCompQty * (boardsApproved / ownerBoardQty));
-    if (cascadeQty <= 0) continue;
-    sibling.components_released = (sibling.components_released || 0) + cascadeQty;
-    // Log the cascade on the sibling's Beam Saw stage if present so the
-    // Stage-wise Production history reads clearly ("cascade from BL-...").
-    // Falls back to the sibling's first stage if no saw stage on route.
-    const sawStage = (sibling.route || []).find((s) => isSawStage(s));
-    const targetStage = sawStage || (sibling.route || [])[0];
-    if (targetStage && sibling.stage_data[targetStage]) {
-      sibling.stage_data[targetStage].history.push({
-        ts: new Date().toISOString(),
-        ws: 'CASCADE',
-        operator: 'Auto',
-        qty: cascadeQty,
-        action: `Cascade: shared board from ${ownerLine.item} (${ownerLine.line_id}) → ${cascadeQty} components released downstream`,
-      });
-    }
-    await client.query(
-      'UPDATE bom_lines SET stage_data = $1, components_released = $2 WHERE line_id = $3',
-      [JSON.stringify(sibling.stage_data), sibling.components_released, sibling.line_id]
-    );
-    cascaded.push({ line_id: sibling.line_id, cascadeQty });
-  }
-  return cascaded;
 }
 
 async function nextBomLineId(client) {
@@ -232,7 +268,11 @@ async function processQcDecision(lineId, { stageName, approveQty, rejectQty, dis
     const { rows } = await client.query('SELECT * FROM bom_lines WHERE line_id = $1 FOR UPDATE', [lineId]);
     if (!rows.length) throw new Error('BOM line not found');
     const line = withDefaults(rows[0]);
-    const sd = line.stage_data[stageName];
+    let sd = line.stage_data[stageName];
+    if (!sd) {
+      const healed = await ensureLineHasStage(client, line, stageName);
+      if (healed) sd = line.stage_data[stageName];
+    }
     if (!sd) throw new Error(`Stage "${stageName}" is not on this line's route`);
 
     const projRes = await client.query('SELECT sap FROM projects WHERE id = $1', [line.project_id]);
@@ -241,15 +281,8 @@ async function processQcDecision(lineId, { stageName, approveQty, rejectQty, dis
     sd.qc_queue -= approveQty + rejectQty;
     sd.qc_approved += approveQty;
 
-    let cascadedSiblings = [];
     if (isSawStage(stageName) && approveQty > 0) {
       applyBoardToComponentConversion(line, stageName, approveQty);
-      // Cascade the release to any consecutive same-segment BOM lines
-      // with board_qty = 0 following this one — the "shared board"
-      // workflow where multiple components come from one physical board.
-      // Runs inside the same transaction so partial-cascade half-states
-      // aren't possible; either all linked lines update or none do.
-      cascadedSiblings = await cascadeSharedBoard(client, line, stageName, approveQty);
     }
 
     let reworkLine = null;
@@ -310,7 +343,7 @@ async function processQcDecision(lineId, { stageName, approveQty, rejectQty, dis
     const progress = await refreshProjectProgress(client, line.project_id);
 
     await client.query('COMMIT');
-    return { originalLine: line, reworkLine, projectProgress: progress, cascadedSiblings };
+    return { originalLine: line, reworkLine, projectProgress: progress };
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;
@@ -321,14 +354,19 @@ async function processQcDecision(lineId, { stageName, approveQty, rejectQty, dis
 
 // Operator submits a completed quantity at a stage — moves it from "pending"
 // into "awaiting QC" (qc_queue). Mirrors the frontend's submitStageEntry().
-async function submitStageEntry(lineId, { stageName, qty, operator, shift, remark, assBatchNos, adhesiveBatchNo, adhesiveExpiryDate, roomTemperature, materialFinish }) {
+async function submitStageEntry(lineId, { stageName, qty, operator, shift, remark, assBatchNos, adhesiveBatchNo, adhesiveExpiryDate }) {
+  console.log('[submitStageEntry] v2-healing lineId=' + lineId + ' stage="' + stageName + '" qty=' + qty);
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const { rows } = await client.query('SELECT * FROM bom_lines WHERE line_id = $1 FOR UPDATE', [lineId]);
     if (!rows.length) throw new Error('BOM line not found');
     const line = withDefaults(rows[0]);
-    const sd = line.stage_data[stageName];
+    let sd = line.stage_data[stageName];
+    if (!sd) {
+      const healed = await ensureLineHasStage(client, line, stageName);
+      if (healed) sd = line.stage_data[stageName];
+    }
     if (!sd) throw new Error(`Stage "${stageName}" is not on this line's route`);
 
     const available = pendingQty(line, stageName);
@@ -350,35 +388,6 @@ async function submitStageEntry(lineId, { stageName, qty, operator, shift, remar
     if (Array.isArray(assBatchNos) && assBatchNos.length) historyEntry.assBatchNos = assBatchNos;
     if (adhesiveBatchNo) historyEntry.adhesiveBatchNo = adhesiveBatchNo;
     if (adhesiveExpiryDate) historyEntry.adhesiveExpiryDate = adhesiveExpiryDate;
-    // Room Temperature (°C) — optional Fabrication-stage traceability field.
-    // Stored on the history entry alongside adhesive batch/expiry so future
-    // audits can correlate curing conditions with adhesive lot. Number-typed
-    // check so an empty string, 0, and NaN behave sensibly: 0 is a legal
-    // value (unlikely at Fabrication but valid), '' means "not entered".
-    if (roomTemperature !== undefined && roomTemperature !== null && roomTemperature !== '') {
-      const n = Number(roomTemperature);
-      if (Number.isFinite(n)) historyEntry.roomTemperature = n;
-    }
-    // Material Finish — mandatory dropdown at Final Polishing stage. Must be
-    // one of the three whitelisted values (Matte / Semi Gloss / Gloss). Server
-    // enforces both the mandatory-ness AND the whitelist here — a direct API
-    // call that skips the frontend dropdown can't sneak in a free-text value.
-    // Non-Final-Polishing stages silently ignore materialFinish if it comes
-    // through so a client that always sends it does no harm.
-    const FINAL_POLISHING_STAGES = new Set(['a.s.s. final polishing', 'a.s.s. final polish', 'final polishing', 'final polish']);
-    const VALID_FINISHES = new Set(['Matte', 'Semi Gloss', 'Gloss']);
-    const isFinalPolishingStage = FINAL_POLISHING_STAGES.has(String(stageName || '').trim().toLowerCase());
-    if (isFinalPolishingStage) {
-      if (!materialFinish || !VALID_FINISHES.has(materialFinish)) {
-        throw new Error('Material Finish is required at Final Polishing and must be one of: Matte, Semi Gloss, Gloss');
-      }
-      historyEntry.materialFinish = materialFinish;
-    } else if (materialFinish && VALID_FINISHES.has(materialFinish)) {
-      // If a valid finish came through on a non-Final-Polishing stage,
-      // still record it — defensive so future stages that legitimately
-      // capture finish don't need engine changes.
-      historyEntry.materialFinish = materialFinish;
-    }
     sd.history.push(historyEntry);
 
     await client.query('UPDATE bom_lines SET stage_data = $1 WHERE line_id = $2', [JSON.stringify(line.stage_data), lineId]);

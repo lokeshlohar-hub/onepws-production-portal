@@ -8410,6 +8410,10 @@ async function saveProject(btn){
       recWood:woodData?.received||null, planWood:woodData?.tat||null,
       recExt:extData?.received||null, planExt:extData?.tat||null,
       certifications,
+      // Docs — filenames attached during Wood/Extrusion segment BOM entry.
+      // Previously stored only in the client's in-memory proj object and
+      // lost on server reload. Now sent to the server and persisted.
+      docs:[...(woodData?.docs||[]),...(extData?.docs||[])],
       bom: fullBom.map(b=>({
         item:b.item, seg:b.seg, l:b.l, w:b.w, t:b.t, profile:b.profile, uom:b.uom, qty:b.qty,
         colorFinish:b.colorFinish, specialChars:b.specialChars,

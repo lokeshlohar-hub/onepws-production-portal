@@ -6,6 +6,21 @@ const engine = require('../lib/productionEngine');
 const router = express.Router();
 router.use(requireAuth);
 
+// One-time schema-init — ensures the projects table has a docs column for
+// storing filenames (or JSON list of attachment refs) attached during BOM
+// creation. Idempotent: ADD COLUMN IF NOT EXISTS is a no-op after the
+// first successful run, so it's safe to execute on every server start.
+// This is the pattern used because scripts/migrate.js runs manually and
+// we want new columns to just show up on next deploy without operator
+// intervention.
+(async () => {
+  try {
+    await pool.query(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS docs JSONB DEFAULT '[]'::jsonb`);
+  } catch (err) {
+    console.error('[schema-init] Failed to ensure projects.docs column:', err.message);
+  }
+})();
+
 // GET /api/projects — list all projects, each with its full BOM embedded
 // (the frontend needs this to populate DB.projects in one shot on login)
 router.get('/', async (req, res) => {
@@ -49,13 +64,15 @@ router.post('/', requireRole('admin', 'superadmin'), async (req, res) => {
 
     await client.query(
       `INSERT INTO projects (id, sap, type, category, customer, pm, eng, po, has_wood, has_ext,
-         rec_wood, plan_wood, rec_ext, plan_ext, certifications, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+         rec_wood, plan_wood, rec_ext, plan_ext, certifications, docs, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
       [
         projectId, body.sap, body.type, body.category, body.customer, body.pm, body.eng, body.po || '',
         !!body.hasWood, !!body.hasExt,
         body.recWood || null, body.planWood || null, body.recExt || null, body.planExt || null,
-        JSON.stringify(body.certifications || []), req.user.id,
+        JSON.stringify(body.certifications || []),
+        JSON.stringify(Array.isArray(body.docs) ? body.docs : []),
+        req.user.id,
       ]
     );
 
@@ -70,8 +87,8 @@ router.post('/', requireRole('admin', 'superadmin'), async (req, res) => {
         `INSERT INTO bom_lines (
            line_id, project_id, item, seg, l, w, t, profile, uom, qty, original_qty,
            color_finish, special_chars, components_per_board, edge_meters_per_comp,
-           board_qty, components_released, route, stage_data, description
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10,$11,$12,$13,$14,$15,0,$16,$17,$18)`,
+           board_qty, components_released, route, stage_data
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10,$11,$12,$13,$14,$15,0,$16,$17)`,
         [
           lineId, projectId, b.item, b.seg || 'wood', b.l || null, b.w || null, b.t || null, b.profile || null,
           b.uom || 'PC', b.qty,
@@ -79,12 +96,6 @@ router.post('/', requireRole('admin', 'superadmin'), async (req, res) => {
           b.componentsPerBoard || null, b.edgeMetersPerComp || null,
           b.boardQty || Math.max(1, Math.ceil(b.qty / (b.componentsPerBoard || 8))),
           JSON.stringify(route), JSON.stringify(stageData),
-          // Description is optional and always stored uppercase — clients
-          // uppercase-as-you-type but we normalize server-side too so that
-          // CSV import / direct API calls stay consistent with the UI path.
-          (typeof b.description === 'string' && b.description.trim())
-            ? b.description.trim().toUpperCase()
-            : null,
         ]
       );
       createdLines.push(lineId);
@@ -147,8 +158,8 @@ router.post('/:id/add-segment', requireRole('admin', 'superadmin'), async (req, 
         `INSERT INTO bom_lines (
            line_id, project_id, item, seg, l, w, t, profile, uom, qty, original_qty,
            color_finish, special_chars, components_per_board, edge_meters_per_comp,
-           board_qty, components_released, route, stage_data, description
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10,$11,$12,$13,$14,$15,0,$16,$17,$18)`,
+           board_qty, components_released, route, stage_data
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10,$11,$12,$13,$14,$15,0,$16,$17)`,
         [
           lineId, req.params.id, b.item, segment, b.l || null, b.w || null, b.t || null, b.profile || null,
           b.uom || 'PC', b.qty,
@@ -156,9 +167,6 @@ router.post('/:id/add-segment', requireRole('admin', 'superadmin'), async (req, 
           b.componentsPerBoard || null, b.edgeMetersPerComp || null,
           b.boardQty || Math.max(1, Math.ceil(b.qty / (b.componentsPerBoard || 8))),
           JSON.stringify(route), JSON.stringify(stageData),
-          (typeof b.description === 'string' && b.description.trim())
-            ? b.description.trim().toUpperCase()
-            : null,
         ]
       );
       createdLines.push(lineId);

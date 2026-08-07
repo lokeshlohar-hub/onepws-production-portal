@@ -7520,7 +7520,7 @@ function renderUpcoming(){
   const fy=getActiveFY();
   const fyProjects = fy ? DB.projects.filter(p=>projectInFY(p,fy)) : DB.projects;
   const a=fyProjects.filter(p=>p.progress<100);
-  document.getElementById('upcomingPanel').innerHTML=a.length?a.slice(0,5).map(p=>'<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border)"><span class="cat-badge cat-'+p.type.toLowerCase().replace('&','')+'">'+p.type+'</span><div style="flex:1;min-width:0"><div class="fw-600 text-sm truncate">'+p.sap+'</div><div class="text-xs text-muted">'+p.customer+'</div></div><div style="text-align:right"><div class="text-sm fw-600">'+(p.planWood||p.planExt||'TBD')+'</div><span class="badge badge-running">'+p.progress+'%</span></div></div>').join('')+'<div class="mt-3"><button class="btn btn-outline btn-sm" onclick="nav(\'tracker\',null)">View All →</button></div>'
+  document.getElementById('upcomingPanel').innerHTML=a.length?a.slice(0,5).map(p=>'<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border)"><span class="cat-badge cat-'+p.type.toLowerCase().replace('&','')+'">'+p.type+'</span><div style="flex:1;min-width:0"><div class="fw-600 text-sm truncate">'+p.sap+'</div><div class="text-xs text-muted">'+p.customer+'</div></div><div style="text-align:right"><div class="text-sm fw-600">'+(dateOnly(p.planWood)||dateOnly(p.planExt)||'TBD')+'</div><span class="badge badge-running">'+p.progress+'%</span></div></div>').join('')+'<div class="mt-3"><button class="btn btn-outline btn-sm" onclick="nav(\'tracker\',null)">View All →</button></div>'
   :'<div class="text-sm text-muted">No active projects in '+getFYLabel()+'</div>';
 }
 
@@ -7715,7 +7715,13 @@ async function confirmDeleteProject(btn){
 // calculations elsewhere are completely unaffected.
 function dateOnly(v){
   if(!v) return '';
-  return String(v).split('T')[0];
+  // Handles all common shapes we might receive:
+  //   2026-09-09T00:00:00.000Z  (ISO from server / new Date().toISOString())
+  //   2026-09-09 14:32:15       (space-separated, as some history entries store)
+  //   2026-09-09                (already clean — pass-through)
+  //   Date object               (String()-coerced first)
+  // Everything before the first T or space is the date part.
+  return String(v).split(/[T\s]/)[0];
 }
 
 // Builds the 6 separate <td> cells (File Received, Planned Dispatch, Actual
@@ -10289,7 +10295,7 @@ function renderComponentHistory(){
         ? '<span class="shift-badge-day">☀️ Day</span>'
         : '';
     const hasTrace = (h.assBatchNos&&h.assBatchNos.length) || h.adhesiveBatchNo || h.adhesiveExpiryDate || h.roomTemperature !== undefined || h.materialFinish;
-    return '<tr><td class="log-td">'+h.ts+'</td><td class="fw-600">'+h.stage+'</td><td class="text-xs text-muted">'+(h.ws||'—')+'</td>'
+    return '<tr><td class="log-td">'+dateOnly(h.ts)+'</td><td class="fw-600">'+h.stage+'</td><td class="text-xs text-muted">'+(h.ws||'—')+'</td>'
       +'<td style="color:var(--accent);font-weight:600">'+(h.operator||'—')+'</td>'
       +'<td class="font-mono">'+(h.qty!=null?h.qty:'—')+'</td>'
       +'<td>'+shiftBadge+'</td>'
@@ -10343,7 +10349,7 @@ function renderComponentHandoverHistory(){
   const tbody=document.getElementById('compHandoverLog'); if(!tbody) return;
   const rows=(DB.handoverLog||[]).filter(h=>h.lineId===b.lineId);
   tbody.innerHTML = rows.length ? rows.map(h=>{
-    const ts = h.ts ? String(h.ts).replace('T',' ').slice(0,16) : '';
+    const ts = h.ts ? dateOnly(h.ts) : '';
     return '<tr><td class="log-td">'+ts+'</td><td class="fw-600">'+(h.finalStage||'—')+'</td>'
       +'<td class="font-mono">'+h.qty+' '+(h.uom||'')+'</td>'
       +'<td class="text-xs" style="color:var(--accent);font-weight:600">'+(h.department||'—')+'</td>'
@@ -11828,7 +11834,7 @@ function renderActLog(){
   const el=document.getElementById('actLog'); if(!el) return;
   const rows = CUR_PROJ ? DB.stageLog.filter(u=>u.proj===CUR_PROJ.sap) : DB.stageLog;
   el.innerHTML = rows.slice(0,20).length ? rows.slice(0,20).map(u=>
-    '<tr>'+'<td class="log-td">'+u.ts+'</td>'+'<td class="fw-600" style="font-size:11.5px">'+u.stage+'</td>'+'<td class="text-xs text-muted" style="max-width:80px;overflow:hidden;text-overflow:ellipsis">'+(u.workstation||'—')+'</td>'+'<td style="font-size:11.5px;color:var(--accent);font-weight:600">'+(u.operator||'—')+'</td>'+'<td style="font-size:11.5px">'+u.user+'</td>'+'<td class="text-muted text-xs" style="max-width:100px;overflow:hidden;text-overflow:ellipsis">'+(u.remark||'—')+'</td>'+'</tr>'
+    '<tr>'+'<td class="log-td">'+dateOnly(u.ts)+'</td>'+'<td class="fw-600" style="font-size:11.5px">'+u.stage+'</td>'+'<td class="text-xs text-muted" style="max-width:80px;overflow:hidden;text-overflow:ellipsis">'+(u.workstation||'—')+'</td>'+'<td style="font-size:11.5px;color:var(--accent);font-weight:600">'+(u.operator||'—')+'</td>'+'<td style="font-size:11.5px">'+u.user+'</td>'+'<td class="text-muted text-xs" style="max-width:100px;overflow:hidden;text-overflow:ellipsis">'+(u.remark||'—')+'</td>'+'</tr>'
   ).join('') : '<tr><td colspan="6" class="text-sm text-muted" style="padding:10px">No activity recorded yet'+(CUR_PROJ?' for '+CUR_PROJ.sap:'')+'.</td></tr>';
 }
 
@@ -12511,7 +12517,7 @@ function openProj(id){
   if(p.hasWood) initBomScrollSync('wood');
   if(p.hasExt)  initBomScrollSync('ext');
   document.getElementById('pt-docs').innerHTML=p.docs.length?p.docs.map(d=>'<div style="display:flex;align-items:center;gap:9px;padding:9px 12px;background:var(--surface2);border-radius:7px;border:1px solid var(--border);margin-bottom:6px"><span style="font-size:18px">'+(d.endsWith('.pdf')?'📄':'📊')+'</span><span class="text-sm fw-600">'+d+'</span><button class="btn btn-outline btn-sm" style="margin-left:auto" onclick="toast(\'Download simulated.\')">Download</button></div>').join(''):'<div class="text-muted text-sm">No documents attached.</div>';
-  document.getElementById('pt-history').innerHTML='<table><thead><tr><th>Timestamp</th><th>User</th><th>Action</th><th>Stage</th><th>Old</th><th>New (incl. Operator)</th></tr></thead><tbody>'+(p.history||[]).map(h=>'<tr><td class="log-td">'+h.ts+'</td><td>'+h.u+'</td><td>'+h.act+'</td><td class="fw-600">'+h.f+'</td><td class="text-muted">'+(h.old||'—')+'</td><td class="fw-600" style="color:var(--accent)">'+(h.nw||'—')+'</td></tr>').join('')+'</tbody></table>';
+  document.getElementById('pt-history').innerHTML='<table><thead><tr><th>Date</th><th>User</th><th>Action</th><th>Stage</th><th>Old</th><th>New (incl. Operator)</th></tr></thead><tbody>'+(p.history||[]).map(h=>'<tr><td class="log-td">'+dateOnly(h.ts)+'</td><td>'+h.u+'</td><td>'+h.act+'</td><td class="fw-600">'+h.f+'</td><td class="text-muted">'+(h.old||'—')+'</td><td class="fw-600" style="color:var(--accent)">'+(h.nw||'—')+'</td></tr>').join('')+'</tbody></table>';
   // Timeline tab
   document.getElementById('pt-timeline').innerHTML = renderProjectTimeline(p);
   document.getElementById('projModal').classList.add('open');
@@ -13651,7 +13657,7 @@ function showCapacitySource(wsId, date){
         '<div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--border);font-size:12.5px">'
         +'<span class="badge badge-complete">+'+s.qty+'</span>'
         +'<div><div class="fw-600">'+s.proj+' — '+s.stage+'</div>'
-        +'<div class="text-xs text-muted">Component: '+s.component+' &nbsp;·&nbsp; '+s.ts+'</div></div>'
+        +'<div class="text-xs text-muted">Component: '+s.component+' &nbsp;·&nbsp; '+dateOnly(s.ts)+'</div></div>'
         +'</div>'
       ).join('');
     }
@@ -18800,7 +18806,7 @@ async function deleteMistakeRecord(id){
 
 function renderAudit(){
   const f=document.getElementById('auditFilter')?.value||'all',d=f==='all'?DB.auditLog:DB.auditLog.filter(l=>l.action===f);
-  document.getElementById('auditBody').innerHTML=d.map(l=>'<tr><td class="log-td">'+l.ts+'</td><td>'+l.user+'</td><td><span class="badge badge-'+(l.action==='Create'?'running':l.action==='Delete'?'delayed':'planning')+'">'+l.action+'</span></td><td>'+l.module+'</td><td class="font-mono fw-600">'+l.entity+'</td><td>'+l.field+'</td><td class="text-muted">'+(l.old||'—')+'</td><td class="fw-600">'+(l.nw||'—')+'</td><td class="log-td">'+(l.ip||'—')+'</td></tr>').join('');
+  document.getElementById('auditBody').innerHTML=d.map(l=>'<tr><td class="log-td">'+dateOnly(l.ts)+'</td><td>'+l.user+'</td><td><span class="badge badge-'+(l.action==='Create'?'running':l.action==='Delete'?'delayed':'planning')+'">'+l.action+'</span></td><td>'+l.module+'</td><td class="font-mono fw-600">'+l.entity+'</td><td>'+l.field+'</td><td class="text-muted">'+(l.old||'—')+'</td><td class="fw-600">'+(l.nw||'—')+'</td><td class="log-td">'+(l.ip||'—')+'</td></tr>').join('');
 }
 
 // ------ ADMIN PANEL ------

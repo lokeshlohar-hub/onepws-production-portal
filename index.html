@@ -1065,7 +1065,14 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
         <div class="form-grid">
           <div class="form-row">
             <div class="form-group"><label class="form-label">System Project ID</label><input type="text" class="form-input" id="np_id" readonly></div>
-            <div class="form-group"><label class="form-label">SAP / Project No <span class="req">*</span></label><input type="text" class="form-input uppercase-input" id="np_sap" placeholder="e.g. CD-26-27-10180"></div>
+            <div class="form-group">
+              <label class="form-label">SAP / Project No <span class="req">*</span></label>
+              <input type="text" class="form-input uppercase-input" id="np_sap" placeholder="e.g. CD-26-27-10180"
+                     onblur="checkSapDuplicate()" oninput="onSapInput()">
+              <div id="sapDupeError" style="display:none;margin-top:4px;padding:6px 8px;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;color:#991b1b;font-size:11.5px">
+                <span style="font-weight:700">⚠ Project Number already exists.</span> Please enter a unique Project Number.
+              </div>
+            </div>
           </div>
           <div class="form-row">
             <div class="form-group"><label class="form-label">Product Type <span class="req">*</span> <span class="lbl-lock">&#128274; ADMIN</span></label><select class="form-select" id="np_type" onchange="calcTAT()"><option value="">&#8212; Select &#8212;</option></select></div>
@@ -3670,6 +3677,62 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeMod('deptAdminPwdModal')">Cancel</button>
       <button class="btn btn-primary" onclick="saveDeptAdminPassword()">💾 Set Password</button>
+    </div>
+  </div>
+</div>
+
+<!-- DUPLICATE PROJECT SAP WARNING — real-time check when the SAP field
+     is blurred/edited in New Project Entry. Triggered by checkSapDuplicate().
+     Also disables the Wood + Aluminum segment cards and the Create button
+     until the SAP is unique, so a user can't waste time entering BOM data
+     before fixing the number. Cleared automatically when the field is
+     edited to a unique value (or emptied). -->
+<div class="modal-overlay" id="sapDupeModal">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title" style="color:#b91c1c">⚠ Project Already Exists</div>
+        <div class="text-xs text-muted" style="margin-top:2px">Real-time duplicate check on Project Number</div>
+      </div>
+      <button class="modal-close" onclick="closeMod('sapDupeModal')">×</button>
+    </div>
+    <div class="modal-body">
+      <div style="padding:10px 12px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;margin-bottom:12px">
+        <div style="font-size:13px;color:#991b1b">Project Number <b><span id="sapDupeAttempted">—</span></b> already exists in the system.</div>
+      </div>
+      <div style="font-size:12.5px;font-weight:600;margin-bottom:6px">Existing Project</div>
+      <div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:14px">
+        <table style="width:100%;font-size:12.5px;margin:0">
+          <tbody>
+            <tr>
+              <td style="width:38%;background:var(--surface2);padding:8px 10px;font-weight:600">Project No.</td>
+              <td class="font-mono" style="padding:8px 10px" id="sapDupeExistingSap">—</td>
+            </tr>
+            <tr>
+              <td style="background:var(--surface2);padding:8px 10px;font-weight:600">Customer Name</td>
+              <td style="padding:8px 10px" id="sapDupeExistingCustomer">—</td>
+            </tr>
+            <tr>
+              <td style="background:var(--surface2);padding:8px 10px;font-weight:600">Current Status</td>
+              <td style="padding:8px 10px" id="sapDupeExistingStatus">—</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div style="font-size:12.5px;line-height:1.5">
+        <div style="margin-bottom:8px">Please verify whether this is:</div>
+        <ul style="margin:0 0 10px 20px;padding:0">
+          <li><b>Same project</b> — do not create another entry.</li>
+          <li><b>A second file or revision</b> of the same project — enter a unique Project Number.</li>
+        </ul>
+        <div style="padding:8px 10px;background:var(--surface2);border-radius:6px">
+          <div class="text-xs text-muted" style="margin-bottom:4px">Examples of unique numbering:</div>
+          <div class="font-mono text-xs" id="sapDupeExamples">—</div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-primary" onclick="closeMod('sapDupeModal');document.getElementById('np_sap').focus()">Edit Project Number</button>
     </div>
   </div>
 </div>
@@ -7823,6 +7886,9 @@ function initNewProj(){
   resetProjCertWidget();
   calcTAT();
   setTimeout(()=>autoFillRoutingSeg(0,'wood'),60);
+  // Phase 18 addition — clear any lingering SAP-duplicate block state
+  // when landing on a fresh New Project entry.
+  if(typeof clearSapDuplicateBlock === 'function') clearSapDuplicateBlock();
 }
 
 function toggleSegments(){
@@ -8315,9 +8381,152 @@ function handleSegmentFiles(inp,seg){
 }
 function handleFiles(inp){ handleSegmentFiles(inp,'wood'); }
 
+// ============ REAL-TIME DUPLICATE PROJECT NUMBER CHECK ============
+// Runs on blur (checkSapDuplicate) and clears itself on input (onSapInput).
+// When a match is found in DB.projects, we (a) show a warning modal with
+// the existing project's SAP / Customer / Status, (b) show an inline
+// error under the SAP field, (c) disable both segment cards and the
+// Create button so the user can't invest time in BOM entry while the
+// SAP is still a duplicate, and (d) set _sapDupeState.blocked so the
+// saveProject pre-check refuses to proceed even if the modal was
+// dismissed. Backed by DB.projects (already loaded from the server on
+// login), so no new API call is needed — the server also enforces
+// uniqueness via its 23505 constraint as a safety net.
+
+const _sapDupeState = { blocked: false, existingProjId: null, lastCheckedSap: null };
+
+function findExistingProjectBySap(sap){
+  if(!sap) return null;
+  const norm = sap.trim().toUpperCase();
+  if(!norm) return null;
+  return (DB.projects || []).find(p => String(p.sap || '').trim().toUpperCase() === norm) || null;
+}
+
+function checkSapDuplicate(){
+  const input = document.getElementById('np_sap');
+  if(!input) return;
+  const sap = input.value.trim().toUpperCase();
+  _sapDupeState.lastCheckedSap = sap;
+  if(!sap){
+    clearSapDuplicateBlock();
+    return;
+  }
+  const existing = findExistingProjectBySap(sap);
+  if(existing){
+    applySapDuplicateBlock(sap, existing);
+  } else {
+    clearSapDuplicateBlock();
+  }
+}
+
+function onSapInput(){
+  // If the user is actively editing after a duplicate warning fired, clear
+  // the block state immediately so downstream cards re-enable — the blur
+  // event will re-run the check when they leave the field. This avoids
+  // the frustration of downstream sections staying grayed while the user
+  // is halfway through typing a corrected value.
+  if(_sapDupeState.blocked){
+    const input = document.getElementById('np_sap');
+    const current = input ? input.value.trim().toUpperCase() : '';
+    if(current !== _sapDupeState.lastCheckedSap){
+      clearSapDuplicateBlock();
+    }
+  }
+}
+
+function applySapDuplicateBlock(sap, existing){
+  _sapDupeState.blocked = true;
+  _sapDupeState.existingProjId = existing.id;
+  // Inline error under the SAP field
+  const err = document.getElementById('sapDupeError');
+  if(err) err.style.display = 'block';
+  // Visual state on the SAP input itself
+  const input = document.getElementById('np_sap');
+  if(input){
+    input.style.borderColor = '#dc2626';
+    input.style.background = '#fef2f2';
+  }
+  // Disable segment cards + Create button so BOM entry can't proceed
+  setNewProjectDownstreamEnabled(false);
+  // Populate + show the warning modal
+  const attemptEl = document.getElementById('sapDupeAttempted');
+  if(attemptEl) attemptEl.textContent = sap;
+  const exSapEl = document.getElementById('sapDupeExistingSap');
+  if(exSapEl) exSapEl.textContent = existing.sap || '—';
+  const exCustEl = document.getElementById('sapDupeExistingCustomer');
+  if(exCustEl) exCustEl.textContent = existing.customer || '—';
+  const exStEl = document.getElementById('sapDupeExistingStatus');
+  if(exStEl){
+    // Prefer explicit status; fall back to segment statuses; then to progress
+    let statusText;
+    if(existing.status){
+      statusText = existing.status;
+    } else if(existing.progress >= 100){
+      statusText = 'Complete';
+    } else if(existing.woodSt === 'Running' || existing.extSt === 'Running'){
+      statusText = 'In Progress ('+(existing.progress||0)+'%)';
+    } else {
+      statusText = 'Active ('+(existing.progress||0)+'%)';
+    }
+    exStEl.textContent = statusText;
+  }
+  // Example suffixes based on the attempted SAP
+  const exEl = document.getElementById('sapDupeExamples');
+  if(exEl){
+    exEl.textContent = sap+'-FILE-2   ·   '+sap+'-REV-A   ·   '+sap+'-B';
+  }
+  const modal = document.getElementById('sapDupeModal');
+  if(modal) modal.classList.add('open');
+}
+
+function clearSapDuplicateBlock(){
+  _sapDupeState.blocked = false;
+  _sapDupeState.existingProjId = null;
+  const err = document.getElementById('sapDupeError');
+  if(err) err.style.display = 'none';
+  const input = document.getElementById('np_sap');
+  if(input){
+    input.style.borderColor = '';
+    input.style.background = '';
+  }
+  setNewProjectDownstreamEnabled(true);
+}
+
+// Disable / enable everything below the Common Project Reference card
+// so the user physically can't enter BOM data while the SAP is duplicate.
+// Uses pointer-events:none + opacity for a light visual + input disable
+// on individual controls so keyboard tabbing also can't sneak in.
+function setNewProjectDownstreamEnabled(enabled){
+  ['woodSegCard','extSegCard'].forEach(id => {
+    const card = document.getElementById(id);
+    if(!card) return;
+    if(enabled){
+      card.style.pointerEvents = '';
+      card.style.opacity = '';
+    } else {
+      card.style.pointerEvents = 'none';
+      card.style.opacity = '0.45';
+    }
+  });
+  const saveBtn = document.getElementById('npSaveBtn');
+  if(saveBtn){
+    saveBtn.disabled = !enabled;
+    saveBtn.title = enabled ? '' : 'Fix the Project Number first — a project with this SAP already exists.';
+  }
+}
+
 async function saveProject(btn){
   if(!hasPermission('newproject', null, 'create')){
     toast('You do not have permission to create new projects.','⚠');
+    return;
+  }
+  // Real-time duplicate SAP check — belt-and-suspenders. checkSapDuplicate()
+  // runs on blur/input and is the primary UX gate; this pre-save call catches
+  // the edge case where the user hits Enter without ever leaving the field
+  // (no blur ever fired) or dismissed the modal via ESC.
+  if(_sapDupeState.blocked){
+    toast('Project Number already exists. Please enter a unique Project Number.','⚠');
+    document.getElementById('np_sap')?.focus();
     return;
   }
   const sap=document.getElementById('np_sap')?.value.trim().toUpperCase();

@@ -966,6 +966,65 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
   </div>
 
   <!-- Hold Reason Modal -->
+  <!-- PDF-IMPORT-3B-INSTALLED -->
+  <div class="modal-overlay" id="pdfImportModal">
+    <div class="modal" style="max-width:1200px;width:96%">
+      <div class="modal-header">
+        <div>
+          <div class="modal-title">&#128196; PDF Import Preview &mdash; Wood BOM</div>
+          <div class="text-xs text-muted" id="pdfImportSummary" style="margin-top:4px">Uploading and extracting...</div>
+        </div>
+        <button class="modal-close" onclick="closePdfImportModal()">&times;</button>
+      </div>
+      <div class="modal-body" id="pdfImportBody" style="max-height:70vh;overflow-y:auto">
+        <div id="pdfImportLoading" style="text-align:center;padding:40px">
+          <div style="font-size:36px">&#9203;</div>
+          <div style="margin-top:8px;color:var(--text-muted)">Extracting BOM data from PDFs...</div>
+          <div class="text-xs text-muted" style="margin-top:4px" id="pdfImportProgress">This can take 3-10 seconds per PDF.</div>
+        </div>
+        <div id="pdfImportError" style="display:none;padding:16px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;color:#991b1b;margin-bottom:12px"></div>
+        <div id="pdfImportFileStatus" style="display:none;margin-bottom:12px"></div>
+        <div id="pdfImportTableWrap" style="display:none;overflow-x:auto">
+          <table style="font-size:12px;min-width:1000px" id="pdfImportTable">
+            <thead>
+              <tr style="background:var(--surface2)">
+                <th style="width:36px;text-align:center" title="Include this row in import"><input type="checkbox" id="pdfImportSelectAll" checked onchange="togglePdfImportSelectAll(this)"></th>
+                <th style="width:36px;text-align:center">#</th>
+                <th style="width:180px">Source PDF</th>
+                <th>Description</th>
+                <th style="width:80px">L (mm)</th>
+                <th style="width:80px">W (mm)</th>
+                <th style="width:60px">T (mm)</th>
+                <th style="width:60px">Qty</th>
+                <th>Color / Finish</th>
+                <th style="width:80px" title="Confidence in the extracted size">Size Conf.</th>
+              </tr>
+            </thead>
+            <tbody id="pdfImportRows"></tbody>
+          </table>
+          <div style="margin-top:10px;padding:10px 12px;background:#f9fafb;border-radius:6px;font-size:12px;color:var(--text-muted)">
+            <div style="margin-bottom:6px"><b>Legend:</b>
+              <span style="display:inline-block;padding:2px 8px;margin-left:6px;background:#ecfdf5;border-radius:4px">High confidence</span>
+              <span style="display:inline-block;padding:2px 8px;margin-left:4px;background:#fefce8;border-radius:4px">Medium (verify)</span>
+              <span style="display:inline-block;padding:2px 8px;margin-left:4px;background:#f5f5f5;color:#999;border-radius:4px">Blank (fill manually)</span>
+            </div>
+            <div>&#128161; Extracted values are pre-filled where confident. Blank L/W means the extractor was unsure &mdash; enter the overall size from the drawing. All values are editable before import.</div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer" id="pdfImportFooter" style="display:none;justify-content:space-between;align-items:center;gap:12px">
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;color:var(--text-muted)">
+          <input type="checkbox" id="pdfImportAttachDocs" checked>
+          <span>Also attach source PDFs to project documents</span>
+        </label>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-outline" onclick="closePdfImportModal()">Cancel</button>
+          <button class="btn btn-success" id="pdfImportCommitBtn" onclick="commitPdfImportRows()">Import <span id="pdfImportCommitCount">0</span> selected rows</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="modal-overlay" id="holdModal">
     <div class="modal" style="max-width:480px">
       <div class="modal-header">
@@ -1136,6 +1195,7 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
           <button class="btn btn-outline btn-sm" onclick="downloadBOMTemplate('wood')">&#128229; Download Template</button>
           <label class="btn btn-outline btn-sm" style="cursor:pointer;margin:0">&#128228; Import CSV<input type="file" accept=".csv" style="display:none" onchange="importBOMCSV(this,'wood')"></label>
+          <label class="btn btn-outline btn-sm pdf-import-btn" style="cursor:pointer;margin:0;background:#f0fdf4;border-color:#065f46;color:#065f46" title="Import BOM rows from Wood CAD PDFs. Extracts Description, T, Qty, Color/Finish from title block plus L/W dimensions from the drawing.">&#128196; Import from PDFs<input type="file" accept=".pdf,application/pdf" multiple style="display:none" onchange="openPdfImportModal(this,'wood')"></label>
           <button class="btn btn-outline btn-sm" onclick="exportBOMCSV('wood')">&#128190; Export CSV</button>
           <span class="text-xs text-muted">Routing auto-assigned per Admin rules</span>
         </div>
@@ -23672,6 +23732,285 @@ window.addEventListener('DOMContentLoaded',()=>{
   // above with real data once a valid session is confirmed.
   restoreSession();
 });
+
+/* ============================================================================
+   PDF-IMPORT-3B-JS-INSTALLED
+   Wood BOM import from CAD PDFs (Session 3b)
+============================================================================ */
+(function(){
+  let PDF_IMPORT_STATE = { rawFiles: [], extracted: null, flatRows: [] };
+
+  window.openPdfImportModal = async function(inputEl, seg) {
+    if (seg !== 'wood') { alert('PDF import is currently supported for Wood segment only.'); return; }
+    const files = Array.from(inputEl.files || []);
+    if (files.length === 0) return;
+    inputEl.value = '';
+
+    PDF_IMPORT_STATE.rawFiles = files;
+    PDF_IMPORT_STATE.extracted = null;
+    PDF_IMPORT_STATE.flatRows = [];
+
+    document.getElementById('pdfImportLoading').style.display = 'block';
+    document.getElementById('pdfImportError').style.display = 'none';
+    document.getElementById('pdfImportFileStatus').style.display = 'none';
+    document.getElementById('pdfImportTableWrap').style.display = 'none';
+    document.getElementById('pdfImportFooter').style.display = 'none';
+    document.getElementById('pdfImportSummary').textContent =
+        'Uploading ' + files.length + ' PDF' + (files.length===1?'':'s') + '...';
+    document.getElementById('pdfImportProgress').textContent =
+        'Extracting ' + files.length + ' PDF' + (files.length===1?'':'s') + '. Expect ~3-10 sec per file.';
+    if (typeof showMod === 'function') showMod('pdfImportModal');
+    else (function(m){ if(m.parentElement!==document.body) document.body.appendChild(m); m.classList.add('open'); })(document.getElementById('pdfImportModal'));
+
+    const form = new FormData();
+    files.forEach(f => form.append('files', f, f.name));
+
+    try {
+      const token = (typeof getAuthToken === 'function')
+                      ? getAuthToken()
+                      : (localStorage.getItem('onepws_token') || localStorage.getItem('token') || localStorage.getItem('authToken') || '');
+      const headers = {};
+      if (token) headers['Authorization'] = token.startsWith('Bearer ') ? token : ('Bearer ' + token);
+
+      const res = await fetch(API_BASE + '/wood/import/pdfs', {
+        method: 'POST', headers: headers, body: form,
+      });
+      const text = await res.text();
+      if (!res.ok) {
+        let msg = 'HTTP ' + res.status;
+        try { const j = JSON.parse(text); if (j.error) msg = j.error; } catch(e){}
+        throw new Error(msg);
+      }
+      const data = JSON.parse(text);
+      PDF_IMPORT_STATE.extracted = data;
+      renderPdfImportPreview(data);
+    } catch (err) {
+      document.getElementById('pdfImportLoading').style.display = 'none';
+      const eb = document.getElementById('pdfImportError');
+      eb.style.display = 'block';
+      eb.innerHTML = '<b>Import failed:</b> ' + escapeHtml(err.message || String(err))
+                     + '<br><span style="font-size:11px">Check backend logs. The extractor sidecar must be running on sys160:8082 (localhost).</span>';
+    }
+  };
+
+  window.closePdfImportModal = function() {
+    if (typeof closeMod === 'function') closeMod('pdfImportModal');
+    else document.getElementById('pdfImportModal').classList.remove('open');
+  };
+
+  function renderPdfImportPreview(data) {
+    document.getElementById('pdfImportLoading').style.display = 'none';
+
+    const statusEl = document.getElementById('pdfImportFileStatus');
+    statusEl.innerHTML = '';
+    statusEl.style.display = 'flex';
+    statusEl.style.flexWrap = 'wrap';
+    statusEl.style.gap = '6px';
+    (data.files || []).forEach(function(f) {
+      const pill = document.createElement('span');
+      pill.style.cssText = 'padding:4px 10px;border-radius:12px;font-size:11px;font-weight:600;'
+                       + (f.success ? 'background:#ecfdf5;color:#065f46' : 'background:#fef2f2;color:#991b1b');
+      pill.textContent = (f.success ? '\u2713 ' : '\u2717 ') + f.filename
+                       + (f.success ? ' (' + f.rowCount + ' rows)' : ' \u2014 ' + (f.error || 'failed'));
+      pill.title = f.success ? f.filename : (f.error || 'extraction failed');
+      statusEl.appendChild(pill);
+    });
+
+    const flat = [];
+    (data.files || []).forEach(function(f) {
+      if (!f.success) return;
+      (f.pages || []).forEach(function(page) {
+        (page.rows || []).forEach(function(row) {
+          flat.push({ sourceFile: f.filename, pageNumber: page.page_number, row: row, include: true });
+        });
+      });
+    });
+    PDF_IMPORT_STATE.flatRows = flat;
+
+    document.getElementById('pdfImportSummary').textContent =
+        data.successfulFiles + ' of ' + data.totalFiles + ' PDF' + (data.totalFiles===1?'':'s')
+        + ' processed \u2014 ' + flat.length + ' BOM row' + (flat.length===1?'':'s') + ' extracted';
+
+    const tbody = document.getElementById('pdfImportRows');
+    tbody.innerHTML = '';
+    flat.forEach(function(entry, idx) {
+      const row = entry.row;
+      const conf = row.confidence || {};
+      const warnings = row.warnings || [];
+      const tr = document.createElement('tr');
+      tr.setAttribute('data-idx', idx);
+      tr.innerHTML =
+        '<td style="text-align:center"><input type="checkbox" class="pdf-import-include" checked onchange="updatePdfImportCommitCount()"></td>'
+      + '<td style="text-align:center;font-family:monospace;color:#999">' + (idx+1) + '</td>'
+      + '<td style="font-size:11px;color:#666">' + escapeHtml(entry.sourceFile) + '<br><span style="color:#999">p.' + entry.pageNumber + '</span></td>'
+      + editableCell('description', row.description, conf.description)
+      + editableCell('length_mm',   row.length_mm,   conf.size)
+      + editableCell('width_mm',    row.width_mm,    conf.size)
+      + editableCell('thickness_mm',row.thickness_mm,conf.material)
+      + editableCell('qty',         row.qty,         conf.qty)
+      + editableCell('color_finish',row.color_finish,conf.color)
+      + '<td style="text-align:center;font-size:11px">' + confBadge(conf.size) + '</td>';
+      tbody.appendChild(tr);
+
+      if (warnings.length) {
+        const wtr = document.createElement('tr');
+        wtr.innerHTML = '<td colspan="10" style="background:#fefce8;color:#78350f;font-size:11px;padding:4px 10px;border-left:3px solid #f59e0b">&#9888; '
+                      + warnings.map(escapeHtml).join(' | ') + '</td>';
+        tbody.appendChild(wtr);
+      }
+    });
+
+    document.getElementById('pdfImportTableWrap').style.display = 'block';
+    document.getElementById('pdfImportFooter').style.display = 'flex';
+    updatePdfImportCommitCount();
+
+    if (flat.length === 0) {
+      const eb = document.getElementById('pdfImportError');
+      eb.style.display = 'block';
+      eb.innerHTML = 'No BOM rows could be extracted. Check the per-file status above for reasons.';
+    }
+  }
+
+  function editableCell(field, value, confidence) {
+    const cls = confClass(confidence);
+    const shown = (value === null || value === undefined) ? '' : String(value);
+    const type = (field === 'length_mm' || field === 'width_mm' || field === 'thickness_mm' || field === 'qty') ? 'number' : 'text';
+    const step = (field === 'length_mm' || field === 'width_mm') ? '0.1' : '1';
+    return '<td class="' + cls + '" style="padding:2px">'
+         + '<input type="' + type + '" step="' + step + '" data-field="' + field + '" value="'
+         + escapeAttr(shown) + '" class="pdf-import-cell" '
+         + 'style="width:100%;border:1px solid transparent;background:transparent;padding:4px 6px;font-size:12px;"'
+         + ' onfocus="this.style.borderColor=\'#94a3b8\'"'
+         + ' onblur="this.style.borderColor=\'transparent\'">'
+         + '</td>';
+  }
+
+  function confClass(level) {
+    if (level === 'high') return 'conf-cell-high';
+    if (level === 'medium') return 'conf-cell-medium';
+    return 'conf-cell-blank';
+  }
+  function confBadge(level) {
+    if (level === 'high')   return '<span style="color:#065f46">high</span>';
+    if (level === 'medium') return '<span style="color:#92400e">medium</span>';
+    if (level === 'low')    return '<span style="color:#999">blank</span>';
+    return '<span style="color:#999">-</span>';
+  }
+
+  window.togglePdfImportSelectAll = function(cb) {
+    document.querySelectorAll('#pdfImportRows .pdf-import-include').forEach(function(i){ i.checked = cb.checked; });
+    updatePdfImportCommitCount();
+  };
+
+  window.updatePdfImportCommitCount = function() {
+    const n = document.querySelectorAll('#pdfImportRows .pdf-import-include:checked').length;
+    const el = document.getElementById('pdfImportCommitCount');
+    if (el) el.textContent = n;
+    const btn = document.getElementById('pdfImportCommitBtn');
+    if (btn) btn.disabled = (n === 0);
+  };
+
+  window.commitPdfImportRows = function() {
+    if (!PDF_IMPORT_STATE.extracted) return;
+    const trs = document.querySelectorAll('#pdfImportRows tr[data-idx]');
+    const toInsert = [];
+    trs.forEach(function(tr) {
+      const cb = tr.querySelector('.pdf-import-include');
+      if (!cb || !cb.checked) return;
+      const cells = tr.querySelectorAll('.pdf-import-cell');
+      const rowVals = {};
+      cells.forEach(function(inp) {
+        const field = inp.getAttribute('data-field');
+        let v = inp.value.trim();
+        if (v === '') { rowVals[field] = null; return; }
+        if (field === 'length_mm' || field === 'width_mm') {
+          const n = parseFloat(v); rowVals[field] = isNaN(n) ? null : n;
+        } else if (field === 'thickness_mm' || field === 'qty') {
+          const n = parseInt(v, 10); rowVals[field] = isNaN(n) ? null : n;
+        } else {
+          rowVals[field] = v;
+        }
+      });
+      toInsert.push(rowVals);
+    });
+
+    if (toInsert.length === 0) return;
+
+    const bomBody = document.getElementById('woodBomBody');
+    if (!bomBody) { alert('Wood BOM table not found. Cannot inject rows.'); return; }
+
+    let injected = 0;
+    toInsert.forEach(function(vals) {
+      const rowsBefore = bomBody.querySelectorAll('tr').length;
+      if (typeof addBOMToSegment === 'function') {
+        addBOMToSegment('wood');
+      } else {
+        console.error('addBOMToSegment(wood) not found');
+        return;
+      }
+      const newRow = bomBody.querySelectorAll('tr')[rowsBefore];
+      if (!newRow) return;
+      populateBomRow(newRow, vals);
+      injected++;
+    });
+
+    const attachCb = document.getElementById('pdfImportAttachDocs');
+    if (attachCb && attachCb.checked && PDF_IMPORT_STATE.rawFiles.length > 0) {
+      const woodFilesInput = document.getElementById('woodFiles');
+      if (woodFilesInput && typeof handleSegmentFiles === 'function') {
+        try {
+          const dt = new DataTransfer();
+          PDF_IMPORT_STATE.rawFiles.forEach(f => dt.items.add(f));
+          woodFilesInput.files = dt.files;
+          handleSegmentFiles(woodFilesInput, 'wood');
+        } catch (e) {
+          console.warn('Could not auto-attach PDFs (browser may not support DataTransfer.items):', e);
+        }
+      }
+    }
+
+    closePdfImportModal();
+    if (typeof showToast === 'function') {
+      showToast(injected + ' BOM row' + (injected===1?'':'s') + ' imported from PDFs', 'success');
+    }
+  };
+
+  function populateBomRow(rowEl, vals) {
+    const textInputs = rowEl.querySelectorAll('input[type="text"], input[type="number"]');
+    const orderedFields = ['description','length_mm','width_mm','thickness_mm','qty', null, 'color_finish', null];
+    let fi = 0;
+    textInputs.forEach(function(inp) {
+      const field = orderedFields[fi++];
+      if (field == null) return;
+      const v = vals[field];
+      if (v === null || v === undefined || v === '') return;
+      inp.value = v;
+      inp.dispatchEvent(new Event('input', { bubbles: true }));
+      inp.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  }
+
+  function escapeHtml(s) {
+    if (s === null || s === undefined) return '';
+    return String(s).replace(/[&<>"']/g, function(c){
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+    });
+  }
+  function escapeAttr(s) { return escapeHtml(s); }
+
+  (function ensureCss(){
+    if (document.getElementById('pdf-import-3b-css')) return;
+    const st = document.createElement('style');
+    st.id = 'pdf-import-3b-css';
+    st.textContent =
+        '.conf-cell-high { background:#ecfdf5 } '
+      + '.conf-cell-medium { background:#fefce8 } '
+      + '.conf-cell-blank { background:#f5f5f5 } '
+      + '#pdfImportModal.open { display:flex } '
+      + '.pdf-import-btn:hover { background:#dcfce7 !important }';
+    document.head.appendChild(st);
+  })();
+})();
 </script>
 </body>
 </html>

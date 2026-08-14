@@ -1,12 +1,56 @@
-# OS
-.DS_Store
-Thumbs.db
+# Node
+node_modules/
+npm-debug.log*
+yarn-error.log*
+package-lock.json.bak
 
-# Editor
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+env/
+*.egg-info/
+
+# Environment / secrets
+.env
+.env.local
+.env.*.local
+*.env.backup
+git*token*.txt
+*secret*.txt
+*.pem
+*.key
+
+# Runtime output
+logs/
+*.log
+backups/
+updates/
+
+# Editor / OS
 .vscode/
 .idea/
 *.swp
+Thumbs.db
+.DS_Store
 
-# Local env files (none currently used by this app, kept as a safety net)
-.env
-.env.local
+# One-off scratch
+*.tmp
+modal_example.txt
+wood_section.txt
+patch_session_*.ps1
+query
+
+# Vendor binaries (documented in README instead)
+nssm/
+
+# Extractor test fixtures kept locally
+extractor/test.pdf
+extractor/logs/
+extractor/venv/
+extractor/__pycache__/
+
+# Update-server runtime
+update-server/node_modules/

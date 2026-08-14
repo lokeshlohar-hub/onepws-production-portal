@@ -4661,7 +4661,7 @@ let CUR_PROJ=null, charts={};
 // ============================================================================
 // EDIT THIS if your backend's URL is different (e.g. you renamed the Render
 // Web Service, or you're pointing this at a local dev server for testing):
-const API_BASE = 'https://onepws-productionportal.onrender.com/api';
+const API_BASE = window.location.origin + '/api';;
 
 let AUTH_TOKEN = null;
 
@@ -23732,6 +23732,78 @@ window.addEventListener('DOMContentLoaded',()=>{
   // above with real data once a valid session is confirmed.
   restoreSession();
 });
+// ============ LIVE AUTO-REFRESH (Phase 19 local deploy) ============
+// Every 30s, pulls fresh project data from the server and re-renders the
+// current page. Pauses entirely when the tab is hidden (Page Visibility
+// API — zero background load). Skips the cycle if the user has an INPUT/
+// TEXTAREA/SELECT focused (they're actively typing; interrupting them
+// with a re-render would lose in-progress edits).
+const AUTO_REFRESH_INTERVAL_MS = 30000;
+let _autoRefreshTimer = null;
+let _autoRefreshEnabled = true;
+
+async function performAutoRefresh() {
+  if (!_autoRefreshEnabled) return;
+  if (document.hidden) return;
+  const active = document.activeElement;
+  if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT')) {
+    return;
+  }
+  try {
+    if (typeof loadProjectsFromServer === 'function') await loadProjectsFromServer();
+    const currentPage = document.querySelector('.page.active')?.id || '';
+    switch (currentPage) {
+      case 'page-dashboard':
+        if (typeof renderKPIs === 'function') renderKPIs();
+        if (typeof renderDashCharts === 'function') renderDashCharts();
+        if (typeof renderUpcoming === 'function') renderUpcoming();
+        if (typeof renderEsc === 'function') renderEsc();
+        if (typeof renderMachLoad === 'function') renderMachLoad();
+        if (typeof renderHeatmap === 'function') renderHeatmap();
+        if (typeof renderGantt === 'function') renderGantt();
+        break;
+      case 'page-tracker':
+        if (typeof renderTracker === 'function') renderTracker();
+        break;
+      case 'page-quality':
+        if (typeof renderQcQueue === 'function') renderQcQueue();
+        break;
+      case 'page-stageupdate':
+        if (typeof CUR_PROJ !== 'undefined' && CUR_PROJ && typeof renderBomComponentPicker === 'function') {
+          renderBomComponentPicker(CUR_PROJ);
+        } else if (typeof renderStageProjectList === 'function') {
+          renderStageProjectList();
+        }
+        break;
+      case 'page-capacity':
+        if (typeof renderCapacity === 'function') renderCapacity();
+        break;
+    }
+  } catch (err) {
+    console.warn('[auto-refresh] failed:', err.message);
+  }
+}
+
+function startAutoRefresh() {
+  stopAutoRefresh();
+  _autoRefreshTimer = setInterval(performAutoRefresh, AUTO_REFRESH_INTERVAL_MS);
+}
+function stopAutoRefresh() {
+  if (_autoRefreshTimer) { clearInterval(_autoRefreshTimer); _autoRefreshTimer = null; }
+}
+
+if (document.readyState === 'complete') startAutoRefresh();
+else window.addEventListener('load', startAutoRefresh);
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) stopAutoRefresh();
+  else startAutoRefresh();
+});
+
+window.toggleAutoRefresh = () => {
+  _autoRefreshEnabled = !_autoRefreshEnabled;
+  console.log('[auto-refresh]', _autoRefreshEnabled ? 'ON' : 'OFF');
+};
 
 /* ============================================================================
    PDF-IMPORT-3B-JS-INSTALLED

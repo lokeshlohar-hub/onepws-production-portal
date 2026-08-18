@@ -133,7 +133,7 @@ function eligibleInputQty(line, stageName) {
   const origQty = Number(line.original_qty) || 0;
   const qty = Number(line.qty) || 0;
 
-  if (isBoardStage(stageName)) {
+  if (isBoardStage(stageName) && !line.is_rework) {   // v54.3 - RP lines are component-count
     const boardQty = Number(line.board_qty) || 1;
     if (idx <= 0) return boardQty;
     const prevStage = line.route[idx - 1];
@@ -232,7 +232,7 @@ async function spawnReworkBomLine(client, origLine, rejectQty, stageName, catego
       rejectQty, rejectQty,
       origLine.color_finish, JSON.stringify(origLine.special_chars || []),
       origLine.components_per_board, origLine.edge_meters_per_comp,
-      boardQty, JSON.stringify(route), JSON.stringify(stageData),
+      null, JSON.stringify(route), JSON.stringify(stageData),  // v54.3 - RP lines don't consume board capacity
       origLine.line_id, stageName, reworkReason, (origLine.rework_generation || 0) + 1,
     ]
   );
@@ -296,14 +296,12 @@ async function processQcDecision(lineId, { stageName, approveQty, rejectQty, dis
     const instrumentLabel = instrument ? `${instrument.tagNo} — ${instrument.name}` : null;
 
     if (rejectQty > 0) {
+      // v54.3: any rejection = scrap = spawn replacement (RP) BOM line.
+      // Rework as a distinct category was removed by session decision.
       sd.qc_rejected += rejectQty;
-      if (disposition === 'rework') {
-        sd.rework += rejectQty;
-        reworkLine = await spawnReworkBomLine(client, line, rejectQty, stageName, category, remarks);
-        line.qty = Math.max(0, line.qty - rejectQty);
-      } else {
-        sd.scrap += rejectQty;
-      }
+      sd.scrap += rejectQty;
+      reworkLine = await spawnReworkBomLine(client, line, rejectQty, stageName, category, remarks);
+      line.qty = Math.max(0, line.qty - rejectQty);
 
       await client.query(
         `INSERT INTO reject_log (date, project_id, proj_sap, item, stage, workstation, qty, category,

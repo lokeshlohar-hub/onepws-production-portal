@@ -3485,7 +3485,6 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
           <div class="form-group">
             <label class="form-label">Disposition <span class="req">*</span></label>
             <select class="form-select" id="qc_disposition">
-              <option value="rework">Rework (re-enters this stage)</option>
               <option value="scrap">Scrap (permanently removed)</option>
             </select>
           </div>
@@ -11671,7 +11670,7 @@ function openQcInspect(projId, lineId, stageName){
   document.getElementById('qc_reject_category').innerHTML='<option value="">— Select Rejection Category —</option>'
     + M.rejectionCategories.map(c=>'<option>'+c+'</option>').join('');
   document.getElementById('qc_reject_category').value='';
-  document.getElementById('qc_disposition').value='rework';
+  document.getElementById('qc_disposition').value='scrap';  // v54.3 rework removed as an option
 
   // QC Instrument Used — pulled live from the Calibration Master (Quality department instruments only)
   const instSel=document.getElementById('qc_instrument');

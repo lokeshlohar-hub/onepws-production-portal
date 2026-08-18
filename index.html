@@ -1196,8 +1196,8 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
         </div>
         <div class="section-title">Wood Component BOM <span class="lbl-lock">&#128274; Components from Admin Master</span></div>
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
-          <button class="btn btn-outline btn-sm" onclick="downloadBOMTemplate('wood')">&#128229; Download Template</button>
-          <label class="btn btn-outline btn-sm" style="cursor:pointer;margin:0">&#128228; Import CSV<input type="file" accept=".csv" style="display:none" onchange="importBOMCSV(this,'wood')"></label>
+          <button class="btn btn-outline btn-sm" onclick="downloadBOMTemplate_v2('wood')">&#128229; Download Template</button>
+          <label class="btn btn-outline btn-sm" style="cursor:pointer;margin:0">&#128228; Import CSV<input type="file" accept=".csv" style="display:none" onchange="importBOMCSV_v2(this,'wood')"></label>
           <label class="btn btn-outline btn-sm pdf-import-btn" style="cursor:pointer;margin:0;background:#f0fdf4;border-color:#065f46;color:#065f46" title="Import BOM rows from Wood CAD PDFs. Extracts Description, T, Qty, Color/Finish from title block plus L/W dimensions from the drawing.">&#128196; Import from PDFs<input type="file" accept=".pdf,application/pdf" multiple style="display:none" onchange="openPdfImportModal(this,'wood')"></label>
           <button class="btn btn-outline btn-sm" onclick="exportBOMCSV('wood')">&#128190; Export CSV</button>
           <span class="text-xs text-muted">Routing auto-assigned per Admin rules</span>
@@ -1239,8 +1239,8 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
         </div>
         <div class="section-title">Extrusion Component BOM <span class="lbl-lock">&#128274; Components from Admin Master</span></div>
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
-          <button class="btn btn-outline btn-sm" onclick="downloadBOMTemplate('ext')">&#128229; Download Template</button>
-          <label class="btn btn-outline btn-sm" style="cursor:pointer;margin:0">&#128228; Import CSV<input type="file" accept=".csv" style="display:none" onchange="importBOMCSV(this,'ext')"></label>
+          <button class="btn btn-outline btn-sm" onclick="downloadBOMTemplate_v2('ext')">&#128229; Download Template</button>
+          <label class="btn btn-outline btn-sm" style="cursor:pointer;margin:0">&#128228; Import CSV<input type="file" accept=".csv" style="display:none" onchange="importBOMCSV_v2(this,'ext')"></label>
           <button class="btn btn-outline btn-sm" onclick="exportBOMCSV('ext')">&#128190; Export CSV</button>
         </div>
         <div style="overflow-x:auto">
@@ -24194,5 +24194,8 @@ window.toggleAutoRefresh = () => {
   })();
 })();
 </script>
+
+<!-- v54.2 CSV import (extracted to avoid splice-related syntax bugs) -->
+<script src="csv-import.js"></script>
 </body>
 </html>

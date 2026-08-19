@@ -5019,6 +5019,7 @@ function serverProjectToLocal(row) {
     pm: row.pm,
     eng: row.eng,
     po: row.po || '',
+    jobWorkPO: row.jobWorkPO || row.job_work_po || '',   // v54.4 - was silently dropped from mapper, breaking Master Tracker PO column on reload
     hasWood: row.has_wood,
     hasExt: row.has_ext,
     // p.wood / p.ext (segment-specific sub-objects) aren't modeled server-side

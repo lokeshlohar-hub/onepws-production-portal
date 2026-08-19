@@ -19630,17 +19630,23 @@ function saveBomComponentSegment(i){
   persistAdminConfig('bomComponentSegments');
   fillMasterSelects();
 }
-function adminAddBomComponent(){
-  const v=prompt('New BOM component name:');
-  if(!v||!v.trim())return;
-  const name=v.trim();
-  if(M.bomComponents.includes(name)){toast('This component already exists.','⚠');return;}
-  const seg=confirm('Is this a Wood Production component?\n(OK = Wood, Cancel = Aluminium Extrusion)')?'wood':'ext';
+async function adminAddBomComponent(){
+  // v54.4 -- was using window.prompt() / window.confirm(), both blocked in Electron.
+  // Now uses Promise-based electronPrompt / electronConfirm helpers.
+  const v = await electronPrompt('New BOM component name:');
+  if(!v || !v.trim()) return;
+  const name = v.trim();
+  if(M.bomComponents.includes(name)){ toast('This component already exists.','⚠'); return; }
+  const isWood = await electronConfirm(
+    'Is this a Wood Production component?\n\nYes = Wood\nNo = Aluminium Extrusion',
+    { yes: 'Wood', no: 'Aluminium Extrusion' }
+  );
+  const seg = isWood ? 'wood' : 'ext';
   M.bomComponents.push(name);
-  M.bomComponentSegments[name]=seg;
+  M.bomComponentSegments[name] = seg;
   fillMasterSelects();
-  renderAdmin('bom',null);
-  toast('Added "'+name+'" — classified as '+(seg==='ext'?'Extrusion':'Wood'),'✓');
+  renderAdmin('bom', null);
+  toast('Added "'+name+'" — classified as '+(seg==='ext' ? 'Extrusion' : 'Wood'), '✓');
   persistAdminConfig('bomComponents');
   persistAdminConfig('bomComponentSegments');
 }
@@ -24196,5 +24202,8 @@ window.toggleAutoRefresh = () => {
 
 <!-- v54.2 CSV import (extracted to avoid splice-related syntax bugs) -->
 <script src="csv-import.js"></script>
+
+<!-- v54.4 dialog-helpers.js (electronPrompt/electronConfirm replacements for blocked window.prompt/confirm) -->
+<script src="dialog-helpers.js"></script>
 </body>
 </html>

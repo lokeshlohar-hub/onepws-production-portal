@@ -204,23 +204,77 @@ router.post('/:id/add-segment', requireRole('admin', 'superadmin'), async (req, 
 // PATCH /api/projects/:id — partial update for project-level fields.
 // Currently accepts: remarks, jobWorkPO. Extensible: add fields as needed.
 router.patch('/:id', requireRole('admin', 'superadmin'), async (req, res) => {
+  // v54.5 — Extended PATCH: accepts full header field list. UI gates the
+  // wider field set (customer/pm/eng/type/etc.) on superadmin; endpoint
+  // itself remains open to admin+ so existing Remarks + PO save flows
+  // continue to work exactly as before.
   const body = req.body || {};
+
+  const COL = {
+    sap: 'sap', type: 'type', category: 'category', customer: 'customer',
+    pm: 'pm', eng: 'eng', po: 'po', jobWorkPO: 'job_work_po', remarks: 'remarks',
+    recWood: 'rec_wood', planWood: 'plan_wood', recExt: 'rec_ext', planExt: 'plan_ext',
+    certifications: 'certifications',
+  };
+
+  const incoming = Object.keys(COL).filter(k => body[k] !== undefined);
+  if (!incoming.length) return res.status(400).json({ error: 'No updatable fields provided' });
+
+  const cur = await pool.query('SELECT * FROM projects WHERE id = $1', [req.params.id]);
+  if (!cur.rows[0]) return res.status(404).json({ error: 'Project not found' });
+  const before = cur.rows[0];
+
   const updates = [];
   const values = [];
+  const changed = [];
   let i = 1;
-  if (body.remarks !== undefined)   { updates.push(`remarks = $${i++}`);     values.push(String(body.remarks)); }
-  if (body.jobWorkPO !== undefined) { updates.push(`job_work_po = $${i++}`); values.push(String(body.jobWorkPO)); }
-  if (!updates.length) return res.status(400).json({ error: 'No updatable fields provided' });
+  for (const key of incoming) {
+    const col = COL[key];
+    let newVal = body[key];
+    if (col === 'certifications') newVal = JSON.stringify(newVal || []);
+    else if (newVal === null) newVal = null;
+    else newVal = String(newVal);
+
+    const oldRaw = before[col];
+    const oldStr = (oldRaw === null || oldRaw === undefined)
+      ? null
+      : (col === 'certifications' ? JSON.stringify(oldRaw) : String(oldRaw));
+    if (oldStr === newVal) continue;
+
+    updates.push(`${col} = $${i++}`);
+    values.push(newVal);
+    changed.push({ field: key, oldVal: oldStr, newVal });
+  }
+
+  if (!updates.length) {
+    return res.json({ ok: true, project: { id: before.id }, changed: [] });
+  }
+
   values.push(req.params.id);
   const result = await pool.query(
     `UPDATE projects SET ${updates.join(', ')} WHERE id = $${i} RETURNING id, remarks, job_work_po`,
     values
   );
-  if (!result.rows[0]) return res.status(404).json({ error: 'Project not found' });
-  const row = result.rows[0];
-  res.json({ ok: true, project: { id: row.id, remarks: row.remarks, jobWorkPO: row.job_work_po } });
-});
 
+  const userId = (req.user && req.user.id) ? req.user.id : null;
+  for (const ch of changed) {
+    try {
+      await pool.query(
+        'INSERT INTO project_edit_log (user_id, project_id, field, old_value, new_value) VALUES ($1, $2, $3, $4, $5)',
+        [userId, req.params.id, ch.field, ch.oldVal, ch.newVal]
+      );
+    } catch (err) {
+      console.error('[project_edit_log] insert failed for field', ch.field, err.message);
+    }
+  }
+
+  const row = result.rows[0];
+  res.json({
+    ok: true,
+    project: { id: row.id, remarks: row.remarks, jobWorkPO: row.job_work_po },
+    changed: changed.map(c => c.field),
+  });
+});
 // POST /api/projects/:id/hold — place a project on Hold. Body: { reason, remarks }
 router.post('/:id/hold', requireRole('admin', 'superadmin'), async (req, res) => {
   const { reason, remarks } = req.body || {};

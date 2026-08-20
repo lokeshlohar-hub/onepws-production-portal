@@ -4768,6 +4768,12 @@ function apiLoadProjects() {
 function apiCreateProject(payload) {
   return apiRequest('/projects', { method: 'POST', body: JSON.stringify(payload) });
 }
+function apiUpdateProject(id, payload) {
+  // v54.5 — PATCH /:id accepts full header field list for Master Admin edits.
+  // Non-superadmin UI keeps fields locked; endpoint still accepts remarks +
+  // jobWorkPO from any admin (existing narrow flows preserved).
+  return apiRequest('/projects/' + encodeURIComponent(id), { method: 'PATCH', body: JSON.stringify(payload) });
+}
 function apiAddSegmentToProject(projectId, payload) {
   return apiRequest('/projects/' + encodeURIComponent(projectId) + '/add-segment', { method: 'POST', body: JSON.stringify(payload) });
 }
@@ -8049,6 +8055,22 @@ function enterEditProjectMode(projectId){
   document.getElementById('np_eng').value = p.eng;
   document.getElementById('np_eng').disabled = true;
 
+  // v54.5 — Master Admin (superadmin) unlock: correction of any header field
+  // is allowed regardless of who originally created the project. Non-superadmin
+  // users see the same locks as before. Save calls PATCH /api/projects/:id.
+  if (CURRENT_USER && CURRENT_USER.role === 'superadmin') {
+    // v54.5 — wrapped in setTimeout so unlock runs AFTER any subsequent
+    // segment-setup code that would otherwise re-disable these fields.
+    setTimeout(function(){
+      ['np_sap','np_customer','np_po','np_type','np_cat','np_pm','np_eng','np_certs',
+       'np_wood_received','np_wood_tat','np_wood_drawing','np_wood_remarks','np_ext_received','np_ext_tat','np_ext_po','np_ext_plan_date','np_ext_drawing','np_ext_remarks']
+        .forEach(function(id){
+          const el = document.getElementById(id);
+          if (el) { el.disabled = false; el.readOnly = false; }
+        });
+    }, 0);
+  }
+
   const banner = document.getElementById('editModeBanner');
   if(banner){
     banner.style.display='block';
@@ -8790,6 +8812,62 @@ async function saveProjectAddSegment(btn){
   }
   const p = DB.projects.find(x=>x.id===_editingProjectId);
   if(!p){ toast('Project not found — please reopen from the project.','⚠'); return; }
+
+  // v54.5 - Master Admin header-edit save. Before BOM save, if superadmin
+  // has changed any project-header field, PATCH those changes and update
+  // the in-memory copy so Master Tracker refreshes without F5. If header
+  // save fails, BOM save is aborted to avoid half-saved state.
+  if (CURRENT_USER && CURRENT_USER.role === 'superadmin') {
+    const cur = {
+      sap:       (document.getElementById('np_sap')      && document.getElementById('np_sap').value      || '').trim(),
+      type:      (document.getElementById('np_type')     && document.getElementById('np_type').value     || '').trim(),
+      category:  (document.getElementById('np_cat')      && document.getElementById('np_cat').value      || '').trim(),
+      customer:  (document.getElementById('np_customer') && document.getElementById('np_customer').value || '').trim(),
+      pm:        (document.getElementById('np_pm')       && document.getElementById('np_pm').value       || '').trim(),
+      eng:       (document.getElementById('np_eng')      && document.getElementById('np_eng').value      || '').trim(),
+      po:        (document.getElementById('np_po')       && document.getElementById('np_po').value       || '').trim(),
+      // v54.5 — Extrusion segment header fields (real IDs are np_ext_*)
+      jobWorkPO: (document.getElementById('np_ext_po')        && document.getElementById('np_ext_po').value        || '').trim(),
+      recExt:    (document.getElementById('np_ext_received')  && document.getElementById('np_ext_received').value  || '').trim(),
+      planExt:   (document.getElementById('np_ext_plan_date') && document.getElementById('np_ext_plan_date').value || '').trim(),
+    };
+    const headerDelta = {};
+    if (cur.sap      && cur.sap      !== (p.sap      || '')) headerDelta.sap      = cur.sap;
+    if (cur.type     && cur.type     !== (p.type     || '')) headerDelta.type     = cur.type;
+    if (cur.category && cur.category !== (p.cat      || '')) headerDelta.category = cur.category;
+    if (cur.customer && cur.customer !== (p.customer || '')) headerDelta.customer = cur.customer;
+    if (cur.pm       && cur.pm       !== (p.pm       || '')) headerDelta.pm       = cur.pm;
+    if (cur.eng      && cur.eng      !== (p.eng      || '')) headerDelta.eng      = cur.eng;
+    if (cur.po       !== (p.po || '')) headerDelta.po = cur.po;
+    if (cur.jobWorkPO !== (p.jobWorkPO || '')) headerDelta.jobWorkPO = cur.jobWorkPO;
+    if (cur.recExt   && cur.recExt   !== (p.recExt   || '')) headerDelta.recExt   = cur.recExt;
+    if (cur.planExt  && cur.planExt  !== (p.planExt  || '')) headerDelta.planExt  = cur.planExt;
+    if (cur.jobWorkPO !== (p.jobWorkPO || '')) headerDelta.jobWorkPO = cur.jobWorkPO;
+    if (cur.recExt   && cur.recExt   !== (p.recExt   || '')) headerDelta.recExt   = cur.recExt;
+    if (cur.planExt  && cur.planExt  !== (p.planExt  || '')) headerDelta.planExt  = cur.planExt;
+    if (Object.keys(headerDelta).length > 0) {
+      try {
+        const hResp = await apiUpdateProject(p.id, headerDelta);
+        if (headerDelta.sap      !== undefined) p.sap      = headerDelta.sap;
+        if (headerDelta.type     !== undefined) p.type     = headerDelta.type;
+        if (headerDelta.category !== undefined) p.cat      = headerDelta.category;
+        if (headerDelta.customer !== undefined) p.customer = headerDelta.customer;
+        if (headerDelta.pm       !== undefined) p.pm       = headerDelta.pm;
+        if (headerDelta.eng      !== undefined) p.eng      = headerDelta.eng;
+        if (headerDelta.po       !== undefined) p.po       = headerDelta.po;
+        if (headerDelta.jobWorkPO !== undefined) p.jobWorkPO = headerDelta.jobWorkPO;
+        if (headerDelta.recExt   !== undefined) p.recExt   = headerDelta.recExt;
+        if (headerDelta.planExt  !== undefined) p.planExt  = headerDelta.planExt;
+        if (headerDelta.jobWorkPO !== undefined) p.jobWorkPO = headerDelta.jobWorkPO;
+        if (headerDelta.recExt   !== undefined) p.recExt   = headerDelta.recExt;
+        if (headerDelta.planExt  !== undefined) p.planExt  = headerDelta.planExt;
+        toast('Header updated: ' + (hResp.changed || Object.keys(headerDelta)).join(', '), '\u2705');
+      } catch (herr) {
+        toast('Header save failed: ' + herr.message + ' - BOM save aborted.', '\u26A0');
+        return;
+      }
+    }
+  }
 
   // === Collect EDITS from both segments =================================
   // Every editable existing-line row goes through PUT /api/bom-lines/:lineId

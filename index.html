@@ -21403,31 +21403,35 @@ function adminSaveInline(key,i){
   toast('Saved: "'+v+'"','✓');
   persistAdminConfig(key);
 }
-function adminAdd(key){
-  const v=prompt('Enter new value:');
-  if(v&&v.trim()){
-    M[key].push(v.trim());fillMasterSelects();
+async function adminAdd(key){
+  // v54.6 - was window.prompt(), blocked in Electron. Now uses electronPrompt from dialog-helpers.js
+  const v = await electronPrompt('Enter new value:');
+  if(v && v.trim()){
+    M[key].push(v.trim()); fillMasterSelects();
     if(key==='bomComponents') ensureBomComponentSegments();
-    renderAdmin(_adminSec,null);toast('Added: '+v.trim(),'✓');persistAdminConfig(key);
+    renderAdmin(_adminSec, null); toast('Added: '+v.trim(),'✓'); persistAdminConfig(key);
   }
 }
-function adminEdit(key,i){
-  const v=prompt('Edit value:',M[key][i]);
-  if(v&&v.trim()){
-    const old=M[key][i];
-    M[key][i]=v.trim();fillMasterSelects();
+async function adminEdit(key,i){
+  // v54.6 - was window.prompt(), blocked in Electron. Now uses electronPrompt from dialog-helpers.js
+  const v = await electronPrompt('Edit value:', M[key][i]);
+  if(v && v.trim()){
+    const old = M[key][i];
+    M[key][i] = v.trim(); fillMasterSelects();
     if(key==='bomComponents' && old!==v.trim() && M.bomComponentSegments && old in M.bomComponentSegments){
-      M.bomComponentSegments[v.trim()]=M.bomComponentSegments[old];
+      M.bomComponentSegments[v.trim()] = M.bomComponentSegments[old];
       delete M.bomComponentSegments[old];
       persistAdminConfig('bomComponentSegments');
     }
-    renderAdmin(_adminSec,null);toast('Updated.','✓');persistAdminConfig(key);
+    renderAdmin(_adminSec, null); toast('Updated.','✓'); persistAdminConfig(key);
   }
 }
-function adminDel(key,i){
-  if(confirm('Delete "'+M[key][i]+'"?\nThis may affect existing projects using this value.')){
-    const removed=M[key][i];
-    M[key].splice(i,1);fillMasterSelects();renderAdmin(_adminSec,null);toast('Deleted.','✓');
+async function adminDel(key,i){
+  // v54.6 - was window.confirm(), blocked in Electron. Now uses electronConfirm from dialog-helpers.js
+  const ok = await electronConfirm('Delete "'+M[key][i]+'"?\nThis may affect existing projects using this value.');
+  if(ok){
+    const removed = M[key][i];
+    M[key].splice(i,1); fillMasterSelects(); renderAdmin(_adminSec,null); toast('Deleted.','✓');
     if(key==='bomComponents' && M.bomComponentSegments && removed in M.bomComponentSegments){
       delete M.bomComponentSegments[removed];
       persistAdminConfig('bomComponentSegments');

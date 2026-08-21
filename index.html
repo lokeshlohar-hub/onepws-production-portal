@@ -6274,8 +6274,8 @@ function onLoginSuccess(isRestore){
   toast((isRestore?'Welcome back, ':'Welcome, ')+CURRENT_USER.fullName+'.','✓');
 }
 
-function logout(){
-  if(!confirm('Log out of ONEPWS Production Portal?')) return;
+async function logout(){
+  if(!(await electronConfirm('Log out of ONEPWS Production Portal?'))) return;
   endAllAdminSessions('user logout');
   CURRENT_USER=null;
   AUTH_TOKEN=null;
@@ -6546,7 +6546,7 @@ async function saveUserForm(){
 
 async function resetUserPassword(userId){
   const u=DB.users.find(x=>x.id===userId); if(!u) return;
-  const newPw=prompt('Enter a new password for "'+u.fullName+'" ('+u.username+'):');
+  const newPw = await electronPrompt('Enter a new password for "'+u.fullName+'" ('+u.username+'):');
   if(!newPw||!newPw.trim()) return;
 
   toast('Saving to server…','⏳');
@@ -6593,7 +6593,7 @@ async function deleteUserAccount(userId){
     const others=DB.users.filter(x=>x.role==='superadmin'&&x.id!==userId&&x.active);
     if(!others.length){toast('Cannot delete the last active Master Admin account.','⚠');return;}
   }
-  if(confirm('Delete user "'+u.fullName+'" ('+u.username+')? This cannot be undone.')){
+  if(await electronConfirm('Delete user "'+u.fullName+'" ('+u.username+')? This cannot be undone.')){
     toast('Deleting from server…','⏳');
     try{
       await apiDeleteUser(userId);
@@ -7722,7 +7722,7 @@ async function confirmHold(){
 
 async function removeHold(projId){
   const p=DB.projects.find(x=>x.id===projId); if(!p) return;
-  if(!confirm('Remove hold from '+p.sap+'? Project will move back to Running.')) return;
+  if(!(await electronConfirm('Remove hold from '+p.sap+'? Project will move back to Running.'))) return;
   const snap={onHold:p.onHold,holdReason:p.holdReason,holdRemarks:p.holdRemarks,holdDate:p.holdDate};
   p.onHold=false; p.holdReason=''; p.holdRemarks=''; p.holdDate='';
   renderTracker();
@@ -8366,7 +8366,7 @@ async function deleteExistingBomLine(safeId, seg){
   const b = (p.bom||[]).find(x=>String(x.lineId).replace(/[^a-zA-Z0-9_-]/g,'_')===safeId);
   if(!b){ toast('BOM line not found in local state.','⚠'); return; }
 
-  const proceed = confirm(
+  const proceed = await electronConfirm(
     'Delete BOM component "'+b.item+'" ('+b.lineId+') from project '+p.sap+'?\n\n'+
     'This is permanent. Only allowed because this line has no production activity yet.\n\n'+
     'Deleted details will be recorded in the Audit Trail.'
@@ -9430,13 +9430,13 @@ function isProductionAdminUser(){
 // (emailPromptShown flag). For rework lines, prompts a confirm() first
 // per the design — declining the confirm sets the flag so the prompt
 // won't re-appear on the next QC action for that rework line.
-function checkAutoOpenHandover(p, b){
+async function checkAutoOpenHandover(p, b){
   if(!p || !b) return;
   if(!isProductionAdminUser()) return;
   if(!isHandoverReady(b)) return;
   if(b.emailPromptShown) return;
   if(b.isRework){
-    const proceed = confirm(
+    const proceed = await electronConfirm(
       'Component "'+b.item+'" ('+b.lineId+') has cleared final-stage QC.\n\n'+
       'This is a rework line'+(b.reworkSourceStage?' (originally rejected at '+b.reworkSourceStage+')':'')+'.\n\n'+
       'Generate handover notification draft?'
@@ -15284,9 +15284,9 @@ function renderMaintMachineStatus(){
   }).join('');
 }
 
-function quickRestoreMachine(wsId){
+async function quickRestoreMachine(wsId){
   const w=M.workstations.find(x=>x.id===wsId); if(!w) return;
-  if(confirm('Mark "'+w.name+'" as fully Running? This will unblock it in Capacity Planning / Machine Blocking.')){
+  if(await electronConfirm('Mark "'+w.name+'" as fully Running? This will unblock it in Capacity Planning / Machine Blocking.')){
     w.maintenanceStatus='none';
     renderMaintMachineStatus();
     if(document.getElementById('cap-blocking')?.style.display==='block') renderBlockingTab();
@@ -16213,10 +16213,10 @@ function savePMCompletion(){
 }
 
 // -- Quick-assign technician to PM entry --
-function assignPMTech(idx){
+async function assignPMTech(idx){
   const e=DB.pmSchedule[idx]; if(!e) return;
   const techSel=M.technicians.filter(t=>t.active!==false).map((t,i)=>i+1+'. '+t.name).join('\n');
-  const choice=prompt('Assign technician to PM for '+e.machineName+':\n\n'+techSel+'\n\nEnter number:');
+  const choice = await electronPrompt('Assign technician to PM for '+e.machineName+':\n\n'+techSel+'\n\nEnter number:');
   if(!choice) return;
   const i=parseInt(choice)-1;
   const tech=M.technicians.filter(t=>t.active!==false)[i];
@@ -18377,10 +18377,10 @@ function saveCycleTimeMaster(i){
   persistAdminConfig('componentCycleTime');
 }
 
-function clearCycleTimeMaster(i){
+async function clearCycleTimeMaster(i){
   const rows=window._ctmRows||[];
   const r=rows[i]; if(!r) return;
-  if(!confirm('Clear cycle time for "'+r.comp+'" @ "'+r.step+'"?\nThis will remove it from scheduling calculations until a value is re-entered.')) return;
+  if(!(await electronConfirm('Clear cycle time for "'+r.comp+'" @ "'+r.step+'"?\nThis will remove it from scheduling calculations until a value is re-entered.'))) return;
   if(M.componentCycleTime[r.comp]) delete M.componentCycleTime[r.comp][r.step];
   rows[i].val=undefined;
   const el=document.getElementById('ctm_val_'+i);
@@ -18804,7 +18804,7 @@ async function markTodoComplete(id){
 
 async function deleteTodoTask(id){
   const t=DB.todos.find(x=>x.id===id); if(!t) return;
-  if(!confirm('Delete task "'+t.task+'"? This cannot be undone.')) return;
+  if(!(await electronConfirm('Delete task "'+t.task+'"? This cannot be undone.'))) return;
   toast('Deleting from server…','⏳');
   try{
     await apiDeleteTodo(id);
@@ -19039,7 +19039,7 @@ async function reopenMistakeRecord(id){
 
 async function deleteMistakeRecord(id){
   const m=DB.mistakes.find(x=>x.id===id); if(!m) return;
-  if(!confirm('Delete this mistake record permanently? This cannot be undone.')) return;
+  if(!(await electronConfirm('Delete this mistake record permanently? This cannot be undone.'))) return;
   toast('Deleting from server…','⏳');
   try{
     await apiDeleteMistake(id);
@@ -19893,9 +19893,9 @@ function saveHandoverRecipient(){
   persistAdminConfig('handoverRecipients');
 }
 
-function deleteHandoverRecipient(idx){
+async function deleteHandoverRecipient(idx){
   const r = M.handoverRecipients[idx]; if(!r) return;
-  if(!confirm('Delete handover recipient "'+r.department+'" ('+r.email+')?')) return;
+  if(!(await electronConfirm('Delete handover recipient "'+r.department+'" ('+r.email+')?'))) return;
   M.handoverRecipients.splice(idx,1);
   const ts=new Date().toISOString().replace('T',' ').slice(0,16);
   DB.auditLog.unshift({ts,user:CURRENT_USER?CURRENT_USER.fullName:'Admin',action:'Delete',module:'Handover Recipients',entity:r.department,field:'Recipient',old:r.email,nw:'Deleted',ip:'192.168.1.1'});
@@ -20107,7 +20107,7 @@ function saveProcessGroupModal(){
   if(originalName && originalName!==newName) persistAdminConfig('componentRouting');
 }
 
-function deleteProcessGroup(gName){
+async function deleteProcessGroup(gName){
   const gNameNorm = gName.trim().toLowerCase();
   const usedByComponents = Object.entries(M.componentRouting).filter(([,route])=>route.some(step=>String(step||'').trim().toLowerCase()===gNameNorm)).map(([comp])=>comp);
   const memberCount = (M.stageToWorkstation[gName]||[]).length;
@@ -20115,7 +20115,7 @@ function deleteProcessGroup(gName){
   if(usedByComponents.length){
     msg += '\n\n⚠ WARNING: This group is currently used in routing for: '+usedByComponents.join(', ')+'.\nThose components\' routing will keep the name "'+gName+'" but it will no longer match any machine, which will block production entry at that stage until you update their routing in BOM Routing Rules.';
   }
-  if(!confirm(msg+'\n\nContinue?')) return;
+  if(!(await electronConfirm(msg+'\n\nContinue?'))) return;
   delete M.stageToWorkstation[gName];
   M.routing = M.routing.filter(r=>r!==gName);
   const ts=new Date().toISOString().replace('T',' ').slice(0,16);
@@ -20173,7 +20173,7 @@ function saveProcessOnlyWorkstation(i){
   renderAdmin('processgroups', null);
 }
 
-function delProcessOnlyWorkstation(i){
+async function delProcessOnlyWorkstation(i){
   ensureProcessOnlyWorkstations();
   const p = M.processOnlyWorkstations[i];
   if(!p) return;
@@ -20192,7 +20192,7 @@ function delProcessOnlyWorkstation(i){
   if(operatorCount){
     msg += '\n\n⚠ '+operatorCount+' operator(s) are keyed to this resource in Operator Master. They will become orphaned — clean them up in Operator Master afterward if needed.';
   }
-  if(!confirm(msg+'\n\nContinue?')) return;
+  if(!(await electronConfirm(msg+'\n\nContinue?'))) return;
   // Remove from processOnlyWorkstations
   M.processOnlyWorkstations.splice(i, 1);
   // Remove from every Process Group's member array
@@ -20214,7 +20214,7 @@ function delProcessOnlyWorkstation(i){
 // still names an individual machine directly (from before process groups
 // existed) to use the corresponding group name instead. Safe to run more
 // than once — nothing to change the second time means nothing happens.
-function migrateRoutingToProcessGroups(){
+async function migrateRoutingToProcessGroups(){
   const LEGACY_TO_GROUP = {
     'Selco Beam Saw':'Cutting', 'Homag Beam Saw':'Cutting',
     'CNC Router':'CNC Machining', 'CNC KFT':'CNC Machining',
@@ -20246,7 +20246,7 @@ function migrateRoutingToProcessGroups(){
     toast('No routing changes needed — every component already uses process groups.','✓');
     return;
   }
-  if(!confirm('Update routing for '+affected.length+' component(s) to use process groups instead of specific machines?\n\n'+affected.join(', ')+'\n\nThis only changes which name routing points to (e.g. "Selco Beam Saw" → "Cutting") — the actual production sequence and machine assignments are unaffected.')){
+  if(!(await electronConfirm('Update routing for '+affected.length+' component(s) to use process groups instead of specific machines?\n\n'+affected.join(', ')+'\n\nThis only changes which name routing points to (e.g. "Selco Beam Saw" → "Cutting") — the actual production sequence and machine assignments are unaffected.'))){
     return; // nothing was mutated yet, so there's nothing to undo
   }
   // Second pass: apply the already-computed changes now that the admin confirmed.
@@ -20829,10 +20829,10 @@ function getStagesAdmin(){
     +'</div></div>';
 }
 
-function addStageConfig(){
-  const name=prompt('New stage name:');
+async function addStageConfig(){
+  const name = await electronPrompt('New stage name:');
   if(!name||!name.trim())return;
-  const type=confirm('Is this a Production Floor stage?\n(OK = Production, Cancel = Project lifecycle)')?'production':'project';
+  const type = (await electronConfirm('Is this a Production Floor stage?\n(Yes = Production, No = Project lifecycle)', {yes:'Production', no:'Project lifecycle'})) ? 'production' : 'project';
   const seq=M.stageConfig.length>0?Math.max(...M.stageConfig.map(s=>s.seq))+1:1;
   M.stageConfig.push({name:name.trim(),type,stream:'all',seq});
   syncAllProjectStages();
@@ -20962,8 +20962,8 @@ function moveStageConfig(i,dir){
   persistAdminConfig('stageConfig');
 }
 
-function delStageConfig(i){
-  if(confirm('Delete stage "'+M.stageConfig[i].name+'"?\nThis affects new project workflow generation.')){
+async function delStageConfig(i){
+  if(await electronConfirm('Delete stage "'+M.stageConfig[i].name+'"?\nThis affects new project workflow generation.')){
     const nm=M.stageConfig[i].name;
     M.stageConfig.splice(i,1);
     M.stageConfig.forEach((s,idx)=>s.seq=idx+1);
@@ -21054,10 +21054,10 @@ function getOperatorAdmin(){
     +'</div></div>';
 }
 
-function addOperatorToWS(wsId){
+async function addOperatorToWS(wsId){
   const res = findResourceById(wsId);
   const label = res ? res.name : wsId;
-  const name=prompt('Operator name for '+label+':');
+  const name = await electronPrompt('Operator name for '+label+':');
   if(!name||!name.trim())return;
   const existing=M.operators.filter(o=>o.workstation===wsId);
   if(existing.length>=3){toast('Maximum 3 operators per resource allowed.','&#9888;');return;}
@@ -21068,10 +21068,10 @@ function addOperatorToWS(wsId){
   persistAdminConfig('operators');
 }
 
-function addOperatorGlobal(){
-  const name=prompt('New operator name:');
+async function addOperatorGlobal(){
+  const name = await electronPrompt('New operator name:');
   if(!name||!name.trim())return;
-  const wsId=prompt('Resource ID (machine ID from Machine Master OR process-only ID from Process-Only Master — visible in the URL when editing, or use the + Add Operator button on the right resource block instead):');
+  const wsId = await electronPrompt('Resource ID (machine ID from Machine Master OR process-only ID from Process-Only Master — visible in the URL when editing, or use the + Add Operator button on the right resource block instead):');
   if(!wsId) return;
   const wsIdTrim = wsId.trim();
   const res = findResourceById(wsIdTrim);
@@ -21096,10 +21096,10 @@ function saveOperator(i){
   persistAdminConfig('operators');
 }
 
-function delOperator(i){
+async function delOperator(i){
   const res = findResourceById(M.operators[i].workstation);
   const label = res ? res.name : M.operators[i].workstation;
-  if(confirm('Delete operator "'+M.operators[i].name+'" from '+label+'?')){
+  if(await electronConfirm('Delete operator "'+M.operators[i].name+'" from '+label+'?')){
     const nm=M.operators[i].name;
     const wsId=M.operators[i].workstation;
     M.operators.splice(i,1);
@@ -21134,8 +21134,8 @@ function getTechnicianAdmin(){
     ).join('')
     +'</tbody></table></div></div>';
 }
-function addTechnician(){
-  const name=prompt('Technician name:');
+async function addTechnician(){
+  const name = await electronPrompt('Technician name:');
   if(!name||!name.trim())return;
   M.technicians.push({id:'t_'+Date.now(), name:name.trim(), active:true});
   renderAdmin('technicians',null);
@@ -21151,8 +21151,8 @@ function saveTechnician(i){
   toast('Technician "'+name+'" saved — '+(active?'Active':'Inactive'),'✓');
   persistAdminConfig('technicians');
 }
-function delTechnician(i){
-  if(confirm('Delete technician "'+M.technicians[i].name+'"? Historical breakdown/repair records referencing this technician will keep their name as text.')){
+async function delTechnician(i){
+  if(await electronConfirm('Delete technician "'+M.technicians[i].name+'"? Historical breakdown/repair records referencing this technician will keep their name as text.')){
     const nm=M.technicians[i].name;
     M.technicians.splice(i,1);
     renderAdmin('technicians',null);
@@ -21182,8 +21182,8 @@ function getQcInspectorAdmin(){
     ).join('')
     +'</tbody></table></div></div>';
 }
-function addQcInspector(){
-  const name=prompt('QC Inspector name:');
+async function addQcInspector(){
+  const name = await electronPrompt('QC Inspector name:');
   if(!name||!name.trim())return;
   M.qcInspectors.push({id:'qc_'+Date.now(), name:name.trim(), active:true});
   renderAdmin('qcinspectors',null);
@@ -21199,8 +21199,8 @@ function saveQcInspector(i){
   toast('QC Inspector "'+name+'" saved — '+(active?'Active':'Inactive'),'✓');
   persistAdminConfig('qcInspectors');
 }
-function delQcInspector(i){
-  if(confirm('Delete QC Inspector "'+M.qcInspectors[i].name+'"? Historical QC records referencing this inspector will keep their name as text.')){
+async function delQcInspector(i){
+  if(await electronConfirm('Delete QC Inspector "'+M.qcInspectors[i].name+'"? Historical QC records referencing this inspector will keep their name as text.')){
     const nm=M.qcInspectors[i].name;
     M.qcInspectors.splice(i,1);
     renderAdmin('qcinspectors',null);
@@ -21289,9 +21289,9 @@ function saveUtilityEquip(){
   persistAdminConfig('utilityEquipment');
 }
 
-function deleteUtilityEquip(idx){
+async function deleteUtilityEquip(idx){
   const eq=(M.utilityEquipment||[])[idx]; if(!eq) return;
-  if(!confirm('Delete utility equipment "'+eq.name+'"? This will also remove it from breakdown records.')) return;
+  if(!(await electronConfirm('Delete utility equipment "'+eq.name+'"? This will also remove it from breakdown records.'))) return;
   M.utilityEquipment.splice(idx,1);
   renderAdmin('utility',null);
   toast('Utility equipment "'+eq.name+'" deleted.','✓');
@@ -21371,10 +21371,10 @@ function saveHandToolModal(){
 }
 
 // Keep delHandTool (used from rendered HTML onclick)
-function delHandTool(i){
+async function delHandTool(i){
   const list=M.handTools||[];
   if(!list[i]) return;
-  if(confirm('Delete hand tool "'+list[i].name+'"?')){
+  if(await electronConfirm('Delete hand tool "'+list[i].name+'"?')){
     const nm=list[i].name;
     list.splice(i,1);
     renderAdmin('handtools',null);
@@ -21509,17 +21509,17 @@ const REFERENCE_MACHINE_LIST = [
   {id:'dc1', name:'Dust Collector',           make:'Welron',         model:'BF-WOSF128-18X1230',location:'India',      assetId:'PWSPL/01-141',group:null,                cap:0,   capUnit:'N/A (Utility Equipment)', isEdge:false},
 ];
 
-function importReferenceMachineList(){
+async function importReferenceMachineList(){
   const existingAssetIds = new Set(M.workstations.map(w=>w.assetId).filter(Boolean));
   const toAdd = REFERENCE_MACHINE_LIST.filter(m=>!existingAssetIds.has(m.assetId));
   if(!toAdd.length){
     toast('All reference machines are already present in Machine Master (matched by Identification No.) — nothing to import.','✓');
     return;
   }
-  if(!confirm('Import '+toAdd.length+' machine(s) from the reference production machine list?\n\n'
+  if(!(await electronConfirm('Import '+toAdd.length+' machine(s) from the reference production machine list?\n\n'
     +'Capacity figures are NOT in the source list, so each new machine gets a placeholder daily capacity — please review and correct these in Machine Master once real throughput figures are known.\n\n'
     +'Machines that only exist singly (no interchangeable duplicate) will still appear as their own single-machine Process Group, consistent with how Hot Press, PU Casting, etc. are already organized.\n\n'
-    +'Continue?')) return;
+    +'Continue?'))) return;
 
   toAdd.forEach(m=>{
     M.workstations.push({
@@ -21550,10 +21550,10 @@ function importReferenceMachineList(){
   persistAdminConfig('routing');
 }
 
-function addWorkstation(){
-  const name=prompt('Workstation name:');
+async function addWorkstation(){
+  const name = await electronPrompt('Workstation name:');
   if(!name||!name.trim())return;
-  const cap=parseInt(prompt('Daily capacity (qty/day):','30'))||30;
+  const cap = parseInt(await electronPrompt('Daily capacity (qty/day):','30'))||30;
   M.workstations.push({id:'ws_'+Date.now(),name:name.trim(),cap,unit:'Components/Day',hoursPerDay:8,pmFrequency:'Monthly',maintenanceStatus:'none',active:true,
     make:'',model:'',assetId:'',powerRating:'',location:'',installDate:'',initialPmDate:'',customPmFreqDays:''});
   renderAdmin('machines',null);toast('Workstation "'+name.trim()+'" added.','✓');
@@ -21576,8 +21576,8 @@ function saveWorkstation(i){
   if(document.getElementById('cap-blocking')?.style.display==='block') renderBlockingTab();
   persistAdminConfig('workstations');
 }
-function delWorkstation(i){
-  if(confirm('Delete workstation "'+M.workstations[i].name+'"?\nThis will remove it from Capacity Planning.')){
+async function delWorkstation(i){
+  if(await electronConfirm('Delete workstation "'+M.workstations[i].name+'"?\nThis will remove it from Capacity Planning.')){
     M.workstations.splice(i,1);renderAdmin('machines',null);toast('Workstation deleted.','✓');
     persistAdminConfig('workstations');
   }
@@ -23102,7 +23102,7 @@ async function deleteDmsDocument(docId){
     toast('You do not have permission to delete this document.','⚠');
     return;
   }
-  const proceed = confirm(
+  const proceed = await electronConfirm(
     'Delete document "' + d.name + '" ('+ (d.docNo||d.id) + ')?\n\n'+
     'Department: ' + (d.dept||'—') + '\n'+
     'This is permanent — the document, its revision history, and its access log will be removed. This is recorded in the Audit Trail.'
@@ -23749,14 +23749,14 @@ function addDmsDept(){
   persistAdminConfig('dmsDepts');
 }
 
-function deleteDmsDept(i){
+async function deleteDmsDept(i){
   const d = M.dmsDepts[i]; if(!d) return;
   const docCount = DB.dmsDocuments.filter(doc=>doc.dept===d.name).length;
   if(docCount>0){
     toast('Cannot delete "'+d.name+'" — '+docCount+' document(s) are assigned to it. Reassign them first.','⚠');
     return;
   }
-  if(!confirm('Delete department "'+d.name+'"?\nThis cannot be undone.')) return;
+  if(!(await electronConfirm('Delete department "'+d.name+'"?\nThis cannot be undone.'))) return;
   M.dmsDepts.splice(i,1);
   DB.auditLog.unshift({ts:new Date().toISOString().replace('T',' ').slice(0,16),user:'Admin',
     action:'Delete',module:'DMS Dept',entity:d.name,field:'Department',old:d.name,nw:'Deleted',ip:'192.168.1.1'});
@@ -23792,8 +23792,8 @@ function getDmsOriginsAdmin(){
     }).join('')
     +'</tbody></table></div></div>';
 }
-function addDmsOrigin(){
-  const name=prompt('Origin / originating department name:');
+async function addDmsOrigin(){
+  const name = await electronPrompt('Origin / originating department name:');
   if(!name||!name.trim())return;
   if(M.dmsOrigins.some(o=>o.toLowerCase()===name.trim().toLowerCase())){toast('This origin already exists.','⚠');return;}
   M.dmsOrigins.push(name.trim());
@@ -23814,11 +23814,11 @@ function saveDmsOrigin(i){
   toast('Origin "'+name+'" saved.'+(oldName!==name?' Existing documents updated.':''),'✓');
   persistAdminConfig('dmsOrigins');
 }
-function deleteDmsOrigin(i){
+async function deleteDmsOrigin(i){
   const name=M.dmsOrigins[i]; if(!name) return;
   const docCount=DB.dmsDocuments.filter(d=>d.origin===name).length;
   if(docCount>0){toast('Cannot delete "'+name+'" — '+docCount+' document(s) use this origin. Reassign them first.','⚠');return;}
-  if(!confirm('Delete origin "'+name+'"?')) return;
+  if(!(await electronConfirm('Delete origin "'+name+'"?'))) return;
   M.dmsOrigins.splice(i,1);
   if(document.getElementById('page-dms')?.classList.contains('active')) fillDmsOriginSelect();
   renderAdmin('dmsorigins',null);

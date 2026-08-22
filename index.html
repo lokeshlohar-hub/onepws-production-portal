@@ -20737,7 +20737,9 @@ function addRoutingStep(comp, ci){
   if(!M.componentRouting[comp]) M.componentRouting[comp]=[];
   M.componentRouting[comp].push(M.routing[0]);
   ensureRoutingPrimaryMachines(comp);
+  const _sc = document.querySelector('.content'); const _y = _sc ? _sc.scrollTop : 0;
   renderAdmin('routing',null);
+  setTimeout(()=>{ if(_sc) _sc.scrollTop = _y; }, 100);
   toast('Step added to '+comp,'✓');
 }
 
@@ -20748,7 +20750,9 @@ function removeRoutingStep(comp, ci, ri){
   // steps' primary assignments remain paired with their stages.
   ensureRoutingPrimaryMachines(comp);
   M.routingPrimaryMachines[comp].splice(ri,1);
+  const _sc = document.querySelector('.content'); const _y = _sc ? _sc.scrollTop : 0;
   renderAdmin('routing',null);
+  setTimeout(()=>{ if(_sc) _sc.scrollTop = _y; }, 100);
   toast('Step removed','✓');
 }
 
@@ -20772,7 +20776,9 @@ function saveComponentRouting(comp, ci){
   const routeWithPrimary = newRoutes.map((s, i) => s + (primaryNames[i]!=='—' ? ' ['+primaryNames[i]+']' : '')).join(' → ');
   const ts=new Date().toISOString().replace('T',' ').slice(0,16);
   DB.auditLog.unshift({ts,user:'Admin',action:'Update',module:'Routing',entity:comp,field:'routing',old:oldRoute||'—',nw:routeWithPrimary,ip:'192.168.1.1'});
+  const _sc = document.querySelector('.content'); const _y = _sc ? _sc.scrollTop : 0;
   renderAdmin('routing',null);
+  setTimeout(()=>{ if(_sc) _sc.scrollTop = _y; }, 100);
   const withPrimaryCount = newPrimaries.filter(x=>x).length;
   toast('Routing for "'+comp+'" saved: '+newRoutes.length+' stations, '+withPrimaryCount+' with primary machine','✓');
   persistAdminConfig('componentRouting');

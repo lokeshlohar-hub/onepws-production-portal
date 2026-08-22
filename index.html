@@ -13226,9 +13226,9 @@ function tatOverrideSegmentChange(){
   const p = DB.projects.find(x=>x.id===projId); if(!p) return;
   const seg = document.getElementById('tov_segment').value;
   let rec='', plan='';
-  if(seg==='wood'){rec=p.recWood||'';plan=effectivePlanDate(p,'wood')||'';}
-  else if(seg==='ext'){rec=p.recExt||'';plan=effectivePlanDate(p,'ext')||'';}
-  else if(seg==='both'){rec=p.recWood||p.recExt||'';plan=effectivePlanDate(p,'wood')||effectivePlanDate(p,'ext')||'';}
+  if(seg==='wood'){rec=(p.recWood||'').slice(0,10);plan=(effectivePlanDate(p,'wood')||'').slice(0,10);}
+  else if(seg==='ext'){rec=(p.recExt||'').slice(0,10);plan=(effectivePlanDate(p,'ext')||'').slice(0,10);}
+  else if(seg==='both'){rec=(p.recWood||p.recExt||'').slice(0,10);plan=(effectivePlanDate(p,'wood')||effectivePlanDate(p,'ext')||'').slice(0,10);}
   document.getElementById('tov_origReceived').value=rec;
   document.getElementById('tov_origPlan').value=plan;
   tatOverrideCalc();

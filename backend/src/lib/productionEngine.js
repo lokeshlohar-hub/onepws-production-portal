@@ -260,6 +260,17 @@ async function refreshProjectProgress(client, projectId) {
   });
   const progress = totalQty > 0 ? Math.round((totalDone / totalQty) * 100) : 0;
   await client.query('UPDATE projects SET progress = $1 WHERE id = $2', [progress, projectId]);
+  if (progress >= 100) {
+    await client.query(
+      `UPDATE projects SET
+         wood_status = CASE WHEN has_wood THEN 'Complete' ELSE wood_status END,
+         ext_status  = CASE WHEN has_ext  THEN 'Complete' ELSE ext_status END,
+         act_wood = CASE WHEN has_wood AND act_wood IS NULL THEN CURRENT_DATE ELSE act_wood END,
+         act_ext  = CASE WHEN has_ext  AND act_ext  IS NULL THEN CURRENT_DATE ELSE act_ext END
+       WHERE id = $1`,
+      [projectId]
+    );
+  }
   return progress;
 }
 

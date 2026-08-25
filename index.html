@@ -955,8 +955,8 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
           <th rowspan="2">Status</th><th rowspan="2">Actions</th>
         </tr>
         <tr>
-          <th style="background:var(--green-light)">File Received</th><th style="background:var(--green-light)">Planned Dispatch</th><th style="background:var(--green-light)">Actual Dispatch</th><th style="background:var(--green-light)">Delay</th><th style="background:var(--green-light)">Progress</th><th style="background:var(--green-light)">Status</th>
-          <th style="background:var(--accent-light)" title="Job Work PO No. — Aluminum Extrusion only">PO No.</th><th style="background:var(--accent-light)">File Received</th><th style="background:var(--accent-light)">Planned Dispatch</th><th style="background:var(--accent-light)">Actual Dispatch</th><th style="background:var(--accent-light)">Delay</th><th style="background:var(--accent-light)">Progress</th><th style="background:var(--accent-light)">Status</th>
+          <th style="background:var(--green-light)">File Received</th><th style="background:var(--green-light)">Planned Dispatch</th><th style="background:var(--green-light)">Actual Complete</th><th style="background:var(--green-light)">Delay</th><th style="background:var(--green-light)">Progress</th><th style="background:var(--green-light)">Status</th>
+          <th style="background:var(--accent-light)" title="Job Work PO No. — Aluminum Extrusion only">PO No.</th><th style="background:var(--accent-light)">File Received</th><th style="background:var(--accent-light)">Planned Dispatch</th><th style="background:var(--accent-light)">Actual Complete</th><th style="background:var(--accent-light)">Delay</th><th style="background:var(--accent-light)">Progress</th><th style="background:var(--accent-light)">Status</th>
         </tr>
         </thead>
         <tbody id="trackerBody"></tbody>
@@ -12660,7 +12660,7 @@ function renderSegmentOverviewCard(p, seg){
       +'<div class="progress-bar"><div class="progress-fill" style="width:'+progress+'%;background:'+themeColor+'"></div></div></div>'
       +row('File Receiving Date', received||'—')
       +row('Planned Dispatch', planned||'—')
-      +row('Actual Dispatch', actual||'—')
+      +row('Actual Complete', actual||'—')
       +row('Current Stage', stage)
       +row('TAT Status', '<span class="'+tat.cls+'">'+tat.label+'</span>')
       +row('Delay Status', (isWood?p.dlyWood:p.dlyExt) ? '<span class="'+((isWood?p.dlyWood:p.dlyExt)>0?'text-danger':'text-success')+'">'+((isWood?p.dlyWood:p.dlyExt)>0?'+':'')+(isWood?p.dlyWood:p.dlyExt)+'d</span>' : '<span class="text-success">On Time</span>')

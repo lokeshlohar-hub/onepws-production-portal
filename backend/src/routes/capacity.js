@@ -7,7 +7,7 @@ router.use(requireAuth);
 
 function rowToEntry(row) {
   return {
-    date: row.cap_date.toISOString().split('T')[0],
+    date: row.cap_date.getFullYear() + '-' + String(row.cap_date.getMonth()+1).padStart(2,'0') + '-' + String(row.cap_date.getDate()).padStart(2,'0'),
     workstationId: row.workstation_id,
     achievedQty: row.achieved_qty,
     helperCount: row.helper_count,

@@ -10889,7 +10889,7 @@ async function submitStageEntry(btn){
   const originalBtnText = btn ? btn.textContent : '';
   if(btn){ btn.disabled=true; btn.textContent='Saving to server…'; }
   try{
-    await apiSubmitStageEntry(b.lineId, { stage:st, qty, operator, shift, remark, assBatchNos, adhesiveBatchNo, adhesiveExpiryDate, roomTemperature, materialFinish });
+    await apiSubmitStageEntry(b.lineId, { stage:st, qty, operator, shift, remark, assBatchNos, adhesiveBatchNo, adhesiveExpiryDate, roomTemperature, materialFinish, chosenWsId, wsLabel });
   } catch(err){
     toast('Could not save this entry to the server: '+err.message,'⚠');
     if(btn){ btn.disabled=false; btn.textContent=originalBtnText||'✓ Submit to QC Queue'; }
@@ -11269,7 +11269,16 @@ async function submitBulkStageUpdate(){
       if(adhesiveExpiryDate) payload.adhesiveExpiryDate = adhesiveExpiryDate;
       if(roomTemperature !== '') payload.roomTemperature = roomTemperature;
       if(materialFinish) payload.materialFinish = materialFinish;
+      // v54.6 - attribute to the bulk-selected machine (was missing, so backend logged with no workstation)
+      if(machineId) { payload.chosenWsId = machineId; payload.wsLabel = (findResourceById(machineId)?.name) || machineId; }
       await apiSubmitStageEntry(lineId, payload);
+      // v54.6 - mirror single-submit: update daily capacity so Capacity Planning
+      // reflects this bulk-submitted entry immediately (was missing from bulk path,
+      // so Capacity Planning stayed at 0 for machines used only via bulk submit)
+      if(machineId){
+        try { await autoUpdateCapacityFromStage(CUR_PROJ, st, date, qty, b.item, machineId); }
+        catch(capErr){ console.error('[bulk] autoUpdateCapacityFromStage failed:', capErr); }
+      }
       results.push({ lineId, item: b.item, qty, ok:true });
     } catch(err){
       results.push({ lineId, item: b.item, qty, ok:false, error: err.message || String(err) });

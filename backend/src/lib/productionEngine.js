@@ -359,7 +359,7 @@ async function processQcDecision(lineId, { stageName, approveQty, rejectQty, dis
 
 // Operator submits a completed quantity at a stage — moves it from "pending"
 // into "awaiting QC" (qc_queue). Mirrors the frontend's submitStageEntry().
-async function submitStageEntry(lineId, { stageName, qty, operator, shift, remark, assBatchNos, adhesiveBatchNo, adhesiveExpiryDate }) {
+async function submitStageEntry(lineId, { stageName, qty, operator, shift, remark, assBatchNos, adhesiveBatchNo, adhesiveExpiryDate, chosenWsId, wsLabel, roomTemperature, materialFinish }) {
   console.log('[submitStageEntry] v2-healing lineId=' + lineId + ' stage="' + stageName + '" qty=' + qty);
   const client = await pool.connect();
   try {
@@ -396,6 +396,25 @@ async function submitStageEntry(lineId, { stageName, qty, operator, shift, remar
     sd.history.push(historyEntry);
 
     await client.query('UPDATE bom_lines SET stage_data = $1 WHERE line_id = $2', [JSON.stringify(line.stage_data), lineId]);
+
+    // v54.6 - persist production completion to stage_log so Capacity Planning aggregation
+    // sees completed qty attributed to the actual machine. Previously only processQcDecision
+    // wrote here (hardcoded 'QC'), so no production entries counted toward capacity.
+    try {
+      const projRow = await client.query('SELECT id, sap FROM projects WHERE id = $1', [line.project_id]);
+      const projSap = projRow.rows[0] ? projRow.rows[0].sap : '';
+      const ws = wsLabel || stageName || '';
+      const remarkText = 'Component: ' + line.item + ' | Completed ' + qty + (remark ? ' | ' + remark : '');
+      await client.query(
+        `INSERT INTO stage_log (project_id, project_sap, stage, workstation, operator, app_user, remark)
+         VALUES ($1,$2,$3,$4,$5,$5,$6)`,
+        [line.project_id, projSap, stageName, ws, operator || '', remarkText]
+      );
+    } catch (logErr) {
+      console.error('[submitStageEntry] stage_log insert failed:', logErr.message);
+      // best-effort — do not throw; production entry is already persisted
+    }
+
     await client.query('COMMIT');
     return { line };
   } catch (err) {

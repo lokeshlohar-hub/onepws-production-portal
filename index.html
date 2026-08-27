@@ -1854,9 +1854,11 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
     <button class="tab" onclick="showQualityTab('ppm',this)">🎯 PPM Trend</button>
     <button class="tab" onclick="showQualityTab('history',this)">📁 Full History</button>
     <button class="tab" data-module="dimensional" onclick="showQualityTab('dimensional',this)">🔬 Dimensional Capability</button>
+    <button class="tab" id="jwoQualityTabBtn" style="display:none" onclick="showQualityTab('jwo',this)">📦 Job Work Outward</button>
   </div>
 
   <!-- -- TAB: LIVE QC -- -->
+  <div id="qtab-jwo" style="display:none"><div id="jwoQualityTabBody"></div></div>
   <div id="qtab-live">
     <!-- Quality KPIs -->
     <div class="kpi-grid" id="qualityKPIs" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px"></div>
@@ -3457,6 +3459,41 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
   </div>
 </div>
 <!-- QC INSPECTION MODAL -->
+<div class="modal-overlay" id="jwoHubModal">
+  <div class="modal modal-lg">
+    <div class="modal-header"><div class="modal-title">📦 Job Work Outward / QC</div><button class="modal-close" onclick="closeMod('jwoHubModal')">×</button></div>
+    <div class="modal-body">
+      <div id="jwoHubSummary" style="background:var(--surface2);border-radius:8px;padding:10px 13px;margin-bottom:14px;font-size:12.5px"></div>
+      <div style="display:flex;gap:8px;border-bottom:1.5px solid var(--border);margin-bottom:14px">
+        <div class="tab-link active" id="jwoTabSend" onclick="jwoSwitchTab('send')" style="cursor:pointer;padding:8px 4px;font-weight:600">Send New</div>
+        <div class="tab-link" id="jwoTabHistory" onclick="jwoSwitchTab('history')" style="cursor:pointer;padding:8px 4px;font-weight:600;color:var(--text-muted)">History &amp; Inspect</div>
+      </div>
+      <div id="jwoTabPanelSend"><div id="jwoOutwardLines"></div></div>
+      <div id="jwoTabPanelHistory" style="display:none"><div id="jwoQcPickerBody"></div></div>
+    </div>
+    <div class="modal-footer" id="jwoHubFooterSend">
+      <button class="btn btn-outline" onclick="closeMod('jwoHubModal')">Cancel</button>
+      <button class="btn btn-primary" id="jwoOutwardSubmitBtn" onclick="submitJwoOutward()">Create Job Work Outward</button>
+    </div>
+  </div>
+</div>
+<div class="modal-overlay" id="jwoQcModal">
+  <div class="modal modal-lg">
+    <div class="modal-header"><div class="modal-title">🔍 Job Work Outward — QC Inspection</div><button class="modal-close" onclick="closeMod('jwoQcModal')">×</button></div>
+    <div class="modal-body">
+      <div id="jwoQcSummary" style="background:var(--surface2);border-radius:8px;padding:10px 13px;margin-bottom:14px;font-size:12.5px"></div>
+      <div id="jwoQcBody"></div>
+      <div class="form-row" style="margin-top:10px">
+        <div class="form-group"><label class="form-label">QC Person <span class="req">*</span></label><select class="form-select" id="jwoqc_person"><option value="">— Select QC Inspector —</option></select></div>
+        <div class="form-group"><label class="form-label">QC Remarks</label><input type="text" class="form-input" id="jwoqc_remarks"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeMod('jwoQcModal')">Cancel</button>
+      <button class="btn btn-primary" id="jwoQcSaveBtn" onclick="submitJwoQc()">✓ Save QC Results</button>
+    </div>
+  </div>
+</div>
 <div class="modal-overlay" id="qcInspectModal">
   <div class="modal modal-sm">
     <div class="modal-header"><div class="modal-title">🔍 QC Inspection</div><button class="modal-close" onclick="closeMod('qcInspectModal')">×</button></div>
@@ -4670,6 +4707,414 @@ let AUTH_TOKEN = null;
 // Wraps fetch() with auth header injection, JSON parsing, consistent error
 // messages, and a generous timeout — Render's free tier can take up to
 // ~50 seconds to wake a service that's been asleep from inactivity.
+
+// ====== JOB WORK OUTWARD / QC — combined hub (Session 5) ======
+let _jwoCurrentProjId = null;
+let _jwoAvailable = [];
+let _jwoQcId = null;
+let _jwoQcLines = [];
+let _jwoQcHeader = {};
+
+function openJwoHub(projId){
+  const p = DB.projects.find(x=>x.id===projId);
+  if(!p){ toast('Project not found.','⚠'); return; }
+  if(!p.hasExt){ toast('This project has no Aluminium Extrusion segment.','⚠'); return; }
+  _jwoCurrentProjId = projId;
+  document.getElementById('jwoHubSummary').innerHTML =
+    '<div style="display:flex;gap:14px;flex-wrap:wrap"><span><b>Project:</b> '+p.sap+'</span><span><b>Customer:</b> '+(p.customer||'—')+'</span><span><b>Job Work PO:</b> '+(p.ext&&p.ext.jobWorkPO||'—')+'</span></div>';
+  document.getElementById('jwoHubModal').classList.add('open');
+  jwoSwitchTab('send');
+  jwoLoadEligible();
+}
+
+function jwoSwitchTab(tab){
+  const isSend = tab==='send';
+  document.getElementById('jwoTabPanelSend').style.display = isSend ? '' : 'none';
+  document.getElementById('jwoTabPanelHistory').style.display = isSend ? 'none' : '';
+  document.getElementById('jwoTabSend').style.color = isSend ? '' : 'var(--text-muted)';
+  document.getElementById('jwoTabHistory').style.color = isSend ? 'var(--text-muted)' : '';
+  document.getElementById('jwoHubFooterSend').style.display = isSend ? '' : 'none';
+  if(!isSend) jwoLoadHistory();
+}
+
+function jwoLoadEligible(){
+  document.getElementById('jwoOutwardLines').innerHTML = '<div class="text-sm text-muted">Loading components…</div>';
+  apiRequest('/job-work-outward/eligible/'+_jwoCurrentProjId, { method:'GET' })
+    .then(resp => { _jwoLineData = resp.lines || []; renderJwoLines(); })
+    .catch(err => { document.getElementById('jwoOutwardLines').innerHTML = '<div class="text-sm text-danger">Could not load components: '+err.message+'</div>'; });
+}
+let _jwoLineData = [];
+
+function renderJwoLines(){
+  const wrap = document.getElementById('jwoOutwardLines');
+  const available = _jwoLineData.filter(l => l.remaining > 0);
+  if(!available.length){
+    wrap.innerHTML = '<div class="text-sm text-muted">No Extrusion components with remaining quantity — everything has already been fully sent for job work.</div>';
+    document.getElementById('jwoOutwardSubmitBtn').disabled = true;
+    _jwoAvailable = [];
+    return;
+  }
+  document.getElementById('jwoOutwardSubmitBtn').disabled = false;
+  const rows = available.map((l,i) => {
+    const dims = [l.l,l.w,l.t].filter(Boolean).join(' x ');
+    return '<tr>'
+      +'<td>'+(i+1)+'</td>'
+      +'<td>'+l.item+'</td>'
+      +'<td>'+(dims||'—')+'</td>'
+      +'<td>'+(l.colorFinish||'—')+'</td>'
+      +'<td class="text-center"><b class="text-success">'+l.remaining+'</b> of '+l.qty+'</td>'
+      +'<td style="white-space:nowrap"><label style="margin-right:8px"><input type="checkbox" id="jwo_all_'+i+'" onchange="jwoAllToggle('+i+')"> ALL</label>'
+        +'<input type="number" class="form-input" style="width:80px;display:inline-block" min="0" max="'+l.remaining+'" placeholder="Qty" id="jwo_qty_'+i+'" oninput="jwoQtyChanged('+i+')"></td>'
+    +'</tr>';
+  }).join('');
+  wrap.innerHTML =
+    '<div style="margin-bottom:8px"><a href="#" onclick="jwoSelectAllRows();return false;" style="font-size:12px">Select ALL for every component</a></div>'
+    +'<table style="width:100%;font-size:12px;border-collapse:collapse" border="1"><thead><tr><th>#</th><th>Material</th><th>Size</th><th>Color</th><th>Remaining</th><th>Send Qty</th></tr></thead><tbody>'+rows+'</tbody></table>';
+  _jwoAvailable = available;
+}
+
+function jwoAllToggle(i){
+  const l = _jwoAvailable[i];
+  const chk = document.getElementById('jwo_all_'+i);
+  const inp = document.getElementById('jwo_qty_'+i);
+  if(chk.checked){
+    inp.value = l.remaining;
+    inp.readOnly = true;
+  } else {
+    inp.readOnly = false;
+    inp.value = '';
+  }
+}
+
+function jwoSelectAllRows(){
+  _jwoAvailable.forEach((l,i) => {
+    document.getElementById('jwo_all_'+i).checked = true;
+    jwoAllToggle(i);
+  });
+  toast('All components set to full remaining quantity.','✓');
+}
+
+function jwoQtyChanged(i){
+  const l = _jwoAvailable[i];
+  const inp = document.getElementById('jwo_qty_'+i);
+  let val = parseInt(inp.value)||0;
+  if(val < 0) val = 0;
+  if(val > l.remaining){ val = l.remaining; toast(l.item+': cannot exceed remaining quantity of '+l.remaining,'⚠'); }
+  inp.value = val || '';
+}
+
+async function submitJwoOutward(){
+  const lines = _jwoAvailable.map((l,i) => {
+    const inp = document.getElementById('jwo_qty_'+i);
+    const qty = inp ? (parseInt(inp.value)||0) : 0;
+    return { bomLineId: l.bomLineId, qtyOffered: qty };
+  }).filter(l => l.qtyOffered > 0);
+
+  if(!lines.length){ toast('Enter a quantity for at least one component.','⚠'); return; }
+
+  const btn = document.getElementById('jwoOutwardSubmitBtn');
+  btn.disabled = true; btn.textContent = 'Creating…';
+  try{
+    const resp = await apiRequest('/job-work-outward', {
+      method:'POST',
+      body: JSON.stringify({ projectId: _jwoCurrentProjId, lines: lines })
+    });
+    toast('Job Work Outward '+resp.reportNo+' created.','✓');
+    jwoLoadEligible();
+    jwoSwitchTab('history');
+  }catch(err){
+    toast('Could not create Job Work Outward: '+err.message,'⚠');
+  }finally{
+    btn.disabled = false; btn.textContent = 'Create Job Work Outward';
+  }
+}
+
+function jwoLoadHistory(){
+  document.getElementById('jwoQcPickerBody').innerHTML = '<div class="text-sm text-muted">Loading…</div>';
+  apiRequest('/job-work-outward/project/'+_jwoCurrentProjId, { method:'GET' })
+    .then(resp => {
+      const outwards = resp.outwards || [];
+      if(!outwards.length){
+        document.getElementById('jwoQcPickerBody').innerHTML = '<div class="text-sm text-muted">No Job Work Outward records yet for this project.</div>';
+        return;
+      }
+      document.getElementById('jwoQcPickerBody').innerHTML = outwards.map(o => {
+        const badge = o.status==='completed' ? '<span class="badge badge-complete">Completed</span>' : '<span class="badge badge-hold">Draft</span>';
+        const dateStr = o.date_of_inspection ? String(o.date_of_inspection).split('T')[0] : '';
+        return '<div class="card" style="padding:10px 14px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;border:1px solid var(--border);border-radius:8px">'
+          +'<div><b>'+o.report_no+'</b> '+badge+' <span class="text-xs text-muted">'+dateStr+' · '+o.total_offered+' pcs offered</span></div>'
+          +'<div style="display:flex;gap:6px"><button class="btn btn-outline btn-sm" onclick="openJwoQc(\''+o.id+'\')">Inspect</button><button class="btn btn-outline btn-sm" onclick="printJwoReport(\''+o.id+'\')">🖨 Print</button></div>'
+        +'</div>';
+      }).join('');
+    })
+    .catch(err => { document.getElementById('jwoQcPickerBody').innerHTML = '<div class="text-sm text-danger">Could not load: '+err.message+'</div>'; });
+}
+
+function openJwoQc(jwoId){
+  _jwoQcId = jwoId;
+  document.getElementById('jwoQcSummary').innerHTML = '<div class="text-sm text-muted">Loading…</div>';
+  document.getElementById('jwoQcBody').innerHTML = '';
+  document.getElementById('jwoQcModal').classList.add('open');
+  const inspectorOpts = '<option value="">— Select QC Inspector —</option>'
+    + (M.qcInspectors||[]).filter(q=>q.active!==false).map(q=>'<option value="'+q.name+'">'+q.name+'</option>').join('');
+  document.getElementById('jwoqc_person').innerHTML = inspectorOpts;
+  apiRequest('/job-work-outward/'+jwoId, { method:'GET' })
+    .then(resp => {
+      _jwoQcLines = resp.lines || [];
+      _jwoQcHeader = resp.outward;
+      const o = resp.outward;
+      const dateStr = o.date_of_inspection ? String(o.date_of_inspection).split('T')[0] : '';
+      document.getElementById('jwoQcSummary').innerHTML =
+        '<div style="display:flex;gap:14px;flex-wrap:wrap"><span><b>Report:</b> '+o.report_no+'</span><span><b>Date:</b> '+dateStr+'</span><span><b>Status:</b> '+o.status+'</span></div>';
+      document.getElementById('jwoqc_person').value = o.qc_person || '';
+      document.getElementById('jwoqc_remarks').value = o.qc_remarks || '';
+      renderJwoQcBody();
+    })
+    .catch(err => { document.getElementById('jwoQcSummary').innerHTML = '<div class="text-sm text-danger">Could not load: '+err.message+'</div>'; });
+}
+
+function renderJwoQcBody(){
+  const checklist = _jwoQcHeader.checklist_results && _jwoQcHeader.checklist_results.length
+    ? _jwoQcHeader.checklist_results
+    : [];
+
+  const compRows = _jwoQcLines.map((l,i) => {
+    const dims = [l.l,l.w,l.t].filter(Boolean).join(' x ');
+    return '<tr>'
+      +'<td>'+l.item+' <span class="text-xs text-muted">'+(dims?dims+' · ':'')+(l.color_finish||'')+'</span></td>'
+      +'<td class="text-center">'+l.qty_offered+'</td>'
+      +'<td><input type="number" class="form-input" style="width:80px" min="0" id="jwoqc_'+i+'_acc" value="'+(l.qty_accepted||'')+'" oninput="jwoQcValidate('+i+')"></td>'
+      +'<td><input type="number" class="form-input" style="width:80px" min="0" id="jwoqc_'+i+'_rej" value="'+(l.qty_rejected||'')+'" oninput="jwoQcValidate('+i+')"></td>'
+      +'<td><input type="number" class="form-input" style="width:80px" min="0" id="jwoqc_'+i+'_rwk" value="'+(l.qty_rework||'')+'" oninput="jwoQcValidate('+i+')"></td>'
+      +'<td><select class="form-select" id="jwoqc_'+i+'_status">'+['','Accepted','Hold','Rework','Rejected'].map(s=>'<option value="'+s+'"'+(l.final_status===s?' selected':'')+'>'+(s||'—')+'</option>').join('')+'</select></td>'
+      +'<td class="text-xs" id="jwoqc_'+i+'_warn" style="color:var(--red)"></td>'
+    +'</tr>';
+  }).join('');
+
+  const checklistRows = checklist.map((c,ci) =>
+    '<tr>'
+    +'<td class="text-center">'+c.srNo+'</td>'
+    +'<td>'+c.point+'</td>'
+    +'<td class="text-xs text-muted">'+c.criteria+'</td>'
+    +'<td><select class="form-select" id="jwoqc_shared_result_'+ci+'"><option value=""'+(!c.result?' selected':'')+'>—</option><option value="OK"'+(c.result==='OK'?' selected':'')+'>OK</option><option value="Reject"'+(c.result==='Reject'?' selected':'')+'>Reject</option></select></td>'
+    +'<td><input type="text" class="form-input" id="jwoqc_shared_remarks_'+ci+'" value="'+(c.remarks||'').replace(/"/g,'&quot;')+'" placeholder="Remarks"></td>'
+    +'</tr>'
+  ).join('');
+
+  document.getElementById('jwoQcBody').innerHTML =
+    '<div style="text-align:right;margin-bottom:12px"><button class="btn btn-primary btn-sm" onclick="jwoMarkEverythingOk()">✓ Mark Everything OK</button></div>'
+    +'<div style="font-weight:700;margin-bottom:6px">Components Offered in this Outward</div>'
+    +'<table style="width:100%;font-size:11.5px;margin-bottom:18px;border-collapse:collapse" border="1"><thead><tr><th>Component</th><th>Offered</th><th>Accepted</th><th>Rejected</th><th>Rework</th><th>Final Status</th><th></th></tr></thead><tbody>'+compRows+'</tbody></table>'
+    +'<div style="font-weight:700;margin-bottom:6px">Inspection Checklist — applies to the whole batch</div>'
+    +'<table style="width:100%;font-size:11.5px;border-collapse:collapse" border="1"><thead><tr><th>Sr</th><th>Checkpoint</th><th>Criteria</th><th>Result</th><th>Remarks</th></tr></thead><tbody>'+checklistRows+'</tbody></table>';
+}
+
+function jwoMarkEverythingOk(){
+  const checklist = _jwoQcHeader.checklist_results || [];
+  checklist.forEach((c,ci) => {
+    const sel = document.getElementById('jwoqc_shared_result_'+ci);
+    if(sel) sel.value = 'OK';
+  });
+  _jwoQcLines.forEach((l,i) => {
+    document.getElementById('jwoqc_'+i+'_acc').value = l.qty_offered;
+    document.getElementById('jwoqc_'+i+'_rej').value = 0;
+    document.getElementById('jwoqc_'+i+'_rwk').value = 0;
+    document.getElementById('jwoqc_'+i+'_status').value = 'Accepted';
+    jwoQcValidate(i);
+  });
+  toast('Checklist marked OK and every component fully accepted.','✓');
+}
+
+function jwoQcValidate(i){
+  const l = _jwoQcLines[i];
+  const acc = parseInt(document.getElementById('jwoqc_'+i+'_acc').value)||0;
+  const rej = parseInt(document.getElementById('jwoqc_'+i+'_rej').value)||0;
+  const rwk = parseInt(document.getElementById('jwoqc_'+i+'_rwk').value)||0;
+  const warn = document.getElementById('jwoqc_'+i+'_warn');
+  warn.textContent = (acc+rej+rwk > l.qty_offered) ? ('Exceeds Offered ('+l.qty_offered+')!') : '';
+}
+
+async function submitJwoQc(){
+  const qcPerson = document.getElementById('jwoqc_person').value.trim();
+  const qcRemarks = document.getElementById('jwoqc_remarks').value.trim();
+  if(!qcPerson){ toast('Please select the QC Inspector Name.','⚠'); return; }
+
+  const btn = document.getElementById('jwoQcSaveBtn');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try{
+    const lines = _jwoQcLines.map((l,i) => {
+      const acc = parseInt(document.getElementById('jwoqc_'+i+'_acc').value)||0;
+      const rej = parseInt(document.getElementById('jwoqc_'+i+'_rej').value)||0;
+      const rwk = parseInt(document.getElementById('jwoqc_'+i+'_rwk').value)||0;
+      if(acc+rej+rwk > l.qty_offered){
+        throw new Error(l.item+': Accepted+Rejected+Rework exceeds Offered ('+l.qty_offered+')');
+      }
+      return {
+        id: l.id,
+        qtyAccepted: acc, qtyRejected: rej, qtyRework: rwk,
+        finalStatus: document.getElementById('jwoqc_'+i+'_status').value || null
+      };
+    });
+
+    const checklistResults = (_jwoQcHeader.checklist_results||[]).map((c,ci) => ({
+      ...c,
+      result: document.getElementById('jwoqc_shared_result_'+ci).value,
+      remarks: document.getElementById('jwoqc_shared_remarks_'+ci).value.trim()
+    }));
+
+    await apiRequest('/job-work-outward/'+_jwoQcId+'/qc', {
+      method:'PUT',
+      body: JSON.stringify({ qcPerson, qcRemarks, checklistResults, lines })
+    });
+    toast('QC results saved.','✓');
+    closeMod('jwoQcModal');
+    jwoLoadHistory();
+  }catch(err){
+    toast('Could not save QC results: '+err.message,'⚠');
+  }finally{
+    btn.disabled = false; btn.textContent = '✓ Save QC Results';
+  }
+}
+
+async function printJwoReport(jwoId){
+  let resp;
+  try{
+    resp = await apiRequest('/job-work-outward/'+jwoId, { method:'GET' });
+  }catch(err){
+    toast('Could not load Job Work Outward: '+err.message,'⚠');
+    return;
+  }
+  const o = resp.outward;
+  const lines = resp.lines || [];
+  const p = DB.projects.find(x=>x.id===o.project_id);
+  const sap = p ? p.sap : '—';
+  const customer = p ? (p.customer||'—') : '—';
+  const jobWorkPO = p && p.ext ? (p.ext.jobWorkPO||'—') : '—';
+  const drawing = p && p.ext ? (p.ext.drawing||'—') : '—';
+  const dateStr = o.date_of_inspection ? String(o.date_of_inspection).split('T')[0] : '—';
+  const dash = v => (v===0||v==null||v==='') ? '-' : v;
+
+  const dimRows = lines.map((l,i) => {
+    const letter = String.fromCharCode(97+i); // a, b, c...
+    return '<tr>'
+      +'<td style="text-align:center">1.'+letter+'</td>'
+      +'<td>'+l.item+'</td>'
+      +'<td style="font-size:8.5px">Measuring Tape / Vernier Caliper / Degree Protractor</td>'
+      +'<td>As Per Drawing Dimensions.</td>'
+      +'<td>As per ISO 2768 Tolerance Table</td>'
+      +'<td style="text-align:center">'+l.qty_offered+'</td>'
+      +'<td style="text-align:center">'+dash(l.qty_accepted)+'</td>'
+      +'<td style="text-align:center">'+dash(l.qty_rejected)+'</td>'
+      +'<td style="text-align:center">'+(l.final_status||'—')+'</td>'
+    +'</tr>';
+  }).join('');
+
+  const sharedRows = (o.checklist_results||[]).map(c => {
+    const mark = c.result==='OK' ? '&#10003;' : c.result==='Reject' ? '&#10007;' : '—';
+    return '<tr>'
+      +'<td style="text-align:center">'+c.srNo+'</td>'
+      +'<td>'+c.point+'</td>'
+      +'<td style="font-size:8.5px">'+c.mode+'</td>'
+      +'<td>'+c.criteria+'</td>'
+      +'<td>'+c.tolerance+'</td>'
+      +'<td style="text-align:center">'+mark+'</td>'
+      +'<td style="text-align:center">'+mark+'</td>'
+      +'<td style="text-align:center">-</td>'
+      +'<td style="text-align:center">'+(c.result==='OK'?'accepted':c.result==='Reject'?'rejected':'—')+'</td>'
+      +'<td style="font-size:8.5px">'+(c.remarks||'')+'</td>'
+    +'</tr>';
+  }).join('');
+
+  const html = '<!DOCTYPE html><html><head><title>Job Work Outward - '+o.report_no+'</title>'
+    +'<style>@page{size:A4;margin:10mm}body{font-family:Arial,sans-serif;font-size:10.5px;color:#111}'
+    +'table{width:100%;border-collapse:collapse}th,td{border:1px solid #333;padding:4px 6px;text-align:left;vertical-align:top}'
+    +'th{background:#f0f0f0;font-size:9px}.hdr-table td{border:1px solid #333;padding:6px 8px;vertical-align:middle}'
+    +'.print-btn{position:fixed;top:10px;right:10px;padding:8px 14px;background:#1a56db;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px}'
+    +'@media print{.print-btn{display:none}}</style></head><body>'
+    +'<button class="print-btn" onclick="window.print()">🖨 Print / Save as PDF</button>'
+    +'<table class="hdr-table" style="margin-bottom:2px">'
+      +'<tr><td rowspan="4" style="width:22%;text-align:center;font-weight:700">ONEPWS<br><span style="font-size:8px;font-weight:400">Private Limited<br>(Formerly Pyrotech Workspace Solutions Pvt. Ltd.)</span></td>'
+      +'<td colspan="2" style="text-align:center;font-weight:700">QUALITY DEPARTMENT</td>'
+      +'<td style="width:22%;font-size:8.5px">Doc No: IMS-07-03-L4-10</td></tr>'
+      +'<tr><td colspan="2" style="text-align:center;font-weight:700;font-size:13px">Job Work Outward Quality Inspection Report</td><td style="font-size:8.5px">Original Issue Date: 01-July-2015</td></tr>'
+      +'<tr><td colspan="2"></td><td style="font-size:8.5px">Latest Rev. No.: 02</td></tr>'
+      +'<tr><td colspan="2"></td><td style="font-size:8.5px">Standard: QMS, EMS, OHSMS</td></tr></table>'
+    +'<table style="margin-bottom:10px">'
+      +'<tr><td><b>Project Number:</b> '+sap+'</td><td><b>Job Work P.O Number:</b> '+jobWorkPO+'</td><td><b>Date Of Inspection:</b> '+dateStr+'</td></tr>'
+      +'<tr><td><b>Customer Name:</b> '+customer+'</td><td colspan="2"><b>Referred Drawing No/s:</b> '+drawing+'</td></tr></table>'
+    +'<div style="font-weight:700;margin-bottom:6px">Criteria For Inspection</div>'
+    +'<table><thead><tr><th>Sr No.</th><th>Inspection Check Points</th><th>Mode Of Inspection</th><th>Acceptance Criteria</th><th>Acceptable Tolerance</th><th>Qty Offered</th><th>Qty Accepted</th><th>Qty Rejected</th><th>Final QC Acceptance</th>'+ (sharedRows?'<th>Remarks</th>':'') +'</tr></thead><tbody>'
+      +'<tr><td colspan="10" style="font-weight:700;background:#f7f7f7">1. Dimensional Checking L x B x H (mm) — List down the items offered for QC Inspection</td></tr>'
+      +dimRows
+      +sharedRows
+    +'</tbody></table>'
+    +'<table style="margin-top:14px"><tr><td style="width:50%"><b>Material Produced By (Operator Name):</b> '+(o.operator_name||'—')+'</td>'
+      +'<td><b>Material Checked By (QC Person):</b> '+(o.qc_person||'—')+'</td></tr>'
+      +'<tr><td colspan="2"><b>QC Remarks:</b> '+(o.qc_remarks||'—')+'</td></tr></table>'
+    +'<div style="margin-top:10px;font-size:8.5px;color:#555">Refer Quality Plan document no: IMS-07-03-L2-02 &amp; Sampling plan IMS-07-03-L4-31</div>'
+    +'<div style="margin-top:16px;font-size:8px;color:#888">Report No: '+o.report_no+' &middot; Generated: '+new Date().toLocaleString()+' &middot; ONEPWS Production Control Portal</div>'
+    +'</body></html>';
+
+  const w = window.open('','_blank');
+  if(!w){ toast('Pop-up blocked. Allow pop-ups to view the report.','⚠'); return; }
+  w.document.write(html);
+  w.document.close();
+  setTimeout(()=>{ w.focus(); w.print(); }, 400);
+  toast('Job Work Outward report opened — use Print → Save as PDF','📄');
+}
+
+
+// ====== JOB WORK OUTWARD — Quality tab entry point ======
+let _jwoQualityAllProjects = [];
+
+function renderJwoQualityTab(){
+  if(!canAccessJwoQuality()){
+    document.getElementById('jwoQualityTabBody').innerHTML = '<div class="text-sm text-danger">You do not have permission to view this tab.</div>';
+    return;
+  }
+  _jwoQualityAllProjects = DB.projects.filter(p=>p.hasExt);
+  if(!_jwoQualityAllProjects.length){
+    document.getElementById('jwoQualityTabBody').innerHTML = '<div class="text-sm text-muted">No Extrusion projects found.</div>';
+    return;
+  }
+  document.getElementById('jwoQualityTabBody').innerHTML =
+    '<div class="form-group" style="max-width:420px;margin-bottom:8px"><label class="form-label">Search Project</label>'
+    +'<input type="text" class="form-input" id="jwoQualitySearchBox" placeholder="Type Project No. or Customer…" oninput="jwoQualityFilterProjects()"></div>'
+    +'<div class="form-group" style="max-width:420px;margin-bottom:16px"><label class="form-label">Select Extrusion Project</label>'
+    +'<select class="form-select" id="jwoQualityProjSelect" onchange="jwoQualityProjChanged()"></select></div>'
+    +'<div id="jwoQualityProjBody"></div>';
+  jwoQualityFilterProjects();
+}
+
+function jwoQualityFilterProjects(){
+  const q = (document.getElementById('jwoQualitySearchBox')?.value||'').toLowerCase();
+  const filtered = !q ? _jwoQualityAllProjects : _jwoQualityAllProjects.filter(p =>
+    (p.sap||'').toLowerCase().includes(q) || (p.customer||'').toLowerCase().includes(q)
+  );
+  const sel = document.getElementById('jwoQualityProjSelect');
+  const prevVal = sel.value;
+  sel.innerHTML = '<option value="">— Select Project —</option>' + filtered.map(p=>'<option value="'+p.id+'">'+p.sap+' — '+(p.customer||'')+'</option>').join('');
+  if(filtered.some(p=>p.id===prevVal)) sel.value = prevVal;
+}
+
+function jwoQualityProjChanged(){
+  const projId = document.getElementById('jwoQualityProjSelect').value;
+  const body = document.getElementById('jwoQualityProjBody');
+  if(!projId){ body.innerHTML=''; return; }
+  _jwoCurrentProjId = projId;
+  body.innerHTML =
+    '<div style="display:flex;gap:8px;border-bottom:1.5px solid var(--border);margin-bottom:14px">'
+      +'<div class="tab-link active" id="jwoTabSend" onclick="jwoSwitchTab(\'send\')" style="cursor:pointer;padding:8px 4px;font-weight:600">Send New</div>'
+      +'<div class="tab-link" id="jwoTabHistory" onclick="jwoSwitchTab(\'history\')" style="cursor:pointer;padding:8px 4px;font-weight:600;color:var(--text-muted)">History &amp; Inspect</div>'
+    +'</div>'
+    +'<div id="jwoTabPanelSend"><div id="jwoOutwardLines"></div>'
+      +'<div style="margin-top:14px"><button class="btn btn-primary" id="jwoOutwardSubmitBtn" onclick="submitJwoOutward()">Create Job Work Outward</button></div>'
+    +'</div>'
+    +'<div id="jwoTabPanelHistory" style="display:none"><div id="jwoQcPickerBody"></div></div>';
+  jwoSwitchTab('send');
+  jwoLoadEligible();
+}
+
 async function apiRequest(path, opts) {
   opts = opts || {};
   const controller = new AbortController();
@@ -12666,6 +13111,7 @@ function renderSegmentOverviewCard(p, seg){
       +row('Delay Status', (isWood?p.dlyWood:p.dlyExt) ? '<span class="'+((isWood?p.dlyWood:p.dlyExt)>0?'text-danger':'text-success')+'">'+((isWood?p.dlyWood:p.dlyExt)>0?'+':'')+(isWood?p.dlyWood:p.dlyExt)+'d</span>' : '<span class="text-success">On Time</span>')
       +row('BOM Count', bomCount+' component(s)')
       +row('QC Status', '<span class="text-success">✓ '+qc.approved+'</span>'+(qc.rejected?' · <span class="text-danger">⚠ '+qc.rejected+'</span>':'')+(qc.pending?' · <span class="text-muted">⏳ '+qc.pending+'</span>':''))
+
     +'</div>'
   +'</div>';
 }
@@ -12825,54 +13271,66 @@ function openRouteCardForLine(lineId, projId){
 
   const isWood   = b.seg==='wood';
   const segLabel = isWood ? 'Wood Production' : 'Aluminium Extrusion';
-  const nowStr   = new Date().toLocaleString('en-GB', {day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
+  const fmtDateOnly = v => {
+    if(!v) return '';
+    const s = String(v).slice(0,10);
+    const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    return m ? (m[3]+'-'+m[2]+'-'+m[1]) : s;
+  };
+  const nowStr = fmtDateOnly(new Date().toISOString());
   const drawingRef = isWood
     ? (p.wood && p.wood.drawing) || ''
     : (p.ext  && p.ext.drawing)  || '';
-  // Most recently applied Material Finish across every Final-Polishing
-  // history entry on this component. Empty string if this component has
-  // never gone through Final Polishing or the finish wasn't recorded (for
-  // components produced before the field existed).
   const latestFinish = getLatestMaterialFinish(b);
 
-  // IMS reference tick-mark set from Sheet 1. If the portal component's
-  // specialChars list contains any of these (case-insensitive), we tick it;
-  // any specialChars value NOT in this canonical list is preserved verbatim
-  // under "Other" so custom tags aren't lost.
   const IMS_TICKS = ['FSC','CARB Certified','Fire Rated','Particle Board','A.S.S.','Marmoleum','Alucore','Prelam'];
   const compChars = (b.specialChars||[]).map(c=>String(c).trim());
   const compCharsLc = compChars.map(c=>c.toLowerCase());
   const isTicked = name => compCharsLc.includes(name.toLowerCase());
   const otherChars = compChars.filter(c=>!IMS_TICKS.some(t=>t.toLowerCase()===c.toLowerCase()));
 
-  // Latest history record per stage (for pre-filling any already-run stages).
-  // If a stage has never been touched, the row prints blank so the operator
-  // fills it in by hand.
-  const latestHist = stage => {
+  const latestProdEntry = stage => {
     const sd = b.stageData && b.stageData[stage];
-    if(!sd || !Array.isArray(sd.history) || !sd.history.length) return null;
-    // history entries are appended chronologically — take the last as the
-    // most recent event on this stage.
-    return sd.history[sd.history.length-1];
+    if(!sd || !Array.isArray(sd.history)) return null;
+    const prod = sd.history.filter(h=>h.ws!=='QC');
+    return prod.length ? prod[prod.length-1] : null;
   };
+  const latestQcEntry = stage => {
+    const sd = b.stageData && b.stageData[stage];
+    if(!sd || !Array.isArray(sd.history)) return null;
+    const qc = sd.history.filter(h=>h.ws==='QC');
+    return qc.length ? qc[qc.length-1] : null;
+  };
+  let latestInstrument = null;
+  (b.route||[]).forEach(stage=>{
+    const qc = latestQcEntry(stage);
+    if(qc && qc.instrument) latestInstrument = qc.instrument;
+  });
+
   const stageRows = (b.route||[]).map((stage,idx)=>{
-    const h = latestHist(stage);
+    const prodEntry = latestProdEntry(stage);
+    const qcEntry = latestQcEntry(stage);
     const sd = b.stageData && b.stageData[stage] || {};
-    const startDate = h ? (h.date||h.ts||'') : '';
-    const endDate   = ''; // portal history is per-entry, not start/end paired — leave for operator
-    const qty       = sd.completed || (h && h.qty) || '';
-    const nextStage = b.route[idx+1] || '<em style="color:#888">Final</em>';
-    const rejQty    = sd.qcRejected || '';
+    const startDate = prodEntry ? fmtDateOnly(prodEntry.date || prodEntry.ts) : '';
+    const endDate = qcEntry ? fmtDateOnly(qcEntry.ts) : '';
+    const qty = sd.completed || (prodEntry && prodEntry.qty) || '';
+    const operatorName = prodEntry ? (prodEntry.operator||'') : '';
+    const qcName = qcEntry ? (qcEntry.operator||'') : '';
+    const nextStageName = b.route[idx+1];
+    const nextStage = nextStageName || '<em style="color:#888">Final</em>';
+    const nextStageProd = nextStageName ? latestProdEntry(nextStageName) : null;
+    const acceptedSignName = nextStageProd ? (nextStageProd.operator||'') : '';
+    const rejQty = sd.qcRejected ? sd.qcRejected : '-';
     return '<tr>'
       +'<td style="text-align:center;font-weight:600">'+(idx+1)+'</td>'
       +'<td style="font-weight:600">'+stage+'</td>'
       +'<td>'+startDate+'</td>'
       +'<td>'+endDate+'</td>'
       +'<td style="text-align:right">'+qty+'</td>'
-      +'<td></td>'  // Operator Sign — physical signature
-      +'<td></td>'  // QC Check Sign — physical signature
+      +'<td>'+operatorName+'</td>'
+      +'<td>'+qcName+'</td>'
       +'<td>'+nextStage+'</td>'
-      +'<td></td>'  // Accepted Sign — physical signature
+      +'<td>'+acceptedSignName+'</td>'
       +'<td style="text-align:right">'+rejQty+'</td>'
       +'</tr>';
   }).join('') || '<tr><td colspan="10" style="text-align:center;padding:8px;color:#888">No routing configured for this component. Set BOM Routing in Admin Panel.</td></tr>';
@@ -12887,25 +13345,20 @@ function openRouteCardForLine(lineId, projId){
     ? '<span style="display:inline-block;font-size:10.5px"><span style="font-size:13px;vertical-align:-1px">☑</span> Other: '+otherChars.join(', ')+'</span>'
     : '<span style="display:inline-block;font-size:10.5px"><span style="font-size:13px;vertical-align:-1px">☐</span> Other</span>';
 
-  // Page 2 — In-Process QC empty rows. The paper form has 23 rows for
-  // per-unit entries. Print a generous number of blank rows so operators can
-  // record actual measurements by hand — using min(qty, 23) rows to fit the
-  // page but not print more rows than there are units to check.
   const qcRowCount = Math.max(1, Math.min(b.qty||1, 23));
   const qcRows = Array.from({length: qcRowCount}, (_,i)=>
     '<tr>'
     +'<td style="text-align:center">'+(i+1)+'</td>'
-    +'<td></td>'  // Required Length (from design)
-    +'<td></td>'  // Required Width
-    +'<td></td>'  // Qty Manufactured
-    +'<td></td>'  // Finish / Description
-    +'<td></td>'  // Tolerance
-    +'<td></td>'  // QC Accepted (Ok / Hold / Reject)
-    +'<td style="font-size:8.5px">Measuring Tape: __________<br>Vernier Caliper: __________</td>'
-    +'<td></td>'  // QC Remarks
+    +'<td>'+(b.l||'')+'</td>'
+    +'<td>'+(b.w||'')+'</td>'
+    +'<td style="text-align:center">1</td>'
+    +'<td>'+(b.colorFinish||'')+'</td>'
+    +'<td></td>'
+    +'<td></td>'
+    +'<td>'+(i===0 && latestInstrument ? (latestInstrument.tagNo||'')+' '+(latestInstrument.name||'') : '')+'</td>'
+    +'<td></td>'
     +'</tr>'
   ).join('');
-
   const headerBlock = `
     <table class="ims-header">
       <tr>
@@ -12982,9 +13435,9 @@ function openRouteCardForLine(lineId, projId){
         <td class="lbl">Drawing Ref / Rev No</td><td>${drawingRef||''}</td>
       </tr>
       <tr>
-        <td class="lbl">Size (L × W × T)</td><td>${(b.l||'—')} × ${(b.w||'—')} × ${(b.t||'—')} ${b.uom==='MTR'?'mm':'mm'}</td>
         <td class="lbl">Type</td><td>${p.type||''}${b.isRework?' <span style="color:#92400e;font-weight:700">(REWORK)</span>':''}</td>
         <td class="lbl">Date of Generation</td><td>${nowStr}</td>
+        <td class="lbl"></td><td></td>
       </tr>
       <tr>
         <td class="lbl">Project Manager</td><td>${p.pm||''}</td>
@@ -13107,6 +13560,7 @@ function openRouteCardForLine(lineId, projId){
   setTimeout(()=>{ w.focus(); w.print(); }, 400);
   toast('Route Card for '+b.item+' opened — use Print → Save as PDF','🖨');
 }
+
 
 // ----------------------------------------------------------------------
 // ------ DYNAMIC TAT — TIMELINE OVERRIDE MANAGEMENT ------
@@ -22403,7 +22857,7 @@ function restoreDB(inp){
 
 // ------ QUALITY CONTROL ------
 function showQualityTab(t, el){
-  ['live','pareto','ppm','history','dimensional'].forEach(x=>{
+  ['live','pareto','ppm','history','dimensional','jwo'].forEach(x=>{
     const e=document.getElementById('qtab-'+x); if(e) e.style.display=x===t?'block':'none';
   });
   document.querySelectorAll('#qualityTabs .tab').forEach(b=>b.classList.remove('active'));
@@ -22412,9 +22866,18 @@ function showQualityTab(t, el){
   if(t==='ppm') renderPPMTrend();
   if(t==='history') renderQualityLog();
   if(t==='dimensional') initDimStudyTab();
+  if(t==='jwo') renderJwoQualityTab();
+}
+
+function canAccessJwoQuality(){
+  if(!CURRENT_USER) return false;
+  if(CURRENT_USER.role === 'superadmin') return true;
+  return CURRENT_USER.role === 'admin' && CURRENT_USER.department === 'Quality';
 }
 
 function initQuality(){
+  const jwoBtn = document.getElementById('jwoQualityTabBtn');
+  if(jwoBtn) jwoBtn.style.display = canAccessJwoQuality() ? '' : 'none';
   document.getElementById('qualityDate').value = new Date().toISOString().split('T')[0];
   renderQualityKPIs();
   renderQcQueue();

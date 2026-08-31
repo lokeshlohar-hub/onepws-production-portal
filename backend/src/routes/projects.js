@@ -112,7 +112,7 @@ router.post('/', requireRole('admin', 'superadmin'), async (req, res) => {
           b.uom || 'PC', b.qty,
           b.colorFinish || '', JSON.stringify(b.specialChars || []),
           b.componentsPerBoard || null, b.edgeMetersPerComp || null,
-          b.boardQty || Math.max(1, Math.ceil(b.qty / (b.componentsPerBoard || 8))),
+          b.boardQty ?? Math.max(1, Math.ceil(b.qty / (b.componentsPerBoard || 8))),
           JSON.stringify(route), JSON.stringify(stageData),
         ]
       );
@@ -184,7 +184,7 @@ router.post('/:id/add-segment', requireRole('admin', 'superadmin'), async (req, 
           b.uom || 'PC', b.qty,
           b.colorFinish || '', JSON.stringify(b.specialChars || []),
           b.componentsPerBoard || null, b.edgeMetersPerComp || null,
-          b.boardQty || Math.max(1, Math.ceil(b.qty / (b.componentsPerBoard || 8))),
+          b.boardQty ?? Math.max(1, Math.ceil(b.qty / (b.componentsPerBoard || 8))),
           JSON.stringify(route), JSON.stringify(stageData),
         ]
       );

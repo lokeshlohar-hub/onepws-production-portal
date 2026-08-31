@@ -944,7 +944,8 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
   </div>
 
   <div class="card" style="border-radius:0 0 var(--radius) var(--radius);border-top:2px solid var(--accent)">
-    <div class="table-wrap" id="trackerTableWrap">
+    <div class="bom-top-scroll" id="trackerTopScroll" onscroll="syncTrackerTopScroll()"><div class="bom-top-scroll-spacer" id="trackerTopSpacer"></div></div>
+    <div class="table-wrap" id="trackerTableWrap" onscroll="syncTrackerBottomScroll()">
       <table id="trackerTable">
         <thead>
         <tr>
@@ -1559,8 +1560,9 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
 
     <div class="card">
       <div class="card-header"><div class="card-title">🏭 Machine-wise Performance — Selected Period</div></div>
-      <div class="table-wrap">
-        <table><thead><tr><th>Machine</th><th>Achieved</th><th>Capacity</th><th>Pending</th><th>Utilization %</th><th>Best Day</th><th>Worst Day</th></tr></thead><tbody id="capSummaryMachineBody"></tbody></table>
+      <div class="bom-top-scroll" id="capMachTopScroll" onscroll="syncCapMachTopScroll()"><div class="bom-top-scroll-spacer" id="capMachTopSpacer"></div></div>
+      <div class="table-wrap" id="capMachTableWrap" onscroll="syncCapMachBottomScroll()">
+        <table id="capSummaryMachineTable"></table>
       </div>
     </div>
   </div>
@@ -8384,6 +8386,7 @@ function renderTracker(){
   document.getElementById('trackerBody').innerHTML='';
   rows.forEach(r=>document.getElementById('trackerBody').appendChild(r));
   updateTrackerStickyOffset();
+  initTrackerScrollSync();
 }
 
 // Master Tracker sticky freeze-panes offset — Phase 14. Measures the
@@ -8392,6 +8395,44 @@ function renderTracker(){
 // reads that variable so the sub-header row sits exactly beneath the
 // main header row when both are sticky-pinned to the scroll container.
 // Robust to font-size, padding, or letter-spacing changes.
+
+// ====== MASTER TRACKER — synced top scrollbar (mirrors the BOM segment tables) ======
+let _trackerScrollSyncing = false;
+function syncTrackerTopScroll(){
+  if(_trackerScrollSyncing) return;
+  const top = document.getElementById('trackerTopScroll');
+  const bottom = document.getElementById('trackerTableWrap');
+  if(!top || !bottom) return;
+  _trackerScrollSyncing = true;
+  bottom.scrollLeft = top.scrollLeft;
+  _trackerScrollSyncing = false;
+}
+function syncTrackerBottomScroll(){
+  if(_trackerScrollSyncing) return;
+  const top = document.getElementById('trackerTopScroll');
+  const bottom = document.getElementById('trackerTableWrap');
+  if(!top || !bottom) return;
+  _trackerScrollSyncing = true;
+  top.scrollLeft = bottom.scrollLeft;
+  _trackerScrollSyncing = false;
+}
+function initTrackerScrollSync(){
+  const wrap = document.getElementById('trackerTableWrap');
+  const spacer = document.getElementById('trackerTopSpacer');
+  if(!wrap || !spacer) return;
+  const table = document.getElementById('trackerTable');
+  if(!table) return;
+  const update = ()=>{
+    const w = wrap.scrollWidth || table.scrollWidth || 0;
+    if(w > 0) spacer.style.width = w+'px';
+  };
+  update();
+  if(typeof ResizeObserver !== 'undefined'){
+    const ro = new ResizeObserver(update);
+    ro.observe(wrap);
+    ro.observe(table);
+  }
+}
 function updateTrackerStickyOffset(){
   const firstRow = document.querySelector('#trackerTable thead tr:first-child');
   if(!firstRow) return;
@@ -8407,6 +8448,7 @@ window.addEventListener('resize', ()=>{
   // Only measure when the tracker is actually visible — no work when
   // the user is on Dashboard or another page.
   if(document.getElementById('trackerTable')?.offsetParent) updateTrackerStickyOffset();
+  if(document.getElementById('trackerTable')?.offsetParent) initTrackerScrollSync();
 });
 // ------ NEW PROJECT — saves to DB and instantly visible in tracker ------
 function initNewProj(){
@@ -14454,6 +14496,44 @@ async function saveDailyEntry(){
 }
 
 // Resolve a period-type + reference-date into a {start,end,label} range
+
+// ====== CAPACITY PLANNING — Machine table synced top scrollbar ======
+let _capMachScrollSyncing = false;
+function syncCapMachTopScroll(){
+  if(_capMachScrollSyncing) return;
+  const top = document.getElementById('capMachTopScroll');
+  const bottom = document.getElementById('capMachTableWrap');
+  if(!top || !bottom) return;
+  _capMachScrollSyncing = true;
+  bottom.scrollLeft = top.scrollLeft;
+  _capMachScrollSyncing = false;
+}
+function syncCapMachBottomScroll(){
+  if(_capMachScrollSyncing) return;
+  const top = document.getElementById('capMachTopScroll');
+  const bottom = document.getElementById('capMachTableWrap');
+  if(!top || !bottom) return;
+  _capMachScrollSyncing = true;
+  top.scrollLeft = bottom.scrollLeft;
+  _capMachScrollSyncing = false;
+}
+function initCapMachScrollSync(){
+  const wrap = document.getElementById('capMachTableWrap');
+  const spacer = document.getElementById('capMachTopSpacer');
+  if(!wrap || !spacer) return;
+  const table = document.getElementById('capSummaryMachineTable');
+  if(!table) return;
+  const update = ()=>{
+    const w = wrap.scrollWidth || table.scrollWidth || 0;
+    if(w > 0) spacer.style.width = w+'px';
+  };
+  requestAnimationFrame(update);
+  if(typeof ResizeObserver !== 'undefined'){
+    const ro = new ResizeObserver(update);
+    ro.observe(wrap);
+    ro.observe(table);
+  }
+}
 function resolvePeriod(periodType, refDate){
   // Dynamic Date Range filter (From/To) takes priority when both ends are set —
   // same {start,end,label} shape as every other branch below, so every calling
@@ -14466,17 +14546,25 @@ function resolvePeriod(periodType, refDate){
   if(periodType==='daily'){
     return {start:refDate, end:refDate, label:refDate};
   }
+  // Formats a Date object's LOCAL calendar date as YYYY-MM-DD, without
+  // going through toISOString() first. toISOString() converts to UTC
+  // before formatting — on an IST (or any UTC-ahead) machine, that
+  // silently rolls local midnight back to the previous day, which is
+  // exactly why "31" was showing before "1" for a month that starts
+  // on the 1st. This keeps the date exactly as the local calendar
+  // shows it, matching every date the rest of the app already displays.
+  const localDateStr = dt => dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');
   if(periodType==='weekly'){
     const dow=d.getDay(); // 0=Sun
     const monday=new Date(d); monday.setDate(d.getDate()-((dow+6)%7));
     const sunday=new Date(monday); sunday.setDate(monday.getDate()+6);
-    const s=monday.toISOString().split('T')[0], e=sunday.toISOString().split('T')[0];
+    const s=localDateStr(monday), e=localDateStr(sunday);
     return {start:s, end:e, label:'Week of '+s+' to '+e};
   }
   // monthly
   const y=d.getFullYear(), m=d.getMonth();
-  const s=new Date(y,m,1).toISOString().split('T')[0];
-  const e=new Date(y,m+1,0).toISOString().split('T')[0];
+  const s=localDateStr(new Date(y,m,1));
+  const e=localDateStr(new Date(y,m+1,0));
   const monthNames=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   return {start:s, end:e, label:monthNames[m]+' '+y};
 }
@@ -14544,23 +14632,65 @@ function renderCapSummaryTab(){
   ).join('') || '<tr><td colspan="6" class="text-sm text-muted" style="padding:12px">No data for this period.</td></tr>';
 
   // Per-machine totals across the same period
+  // Per-machine totals across the same period — day-by-day grid per the
+  // Monthly Achieved UI update. Rejection is shown only for a machine
+  // that is the SOLE machine on at least one production stage; machines
+  // sharing a stage with another machine only have a combined group
+  // label in the existing reject log, not a specific machine, so those
+  // show '—' rather than a guessed number.
+  const soloMachineIds = new Set();
+  Object.values(M.stageToWorkstation||{}).forEach(list=>{
+    if(Array.isArray(list) && list.length===1) soloMachineIds.add(list[0]);
+  });
   const machineRows = M.workstations.map(w=>{
     const achieved = days.reduce((s,d)=>s+wsAchievedOn(w.id,d),0);
     const cap = days.length*w.cap;
-    const pending = Math.max(0,cap-achieved);
     const util = cap>0?Math.round((achieved/cap)*100):0;
-    const perDay = days.map(d=>({date:d, v:wsAchievedOn(w.id,d)})).filter(x=>x.v>0);
-    const best = perDay.length?perDay.reduce((a,b)=>b.v>a.v?b:a):null;
-    const worst = perDay.length?perDay.reduce((a,b)=>b.v<a.v?b:a):null;
-    return {w, achieved, cap, pending, util, best, worst};
+    const canTrackRejection = soloMachineIds.has(w.id);
+    const dailyComponents = days.map(d=>wsAchievedOn(w.id,d));
+    const dailyBreakdownMins = days.map(d=>Math.round(wsDowntimeHoursOn(w.id,d)*60));
+    const dailyRejection = canTrackRejection
+      ? days.map(d=>DB.rejectLog.filter(r=>r.workstation===w.name && r.date===d).reduce((s,r)=>s+(r.qty||0),0))
+      : null;
+    const totalBreakdownMins = dailyBreakdownMins.reduce((a,b)=>a+b,0);
+    const totalRejection = dailyRejection ? dailyRejection.reduce((a,b)=>a+b,0) : null;
+    return {w, achieved, cap, util, dailyComponents, dailyBreakdownMins, dailyRejection, totalBreakdownMins, totalRejection};
   });
-  document.getElementById('capSummaryMachineBody').innerHTML = machineRows.map(r=>
-    '<tr><td class="fw-600">'+r.w.name+'</td><td>'+r.achieved+'</td><td>'+r.cap+'</td>'
-    +'<td class="'+(r.pending>0?'text-danger':'text-muted')+'">'+r.pending+'</td>'
-    +'<td><span class="badge '+(r.util>=80?'badge-complete':r.util>=50?'badge-running':'badge-delayed')+'">'+r.util+'%</span></td>'
-    +'<td class="text-xs">'+(r.best?r.best.date+' ('+r.best.v+')':'—')+'</td>'
-    +'<td class="text-xs">'+(r.worst?r.worst.date+' ('+r.worst.v+')':'—')+'</td></tr>'
-  ).join('');
+
+  const dayNums = days.map(d=>Number(d.slice(-2)));
+  const headHtml = '<thead><tr>'
+    +'<th rowspan="2">Machine Name</th><th rowspan="2">Capacity/Day</th><th rowspan="2"></th>'
+    +dayNums.map(n=>'<th>'+n+'</th>').join('')
+    +'<th rowspan="2">Total</th><th rowspan="2">Utilization %</th>'
+    +'</tr><tr>'+dayNums.map(()=>'<th></th>').join('')+'</tr></thead>';
+
+  const bodyHtml = machineRows.map(r=>{
+    const utilBadge = '<span class="badge '+(r.util>=80?'badge-complete':r.util>=50?'badge-running':'badge-delayed')+'">'+r.util+'%</span>';
+    const rejCells = r.dailyRejection
+      ? r.dailyRejection.map(v=>'<td class="text-center">'+v+'</td>').join('')
+      : dayNums.map(()=>'<td class="text-center text-muted">—</td>').join('');
+    const rejTotal = r.totalRejection===null ? '—' : r.totalRejection;
+    return '<tr>'
+        +'<td rowspan="3" class="fw-600">'+r.w.name+'</td>'
+        +'<td rowspan="3" class="text-center">'+r.w.cap+'</td>'
+        +'<td class="text-xs text-muted">No. of Components</td>'
+        +r.dailyComponents.map(v=>'<td class="text-center">'+(v||0)+'</td>').join('')
+        +'<td class="fw-600 text-center">'+r.achieved+'</td>'
+        +'<td rowspan="3" class="text-center">'+utilBadge+'</td>'
+      +'</tr><tr>'
+        +'<td class="text-xs text-muted">Breakdown (Mins)</td>'
+        +r.dailyBreakdownMins.map(v=>'<td class="text-center">'+(v||0)+'</td>').join('')
+        +'<td class="fw-600 text-center">'+r.totalBreakdownMins+'</td>'
+      +'</tr><tr>'
+        +'<td class="text-xs text-muted">Rejection (Qty)</td>'
+        +rejCells
+        +'<td class="fw-600 text-center">'+rejTotal+'</td>'
+      +'</tr>';
+  }).join('');
+
+  const machTable = document.getElementById('capSummaryMachineTable');
+  if(machTable) machTable.innerHTML = headHtml + '<tbody>'+bodyHtml+'</tbody>';
+  initCapMachScrollSync();
 
   renderCapSummaryTrendChart(dayRows);
   renderCapSummaryMachineChart(machineRows);

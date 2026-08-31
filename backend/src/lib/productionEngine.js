@@ -249,6 +249,19 @@ async function spawnReworkBomLine(client, origLine, rejectQty, stageName, catego
 // Recomputes a project's overall progress % by summing qty/last-stage-approved
 // across EVERY BOM line belonging to it (original lines + any rework spinoffs)
 // — mirrors refreshProjectProgress().
+// Returns the latest active Timeline Override's revised completion date for
+// a project segment, or null if none exists — mirrors effectivePlanDate()
+// on the frontend exactly, so both sides agree on what "the deadline" means.
+async function getEffectivePlanDate(client, projectId, segment, fallbackPlanDate) {
+  const { rows } = await client.query(
+    `SELECT revised_completion FROM tat_overrides
+     WHERE project_id = $1 AND (segment = $2 OR segment = 'both')
+     ORDER BY created_at DESC LIMIT 1`,
+    [projectId, segment]
+  );
+  return rows[0] ? rows[0].revised_completion : fallbackPlanDate;
+}
+
 async function refreshProjectProgress(client, projectId) {
   const { rows } = await client.query('SELECT * FROM bom_lines WHERE project_id = $1', [projectId]);
   let totalQty = 0, totalDone = 0;
@@ -261,16 +274,20 @@ async function refreshProjectProgress(client, projectId) {
   const progress = totalQty > 0 ? Math.round((totalDone / totalQty) * 100) : 0;
   await client.query('UPDATE projects SET progress = $1 WHERE id = $2', [progress, projectId]);
   if (progress >= 100) {
+    const { rows: pRows } = await client.query('SELECT has_wood, has_ext, plan_wood, plan_ext, act_wood, act_ext FROM projects WHERE id = $1', [projectId]);
+    const proj = pRows[0] || {};
+    const effWood = proj.has_wood ? await getEffectivePlanDate(client, projectId, 'wood', proj.plan_wood) : null;
+    const effExt  = proj.has_ext  ? await getEffectivePlanDate(client, projectId, 'ext',  proj.plan_ext)  : null;
     await client.query(
       `UPDATE projects SET
          wood_status = CASE WHEN has_wood THEN 'Complete' ELSE wood_status END,
          ext_status  = CASE WHEN has_ext  THEN 'Complete' ELSE ext_status END,
          act_wood = CASE WHEN has_wood AND act_wood IS NULL THEN CURRENT_DATE ELSE act_wood END,
          act_ext  = CASE WHEN has_ext  AND act_ext  IS NULL THEN CURRENT_DATE ELSE act_ext END,
-         dly_wood = CASE WHEN has_wood AND act_wood IS NULL AND plan_wood IS NOT NULL THEN (CURRENT_DATE - plan_wood) ELSE dly_wood END,
-         dly_ext  = CASE WHEN has_ext  AND act_ext  IS NULL AND plan_ext  IS NOT NULL THEN (CURRENT_DATE - plan_ext)  ELSE dly_ext  END
+         dly_wood = CASE WHEN has_wood AND act_wood IS NULL AND $2::date IS NOT NULL THEN (CURRENT_DATE - $2::date) ELSE dly_wood END,
+         dly_ext  = CASE WHEN has_ext  AND act_ext  IS NULL AND $3::date IS NOT NULL THEN (CURRENT_DATE - $3::date)  ELSE dly_ext  END
        WHERE id = $1`,
-      [projectId]
+      [projectId, effWood, effExt]
     );
   }
   return progress;

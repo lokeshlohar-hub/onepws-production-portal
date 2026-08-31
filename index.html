@@ -5718,6 +5718,32 @@ function serverRejectLogRowToLocal(row) {
     photoData: row.photo_data || null,
   };
 }
+
+// ====== TIMELINE OVERRIDE — server persistence (Fix session) ======
+async function apiLoadTatOverrides() {
+  return apiRequest('/tat-overrides', { method: 'GET' });
+}
+async function apiSaveTatOverride(payload) {
+  return apiRequest('/tat-overrides', { method: 'POST', body: JSON.stringify(payload) });
+}
+async function loadTatOverridesFromServer() {
+  try {
+    const resp = await apiLoadTatOverrides();
+    DB.tatOverrideLog = (resp.overrides || []).map(o => ({
+      id: o.id, projId: o.project_id, segment: o.segment,
+      originalReceived: o.original_received ? String(o.original_received).split('T')[0] : '',
+      originalPlan: o.original_plan ? String(o.original_plan).split('T')[0] : '',
+      overrideReason: o.override_reason, reasonCategory: o.reason_category,
+      revisedStartDate: o.revised_start_date ? String(o.revised_start_date).split('T')[0] : '',
+      revisedCompletion: o.revised_completion ? String(o.revised_completion).split('T')[0] : '',
+      delayDaysAdded: o.delay_days_added, responsibilityCategory: o.responsibility_category,
+      notes: o.notes, createdBy: o.created_by_name, createdAt: String(o.created_at).slice(0,16).replace('T',' ')
+    }));
+  } catch (err) {
+    toast('Could not load saved timeline overrides from the server: ' + err.message, '⚠');
+    DB.tatOverrideLog = DB.tatOverrideLog || [];
+  }
+}
 async function loadRejectLogFromServer() {
   try {
     const resp = await apiLoadRejectLog();
@@ -6648,6 +6674,7 @@ async function attemptLogin(btn){
     await loadAdminConfigFromServer();
     await loadUsersFromServer();
     await loadRejectLogFromServer();
+    await loadTatOverridesFromServer();
     await loadHandoverLogFromServer();
     await loadTodosFromServer();
     await loadMistakesFromServer();
@@ -6696,6 +6723,7 @@ async function restoreSession(){
     await loadAdminConfigFromServer();
     await loadUsersFromServer();
     await loadRejectLogFromServer();
+    await loadTatOverridesFromServer();
     await loadHandoverLogFromServer();
     await loadTodosFromServer();
     await loadMistakesFromServer();
@@ -13768,7 +13796,7 @@ function tatOverrideCalc(){
 }
 
 // -- Save the TAT override entry --
-function saveTatOverride(){
+async function saveTatOverride(){
   const projId = window._tatOverrideProjId;
   const p = DB.projects.find(x=>x.id===projId); if(!p){toast('Project not found.','⚠');return;}
   const segment   = document.getElementById('tov_segment').value;
@@ -13791,36 +13819,51 @@ function saveTatOverride(){
   if(!createdBy){toast('Select who is recording this override.','⚠');return;}
 
   const delayDays = parseInt(delayTxt)||0;
+
+  const saveBtn = document.getElementById('tovSaveBtn');
+  if(saveBtn){ saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
+
+  let serverEntry;
+  try{
+    const apiResp = await apiSaveTatOverride({
+      projectId: projId, segment, originalReceived: origRec, originalPlan: origPlan,
+      overrideReason: reason, reasonCategory: reasonCat,
+      revisedStartDate: revStart, revisedCompletion: revComp,
+      delayDaysAdded: delayDays, responsibilityCategory: resp, notes, createdByName: createdBy
+    });
+    const o = apiResp.override;
+    serverEntry = {
+      id: o.id, projId: o.project_id, segment: o.segment,
+      originalReceived: o.original_received ? String(o.original_received).split('T')[0] : '',
+      originalPlan: o.original_plan ? String(o.original_plan).split('T')[0] : '',
+      overrideReason: o.override_reason, reasonCategory: o.reason_category,
+      revisedStartDate: o.revised_start_date ? String(o.revised_start_date).split('T')[0] : '',
+      revisedCompletion: o.revised_completion ? String(o.revised_completion).split('T')[0] : '',
+      delayDaysAdded: o.delay_days_added, responsibilityCategory: o.responsibility_category,
+      notes: o.notes, createdBy: o.created_by_name, createdAt: String(o.created_at).slice(0,16).replace('T',' ')
+    };
+  }catch(err){
+    toast('Could not save timeline override to the server: '+err.message,'⚠');
+    if(saveBtn){ saveBtn.disabled = false; saveBtn.textContent = 'Save Override'; }
+    return;
+  }
+  if(saveBtn){ saveBtn.disabled = false; saveBtn.textContent = 'Save Override'; }
+
+  DB.tatOverrideLog.push(serverEntry);
+
+  // NOTE: p.planWood / p.planExt are intentionally left untouched here.
+  // The original plan date must never be overwritten — every place that
+  // needs "the deadline" (tracker, OTD, delay display) should call
+  // effectivePlanDate(p, segment), which already checks DB.tatOverrideLog
+  // first and only falls back to the original plan if no override exists.
+  // This mirrors exactly what the backend's getEffectivePlanDate() now does.
+
   const ts = new Date().toISOString().replace('T',' ').slice(0,16);
-  const id = 'TAT-'+String(Date.now()).slice(-6);
-
-  const entry = {
-    id, projId, segment, originalReceived:origRec, originalPlan:origPlan,
-    overrideReason:reason, reasonCategory:reasonCat,
-    revisedStartDate:revStart, revisedCompletion:revComp,
-    delayDaysAdded:delayDays, responsibilityCategory:resp,
-    createdAt:ts, createdBy, notes
-  };
-  DB.tatOverrideLog.push(entry);
-
-  // Update project's revised plan dates so tracker/OTD reflects the new effective date
-  if(segment==='wood'||segment==='both'){
-    p.planWood = revComp;
-    if(p.actWood && p.actWood<=revComp) p.dlyWood = Math.round((new Date(p.actWood)-new Date(origRec))/86400000) - (Math.round((new Date(origPlan)-new Date(origRec))/86400000));
-  }
-  if(segment==='ext'||segment==='both'){
-    p.planExt = revComp;
-    if(p.actExt && p.actExt<=revComp) p.dlyExt = 0;
-  }
-
-  // Audit log
   DB.auditLog.unshift({ts,user:createdBy,action:'Timeline Override',module:'Project',entity:p.sap,
     field:segment+' TAT',old:origPlan,nw:'Revised: '+revComp+' (+'+delayDays+'d) — '+reasonCat,ip:'192.168.1.1'});
-  // Project history
   if(!p.history) p.history=[];
   p.history.unshift({ts,u:createdBy,act:'Timeline Override Added',f:'TAT/'+segment,
     old:origPlan,nw:'Revised completion: '+revComp+' (+'+ delayDays+'d) | '+reasonCat+' | '+reason.slice(0,60)+(reason.length>60?'…':'')});
-  // Notification
   DB.notifications.unshift({type:'warn',
     msg:p.sap+': Timeline override — '+reasonCat+' (+'+delayDays+'d). Revised completion: '+revComp,time:'Just now'});
   document.getElementById('notifCount').textContent=DB.notifications.length;

@@ -8,7 +8,9 @@ const qcRoutes = require('./routes/qc');
 const calibrationRoutes = require('./routes/calibration');
 const maintenanceRoutes = require('./routes/maintenance');
 const toolsRoutes = require('./routes/tools');
+const tatOverrideRoutes = require('./routes/tatOverride');
 const capacityRoutes = require('./routes/capacity');
+const jobWorkOutwardRoutes = require('./routes/jobWorkOutward');
 const adminConfigRoutes = require('./routes/adminConfig');
 const handoverRoutes = require('./routes/handover');
 const todoRoutes = require('./routes/todo');
@@ -49,6 +51,13 @@ app.get('/api/health', (req, res) => res.json({
     'POST /api/tool-inventory/issue': true,
     'GET /api/daily-capacity': true,
     'POST /api/daily-capacity/increment': true,
+    'GET /api/tat-overrides': true,
+    'POST /api/tat-overrides': true,
+    'GET /api/job-work-outward/eligible/:projectId': true,
+    'GET /api/job-work-outward/project/:projectId': true,
+    'GET /api/job-work-outward/:id': true,
+    'POST /api/job-work-outward': true,
+    'PUT /api/job-work-outward/:id/qc': true,
     'GET /api/admin-config': true,
     'PUT /api/admin-config/:key': true,
     'GET /api/auth/users': true,
@@ -80,6 +89,8 @@ app.use('/api/calibration-instruments', calibrationRoutes);
 app.use('/api/breakdown-log', maintenanceRoutes);
 app.use('/api/tool-inventory', toolsRoutes);
 app.use('/api/daily-capacity', capacityRoutes);
+app.use('/api/tat-overrides', tatOverrideRoutes);
+app.use('/api/job-work-outward', jobWorkOutwardRoutes);
 app.use('/api/admin-config', adminConfigRoutes);
 app.use('/api/handover-log', handoverRoutes);
 app.use('/api/todo-list', todoRoutes);

@@ -293,4 +293,41 @@ router.put('/:lineId/reconcile-route', requireRole('admin', 'superadmin'), async
   res.json({ ok: true, lineId: rows[0].line_id });
 });
 
+
+// Sets or clears a BOM line's explicit board-planning parent link.
+// Used both right after New Project creation (to resolve temporary
+// on-screen row references into real IDs) and from Edit BOM (where the
+// line already exists). boardSourceLineId: a real line_id, or null to
+// clear the link and fall back to the old positional behavior.
+router.patch('/:lineId/board-source', requireAuth, async (req, res) => {
+  const { lineId } = req.params;
+  const { boardSourceLineId } = req.body || {};
+  try {
+    if (boardSourceLineId) {
+      const { rows: parentRows } = await pool.query(
+        'SELECT line_id, project_id, seg FROM bom_lines WHERE line_id = $1', [boardSourceLineId]
+      );
+      const { rows: childRows } = await pool.query(
+        'SELECT line_id, project_id, seg FROM bom_lines WHERE line_id = $1', [lineId]
+      );
+      if (!parentRows[0] || !childRows[0]) {
+        return res.status(404).json({ error: 'Line not found' });
+      }
+      if (parentRows[0].project_id !== childRows[0].project_id || parentRows[0].seg !== childRows[0].seg) {
+        return res.status(400).json({ error: 'Parent line must be in the same project and segment' });
+      }
+      if (boardSourceLineId === lineId) {
+        return res.status(400).json({ error: 'A line cannot be its own board-planning parent' });
+      }
+    }
+    const { rows } = await pool.query(
+      'UPDATE bom_lines SET board_source_line_id = $1 WHERE line_id = $2 RETURNING line_id, board_source_line_id',
+      [boardSourceLineId || null, lineId]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Line not found' });
+    res.json({ line: rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: 'Could not update board-planning link', detail: err.message });
+  }
+});
 module.exports = router;

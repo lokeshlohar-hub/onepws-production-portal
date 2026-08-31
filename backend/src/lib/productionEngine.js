@@ -320,6 +320,44 @@ async function processQcDecision(lineId, { stageName, approveQty, rejectQty, dis
 
     if (isSawStage(stageName) && approveQty > 0) {
       applyBoardToComponentConversion(line, stageName, approveQty);
+
+      // Persist the shared-board sibling cascade — previously this only ever
+      // happened in the browser's memory and was never saved to the database,
+      // so sibling lines' released counts silently reverted on every restart.
+      // Explicit link (board_source_line_id) is checked first; if a sibling
+      // has none set, falls back to the same positional walk the app has
+      // always used, so nothing that already works today changes unless
+      // someone explicitly picks a parent for that line.
+      const { rows: allLines } = await client.query(
+        'SELECT * FROM bom_lines WHERE project_id = $1 AND seg = $2 ORDER BY created_at',
+        [line.project_id, line.seg]
+      );
+      const ownerBoardQty = Number(line.board_qty) || 1;
+      const idxInSeg = allLines.findIndex(l => l.line_id === line.line_id);
+
+      const linkedChildren = allLines.filter(l =>
+        l.line_id !== line.line_id && l.board_source_line_id === line.line_id
+      );
+      const positionalChildren = [];
+      if (idxInSeg >= 0) {
+        for (let i = idxInSeg + 1; i < allLines.length; i++) {
+          const sib = allLines[i];
+          if (sib.board_source_line_id) break;
+          if ((Number(sib.board_qty) || 1) !== 0) break;
+          positionalChildren.push(sib);
+        }
+      }
+      const siblingsToUpdate = linkedChildren.length ? linkedChildren : positionalChildren;
+
+      for (const sib of siblingsToUpdate) {
+        const sibCompQty = Number(sib.qty) || 1;
+        const cascadeQty = approveQty >= ownerBoardQty
+          ? sibCompQty
+          : Math.floor(sibCompQty * (approveQty / ownerBoardQty));
+        if (cascadeQty <= 0) continue;
+        const newReleased = (Number(sib.components_released) || 0) + cascadeQty;
+        await client.query('UPDATE bom_lines SET components_released = $1 WHERE line_id = $2', [newReleased, sib.line_id]);
+      }
     }
 
     let reworkLine = null;

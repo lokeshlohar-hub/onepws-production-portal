@@ -41,6 +41,7 @@ app.get('/api/health', (req, res) => res.json({
     'POST /api/bom-lines/:lineId/mark-email-prompt-shown': true,
     'PUT /api/bom-lines/:lineId': true,
     'DELETE /api/bom-lines/:lineId': true,
+    'PATCH /api/bom-lines/:lineId/board-source': true,
     'GET /api/calibration-instruments': true,
     'POST /api/calibration-instruments/bulk': true,
     'GET /api/breakdown-log': true,

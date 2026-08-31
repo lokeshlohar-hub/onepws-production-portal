@@ -5439,6 +5439,7 @@ function serverBomLineToLocal(row) {
     componentsPerBoard: row.components_per_board,
     edgeMetersPerComp: row.edge_meters_per_comp != null ? Number(row.edge_meters_per_comp) : null,
     boardQty: row.board_qty,
+    boardSourceLineId: row.board_source_line_id || null,
     componentsReleased: row.components_released || 0,
     route: row.route || [],
     stageData: stageData,
@@ -8683,7 +8684,7 @@ function setupSegmentForEdit(seg, p){
     // Save hits PUT with just that row's fields, no batching with the
     // project-level save.
     if(editable.length){
-      html += editable.map(b=>makeSegBOMEditRow(b, seg, p.id)).join('');
+      html += editable.map((b,i)=>makeSegBOMEditRow(b, seg, p.id, i)).join('');
     }
     // Locked bullets — original view-only summary, verbatim from the
     // pre-Phase-10 behavior. Shown if any component is locked, OR if the
@@ -8701,6 +8702,14 @@ function setupSegmentForEdit(seg, p){
       html += '<tr><td colspan="12" style="padding:10px">'+introMsg+bullets+'</td></tr>';
     }
     tbody.innerHTML = html;
+    if(seg==='wood'){
+      editable.forEach(b=>{
+        if((b.boardQty ?? 1) === 0 && b.boardSourceLineId){
+          const safeId = String(b.lineId).replace(/[^a-zA-Z0-9_-]/g,'_');
+          populateEditBoardSourceOptions(safeId, seg);
+        }
+      });
+    }
   }
   if(seg==='wood') woodBomIdx=0; else extBomIdx=0;
 }
@@ -8713,7 +8722,7 @@ function setupSegmentForEdit(seg, p){
 // so a rename to a name that IS in the master list is one dropdown pick,
 // and keeping the current name doesn't require the master list to still
 // know about it.
-function makeSegBOMEditRow(b, seg, projectId){
+function makeSegBOMEditRow(b, seg, projectId, rowIdx){
   const id = b.lineId;
   const safeId = id.replace(/[^a-zA-Z0-9_-]/g,'_');
   let compNames = bomComponentsForSegment(seg);
@@ -8729,7 +8738,7 @@ function makeSegBOMEditRow(b, seg, projectId){
   if(seg==='ext'){
     const uomOpts = ['PC','MTR','NOS'].map(u=>'<option'+(u===uom?' selected':'')+'>'+u+'</option>').join('');
     return '<tr '+dataAttrs+' style="'+rowStyle+'">'
-      +'<td style="font-size:12px">•</td>'
+      +'<td style="font-size:12px">'+(rowIdx+1)+'</td>'
       +'<td><select class="form-select" style="height:27px;min-width:120px" id="e_bom_comp_ext_'+safeId+'">'+compOpts+'</select></td>'
       +'<td><input type="text" class="form-input" style="height:27px;width:130px;text-transform:uppercase" maxlength="50" id="e_bom_desc_ext_'+safeId+'" value="'+(b.description||'').replace(/"/g,'&quot;')+'" placeholder="Optional identifier" oninput="this.value=this.value.toUpperCase()" title="Optional traceability description"></td>'
       +'<td class="bom-col-profile"><input type="text" class="form-input" style="height:27px;width:75px" id="e_bom_profile_'+safeId+'" value="'+(b.profile||'')+'"></td>'
@@ -8746,7 +8755,7 @@ function makeSegBOMEditRow(b, seg, projectId){
   }
   const uomOpts = ['PC','SET','NOS'].map(u=>'<option'+(u===uom?' selected':'')+'>'+u+'</option>').join('');
   return '<tr '+dataAttrs+' style="'+rowStyle+'">'
-    +'<td style="font-size:12px">•</td>'
+    +'<td style="font-size:12px">'+(rowIdx+1)+'</td>'
     +'<td><select class="form-select" style="height:27px;min-width:120px" id="e_bom_comp_wood_'+safeId+'">'+compOpts+'</select></td>'
     +'<td><input type="text" class="form-input" style="height:27px;width:130px;text-transform:uppercase" maxlength="50" id="e_bom_desc_wood_'+safeId+'" value="'+(b.description||'').replace(/"/g,'&quot;')+'" placeholder="Optional identifier" oninput="this.value=this.value.toUpperCase()" title="Optional traceability description"></td>'
     +'<td><input type="number" class="form-input dim-input" style="height:27px;width:65px" id="e_bom_l_wood_'+safeId+'" value="'+(b.l||'')+'"></td>'
@@ -8754,7 +8763,7 @@ function makeSegBOMEditRow(b, seg, projectId){
     +'<td><input type="number" class="form-input dim-input" style="height:27px;width:58px" id="e_bom_t_wood_'+safeId+'" value="'+(b.t||'')+'"></td>'
     +'<td class="bom-col-uom"><select class="form-select" style="height:27px;width:55px" id="e_bom_uom_wood_'+safeId+'">'+uomOpts+'</select></td>'
     +'<td><input type="number" class="form-input" style="height:27px;width:52px" id="e_bom_qty_wood_'+safeId+'" value="'+b.qty+'" min="1"></td>'
-    +'<td><input type="number" class="form-input" style="height:27px;width:52px;background:#ede9fe;color:#7c3aed;font-weight:700" id="e_bom_boards_'+safeId+'" value="'+((b.boardQty===0||b.boardQty)?b.boardQty:'')+'" min="0" placeholder="Auto" title="Boards Planned — leave blank for auto, or enter 0 to link this component to a previous shared board"></td>'
+    +'<td><input type="number" class="form-input" style="height:27px;width:52px;background:#ede9fe;color:#7c3aed;font-weight:700" id="e_bom_boards_'+safeId+'" value="'+((b.boardQty===0||b.boardQty)?b.boardQty:'')+'" min="0" placeholder="Auto" title="Boards Planned — leave blank for auto, or enter 0 to link this component to a previous shared board" oninput="onEditBoardsPlannedChange(this,'+seg+')"><select class="form-select" id="e_bom_boardsrc_'+safeId+'" style="height:24px;width:150px;margin-top:3px;display:'+((b.boardQty===0)?'':'none')+';font-size:10px"><option value="">— Select Parent —</option></select></td>'
     +'<td><input type="text" class="form-input" style="height:27px;width:100px" id="e_bom_finish_wood_'+safeId+'" value="'+(b.colorFinish||'').replace(/"/g,'&quot;')+'"></td>'
     +'<td><input type="text" class="form-input" style="height:27px;width:130px" id="e_bom_specials_wood_'+safeId+'" value="'+specialCharsStr.replace(/"/g,'&quot;')+'" placeholder="comma-separated" title="Comma-separated special characteristics"></td>'
     +'<td class="bom-col-route"><div style="min-width:200px">'+routeDisplay+'</div></td>'
@@ -8772,6 +8781,48 @@ function makeSegBOMEditRow(b, seg, projectId){
 // gate — shouldn't happen if the frontend UI check was right, but caught
 // defensively), 409 (line just entered production — the untouched test
 // is authoritative on the server so the row can no longer be edited).
+
+// ====== BOARD PLANNING — Edit BOM dropdown ======
+function onEditBoardsPlannedChange(inputEl, seg){
+  const safeId = inputEl.id.replace('e_bom_boards_','');
+  const srcSelect = document.getElementById('e_bom_boardsrc_'+safeId);
+  if(!srcSelect) return;
+  const isZero = inputEl.value.trim() === '0';
+  srcSelect.style.display = isZero ? '' : 'none';
+  if(isZero) populateEditBoardSourceOptions(safeId, seg);
+  // Same reasoning as the New Project Entry version — this row's board
+  // count just changed, which can affect every other row's valid parent
+  // list. Refresh every other currently-visible dropdown in this segment.
+  const tbody = inputEl.closest('tbody');
+  if(tbody){
+    tbody.querySelectorAll('[id^="e_bom_boardsrc_"]').forEach(sel=>{
+      if(sel===srcSelect) return;
+      if(sel.style.display !== 'none'){
+        const otherSafeId = sel.id.replace('e_bom_boardsrc_','');
+        populateEditBoardSourceOptions(otherSafeId, seg);
+      }
+    });
+  }
+}
+
+function populateEditBoardSourceOptions(safeId, seg){
+  const projectId = _editingProjectId;
+  const p = DB.projects.find(x=>x.id===projectId);
+  if(!p) return;
+  const thisLine = (p.bom||[]).find(x=>String(x.lineId).replace(/[^a-zA-Z0-9_-]/g,'_')===safeId);
+  const srcSelect = document.getElementById('e_bom_boardsrc_'+safeId);
+  if(!srcSelect || !thisLine) return;
+  const allSegLines = (p.bom||[]).filter(x => x.seg===seg);
+  const siblings = allSegLines.filter(x => x.lineId!==thisLine.lineId && (x.boardQty ?? 1) !== 0);
+  let optsHtml = '<option value="">— Select Parent —</option>';
+  siblings.forEach(sib=>{
+    const sel = sib.lineId===thisLine.boardSourceLineId ? ' selected' : '';
+    const boardsDisplay = (sib.boardQty ?? 1);
+    const rowNum = allSegLines.findIndex(x=>x.lineId===sib.lineId) + 1;
+    optsHtml += '<option value="'+sib.lineId+'"'+sel+'>Row '+rowNum+' — '+sib.item+' — Qty '+sib.qty+' — '+boardsDisplay+' board(s)</option>';
+  });
+  srcSelect.innerHTML = optsHtml;
+}
 async function saveExistingBomLine(safeId, seg){
   const projectId = _editingProjectId;
   if(!projectId){ toast('Editing session lost. Reopen Edit BOM.','⚠'); return; }
@@ -8836,6 +8887,22 @@ async function saveExistingBomLine(safeId, seg){
       // Fallback: server accepted but returned nothing usable — apply the payload locally.
       Object.assign(b, payload);
     }
+    // Board Planning — Boards Planned is the single source of truth here.
+    // If it's exactly 0 and a parent was chosen, save that link. Anything
+    // else (including a leftover hidden selection from before the user
+    // changed the number back) means the link is cleared, so nothing
+    // stale can ever survive silently.
+    try{
+      const srcSelect = document.getElementById('e_bom_boardsrc_'+safeId);
+      const chosenParent = (payload.boardQty === 0 && srcSelect) ? (srcSelect.value || null) : null;
+      await apiRequest('/bom-lines/'+encodeURIComponent(b.lineId)+'/board-source', {
+        method:'PATCH', body: JSON.stringify({ boardSourceLineId: chosenParent })
+      });
+      b.boardSourceLineId = chosenParent;
+    }catch(err){
+      toast('Saved, but the Board Planning link could not be updated: '+err.message,'⚠');
+    }
+
     // Route auto-recomputation feedback (server sets routeReplaced=true
     // when item name changed, and newRouteLength tells us whether the new
     // name had a rule in the admin panel).
@@ -8922,8 +8989,13 @@ function cancelEditProjectMode(){
 
 function makeSegBOMRow(i, seg){
   const compOpts=bomComponentsForSegment(seg).map(c=>'<option>'+c+'</option>').join('');
+  // Stable tag for this on-screen row, used only for the Board Planning
+  // "Use Board Planning From" parent link. Never changes for this row's
+  // lifetime, even if other rows are added or removed around it — unlike
+  // the visible row number (i), which shifts.
+  const boid = 'bt'+(_bomTempIdSeq++);
   if(seg==='ext'){
-    return '<tr>'
+    return '<tr data-boid="'+boid+'">'
       +'<td style="font-size:12px">'+(i+1)+'</td>'
       +'<td><select class="form-select" style="height:27px;min-width:120px" id="bom_comp_ext_'+i+'" onchange="autoFillRoutingSeg('+i+',\'ext\')">'+compOpts+'</select></td>'
       +'<td><input type="text" class="form-input" style="height:27px;width:130px;text-transform:uppercase" maxlength="50" placeholder="Optional identifier" oninput="this.value=this.value.toUpperCase()" title="Optional traceability description — e.g. LEFT SHUTTER"></td>'
@@ -8937,7 +9009,7 @@ function makeSegBOMRow(i, seg){
       +'<td><button class="btn btn-danger btn-sm" style="height:26px;padding:0 7px" onclick="this.closest(\'tr\').remove()">x</button></td>'
       +'</tr>';
   }
-  return '<tr>'
+  return '<tr data-boid="'+boid+'">'
     +'<td style="font-size:12px">'+(i+1)+'</td>'
     +'<td><select class="form-select" style="height:27px;min-width:120px" id="bom_comp_wood_'+i+'" onchange="autoFillRoutingSeg('+i+',\'wood\')">'+compOpts+'</select></td>'
     +'<td><input type="text" class="form-input" style="height:27px;width:130px;text-transform:uppercase" maxlength="50" placeholder="Optional identifier" oninput="this.value=this.value.toUpperCase()" title="Optional traceability description — e.g. LEFT SHUTTER"></td>'
@@ -8946,7 +9018,7 @@ function makeSegBOMRow(i, seg){
     +'<td><input type="number" class="form-input dim-input" style="height:27px;width:58px" placeholder="T"></td>'
     +'<td class="bom-col-uom"><select class="form-select" style="height:27px;width:55px"><option>PC</option><option>SET</option><option>NOS</option></select></td>'
     +'<td title="Total COMPONENTS to manufacture (BOM quantity)"><input type="number" class="form-input" style="height:27px;width:52px" value="1" min="1"></td>'
-    +'<td title="Boards Planned for Hot Press / Beam Saw. Auto = Qty if blank. Enter 0 to share the board with a previous line (shared-board optimization)."><input type="number" class="form-input" style="height:27px;width:52px;background:#ede9fe;color:#7c3aed;font-weight:700" min="0" placeholder="Auto"></td>'
+    +'<td title="Boards Planned for Hot Press / Beam Saw. Auto = Qty if blank. Enter 0 to share the board with a previous line."><input type="number" class="form-input board-qty-input" style="height:27px;width:52px;background:#ede9fe;color:#7c3aed;font-weight:700" min="0" placeholder="Auto" oninput="onBoardsPlannedChange(this)"><select class="form-select board-source-select" style="height:24px;width:150px;margin-top:3px;display:none;font-size:10px" onchange="onBoardSourceChange(this)"><option value="">— Select Parent —</option></select></td>'
     +'<td><input type="text" class="form-input" id="bom_finish_wood_'+i+'" style="height:27px;width:100px" placeholder="e.g. Walnut, White"></td>'
     +'<td><div class="ms-dropdown" id="ms_wood_'+i+'"><button type="button" class="ms-toggle" id="ms_toggle_wood_'+i+'" onclick="toggleMsPanel(\'wood\','+i+')"><span class="ms-toggle-text ms-placeholder" id="ms_text_wood_'+i+'">Select...</span><span class="ms-caret">▾</span></button><div class="ms-panel" id="ms_panel_wood_'+i+'">'+msOptionsHTML('wood',i)+'</div></div></td>'
     +'<td class="bom-col-route"><div id="bom_route_wood_'+i+'" style="min-width:200px"><div style="font-size:11px;color:var(--text-muted);font-style:italic">Select component for routing</div></div></td>'
@@ -8955,6 +9027,7 @@ function makeSegBOMRow(i, seg){
 }
 function makeBOMRow(i){ return makeSegBOMRow(i,'wood'); }
 
+let _bomTempIdSeq = 0; // stable per-row tag for Board Planning parent links — never resets, never reused
 let woodBomIdx=1, extBomIdx=1;
 function addBOMToSegment(seg){
   const bodyId=seg==='wood'?'woodBomBody':'extBomBody';
@@ -8966,6 +9039,62 @@ function addBOMToSegment(seg){
   setTimeout(()=>autoFillRoutingSeg(tbody.rows.length-1,seg),30);
 }
 
+
+// ====== BOARD PLANNING — "Use Board Planning From" (New Project Entry) ======
+function onBoardsPlannedChange(inputEl){
+  const row = inputEl.closest('tr');
+  const srcSelect = row.querySelector('.board-source-select');
+  if(!srcSelect) return;
+  const isZero = inputEl.value.trim() === '0';
+  srcSelect.style.display = isZero ? '' : 'none';
+  if(!isZero){
+    srcSelect.value = '';
+    row.dataset.boardSourceBoid = '';
+  } else {
+    populateBoardSourceOptions(row);
+  }
+  // This row's own board count just changed, which can affect every OTHER
+  // row's list of valid parents (a row that just became 0 can no longer be
+  // someone else's parent; a row that just stopped being 0 now can be).
+  // Refresh every other row that currently has its dropdown showing, so
+  // nothing stale is ever left on screen.
+  const tbody = row.closest('tbody');
+  if(tbody){
+    Array.from(tbody.children).forEach(sib=>{
+      if(sib===row) return;
+      const sibSelect = sib.querySelector('.board-source-select');
+      if(sibSelect && sibSelect.style.display !== 'none') populateBoardSourceOptions(sib);
+    });
+  }
+}
+
+function populateBoardSourceOptions(row){
+  const tbody = row.closest('tbody');
+  const srcSelect = row.querySelector('.board-source-select');
+  if(!tbody || !srcSelect) return;
+  const previouslyChosen = row.dataset.boardSourceBoid || '';
+  let optsHtml = '<option value="">— Select Parent —</option>';
+  Array.from(tbody.children).forEach((sib, ri)=>{
+    if(sib===row) return;
+    const boardsInp = sib.querySelector('.board-qty-input');
+    const boardsVal = boardsInp ? boardsInp.value.trim() : '';
+    if(boardsVal==='0') return; // a 0-board line can't itself be a parent
+    const compSel = sib.querySelector('select[id^="bom_comp_wood_"]');
+    const compName = compSel ? compSel.value : '(unnamed)';
+    const numInputs = sib.querySelectorAll('input[type="number"]');
+    const qtyVal = numInputs[3] ? numInputs[3].value : '?';
+    const boardsDisplay = boardsVal || 'Auto';
+    const sibBoid = sib.dataset.boid;
+    const sel = sibBoid===previouslyChosen ? ' selected' : '';
+    optsHtml += '<option value="'+sibBoid+'"'+sel+'>Line '+(ri+1)+' — '+compName+' — Qty '+qtyVal+' — '+boardsDisplay+' board(s)</option>';
+  });
+  srcSelect.innerHTML = optsHtml;
+}
+
+function onBoardSourceChange(selectEl){
+  const row = selectEl.closest('tr');
+  row.dataset.boardSourceBoid = selectEl.value || '';
+}
 function autoFillRoutingSeg(i, seg){
   const selId='bom_comp_'+seg+'_'+i;
   const divId='bom_route_'+seg+'_'+i;
@@ -9272,7 +9401,36 @@ async function saveProject(btn){
         componentsPerBoard:b.componentsPerBoard, edgeMetersPerComp:b.edgeMetersPerComp, boardQty:b.boardQty,
         route:b.route
       }))
-    });
+});
+
+    // Board Planning — resolve any "Use Board Planning From" selections
+    // (stored as data-boid/data-boardSourceBoid tags on the on-screen rows,
+    // since those rows had no real IDs yet) into real BOM line IDs now that
+    // the server has assigned them, then save each link. Best-effort: a
+    // failure here doesn't roll back project creation, since the project
+    // and its BOM lines are already saved correctly — it only means that
+    // one link falls back to the old positional behavior, same as before
+    // this feature existed.
+    try{
+      const allWoodRows = Array.from(document.querySelectorAll('#woodBomBody tr'));
+      const boidToRealId = {};
+      allWoodRows.forEach((row, idx)=>{
+        const boid = row.dataset.boid;
+        if(boid && serverResult.bomLineIds[idx]) boidToRealId[boid] = serverResult.bomLineIds[idx];
+      });
+      for(const row of allWoodRows){
+        const chosenBoid = row.dataset.boardSourceBoid;
+        if(!chosenBoid) continue;
+        const childRealId = boidToRealId[row.dataset.boid];
+        const parentRealId = boidToRealId[chosenBoid];
+        if(!childRealId || !parentRealId) continue;
+        await apiRequest('/bom-lines/'+encodeURIComponent(childRealId)+'/board-source', {
+          method:'PATCH', body: JSON.stringify({ boardSourceLineId: parentRealId })
+        });
+      }
+    }catch(err){
+      toast('Project created, but one or more Board Planning links could not be saved: '+err.message,'⚠');
+    }
   } catch(err){
     toast('Could not save this project to the server: '+err.message,'⚠');
     if(btn){ btn.disabled=false; btn.textContent=originalBtnText||'✓ Create Project & Generate Workflows'; }
@@ -9463,6 +9621,21 @@ async function saveProjectAddSegment(btn){
       const updated = resp.line ? serverBomLineToLocal(resp.line) : null;
       if(updated){ Object.assign(e.localLine, updated); }
       else { Object.assign(e.localLine, e.payload); }
+
+      // Board Planning — same rule as the single-row Save: Boards Planned
+      // is the source of truth, cleared unless it's exactly 0 with a
+      // parent chosen. Best-effort — doesn't fail the whole batched save.
+      try{
+        const safeIdForRow = String(e.lineId).replace(/[^a-zA-Z0-9_-]/g,'_');
+        const srcSelect = document.getElementById('e_bom_boardsrc_'+safeIdForRow);
+        const chosenParent2 = (e.payload.boardQty === 0 && srcSelect) ? (srcSelect.value || null) : null;
+        await apiRequest('/bom-lines/'+encodeURIComponent(e.lineId)+'/board-source', {
+          method:'PATCH', body: JSON.stringify({ boardSourceLineId: chosenParent2 })
+        });
+        e.localLine.boardSourceLineId = chosenParent2;
+      }catch(err){
+        toast('Line '+e.lineId+' saved, but its Board Planning link could not be updated: '+err.message,'⚠');
+      }
       if(resp.routeReplaced){
         if(!resp.newRouteLength) renamedNoRoute.push(e.payload.item);
         else renamedWithRoute.push({item: e.payload.item, stages: resp.newRouteLength});
@@ -10131,18 +10304,27 @@ function applyBoardToComponentConversion(p, b, sawStageName, boardsApproved){
     ws:'CONVERSION',operator:'Auto',qty:boardsApproved,
     action:'Conversion: '+boardsApproved+' boards approved → '+newComponents+' components released for downstream (ratio '+ratio.toFixed(2)+')'
   });
-  // Positional shared-board cascade — Phase 12. Walk forward through same-
-  // segment BOM lines; while the next line has boardQty === 0, release its
-  // components proportionally. Stops at the next line with boardQty > 0
-  // (which is the next owner) or at end of segment.
+  // Shared-board cascade — checks each line's explicit "Use Board Planning
+  // From" link first (boardSourceLineId); if a line has no explicit link,
+  // falls back to the original positional walk exactly as before — this
+  // matches the backend's identical rule in productionEngine.js, so what's
+  // shown on screen immediately agrees with what actually gets saved to
+  // the database, before any refresh.
   if(p && Array.isArray(p.bom)){
     const segLines = p.bom.filter(x => x.seg === b.seg);
     const idx = segLines.findIndex(x => x.lineId === b.lineId);
     if(idx >= 0){
       const ownerBoardQty = b.boardQty ?? 1;
+      const linkedChildren = segLines.filter(x => x.lineId !== b.lineId && x.boardSourceLineId === b.lineId);
+      const positionalChildren = [];
       for(let i = idx + 1; i < segLines.length; i++){
-        const sibling = segLines[i];
-        if((sibling.boardQty ?? 1) !== 0) break;
+        const cand = segLines[i];
+        if(cand.boardSourceLineId) break;
+        if((cand.boardQty ?? 1) !== 0) break;
+        positionalChildren.push(cand);
+      }
+      const cascadeTargets = linkedChildren.length ? linkedChildren : positionalChildren;
+      for(const sibling of cascadeTargets){
         const siblingCompQty = sibling.qty || 1;
         const cascadeQty = boardsApproved >= ownerBoardQty
           ? siblingCompQty

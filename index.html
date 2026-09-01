@@ -8389,14 +8389,12 @@ function renderTracker(){
       +woodCells
       +extCells
       +'<td>'+statusBadge+'</td>'
-      +'<td><div style="display:flex;gap:3px;flex-wrap:wrap">'
-        +'<button class="btn btn-outline btn-sm" data-action="view" data-pid="'+pid+'">View</button>'
-        +'<button class="btn btn-outline btn-sm" data-action="update" data-pid="'+pid+'">Update</button>'
+      +'<td><div style="display:flex;gap:4px;white-space:nowrap">'
         +(p.onHold
-          ?'<button class="btn btn-sm" style="background:#f0fdf4;color:#166534;border:1px solid #bbf7d0" data-action="resume" data-pid="'+pid+'">▶ Resume</button>'
-          :p.progress<100?'<button class="btn btn-sm" style="background:#fef9c3;color:#854d0e;border:1px solid #fde047" data-action="hold" data-pid="'+pid+'">⏸ Hold</button>':'')
-        +'<button class="btn btn-sm" style="background:var(--yellow-light);color:var(--yellow);border:1px solid #fde047" data-action="override" data-pid="'+pid+'">📅 TAT</button>'
-        +(hasPermission('tracker',null,'delete')?'<button class="btn btn-sm" style="background:var(--red-light);color:var(--red);border:1px solid #fca5a5" data-action="delete" data-pid="'+pid+'">🗑 Delete</button>':'')
+          ?'<button class="btn btn-sm" style="background:#f0fdf4;color:#166534;border:1px solid #bbf7d0;width:28px;height:28px;padding:0;font-size:13px;line-height:1" data-action="resume" data-pid="'+pid+'" title="Resume Project">&#9654;</button>'
+          :p.progress<100?'<button class="btn btn-sm" style="background:#fef9c3;color:#854d0e;border:1px solid #fde047;width:28px;height:28px;padding:0;font-size:13px;line-height:1" data-action="hold" data-pid="'+pid+'" title="Hold Project">&#9208;</button>':'')
+        +'<button class="btn btn-sm" style="background:var(--yellow-light);color:var(--yellow);border:1px solid #fde047;width:28px;height:28px;padding:0;font-size:13px;line-height:1" data-action="override" data-pid="'+pid+'" title="Manage TAT">&#128197;</button>'
+        +(hasPermission('tracker',null,'delete')?'<button class="btn btn-sm" style="background:var(--red-light);color:var(--red);border:1px solid #fca5a5;width:28px;height:28px;padding:0;font-size:13px;line-height:1" data-action="delete" data-pid="'+pid+'" title="Delete Project">&#128465;</button>':'')
       +'</div></td>';
     tr.querySelector('[data-pid]').addEventListener('click',function(){openProj(this.dataset.pid);});
     tr.querySelectorAll('button[data-action]').forEach(btn=>{

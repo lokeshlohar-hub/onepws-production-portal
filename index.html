@@ -122,8 +122,10 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text-prim
    preview, Route Card PDF, Reports, Project Details, print formats —
    because those views don't apply this class. */
 .bom-col-uom,
-.bom-col-profile,
-.bom-col-route{display:none}
+.bom-col-profile{display:none}
+.qty-no-spin::-webkit-inner-spin-button,.qty-no-spin::-webkit-outer-spin-button,
+.board-qty-input::-webkit-inner-spin-button,.board-qty-input::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+.qty-no-spin,.board-qty-input{-moz-appearance:textfield}
 /* BOM segment vertical scroll pattern — Phase 10. When a segment has more
    rows than fit the viewport height, the outer card bounds itself to a
    max height, and the section header + top scrollbar stay pinned at the
@@ -1138,7 +1140,7 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
             </div>
           </div>
           <div class="form-row">
-            <div class="form-group"><label class="form-label">Product Type <span class="req">*</span> <span class="lbl-lock">&#128274; ADMIN</span></label><select class="form-select" id="np_type" onchange="calcTAT()"><option value="">&#8212; Select &#8212;</option></select></div>
+            <div class="form-group"><label class="form-label">Product Type <span class="req">*</span> <span class="lbl-lock">&#128274; ADMIN</span></label><select class="form-select" id="np_type" onchange="onNpTypeChange()"><option value="">&#8212; Select &#8212;</option></select></div>
             <div class="form-group"><label class="form-label">Project Category <span class="req">*</span> <span class="lbl-lock">&#128274; ADMIN</span></label><select class="form-select" id="np_cat" onchange="calcTAT()"><option value="">&#8212; Select &#8212;</option></select></div>
           </div>
           <div class="form-row">
@@ -1367,6 +1369,7 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
         <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
           <button class="btn btn-outline btn-sm" onclick="toggleStageBomSelectAll()" id="stageBomSelectAllBtn" style="display:none">☑ Select All</button>
           <button class="btn btn-success" onclick="openBulkStageUpdateModal()" id="stageBomProceedBtn" disabled>➡ Proceed to Stage</button>
+          <button class="btn btn-primary btn-sm" onclick="openHandoverForSelected()" id="stageBomNotifyBtn" disabled>Notify Handover</button>
         </div>
       </div>
       <div class="card-body" id="bomComponentPicker" style="padding:0">
@@ -2052,14 +2055,64 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
     <div class="card">
       <div class="card-header">
         <div>
-          <div class="card-title">📊 Quality Reporting — Full Rejection History</div>
-          <div class="text-xs text-muted" style="margin-top:2px">Complete rejection log — exportable for management reporting</div>
+          <div class="card-title">Complete QC History</div>
+          <div class="text-xs text-muted" style="margin-top:2px" id="qcHistoryRangeLabel"></div>
+        </div>
+      </div>
+      <div class="card-body" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;padding-top:10px;padding-bottom:10px">
+        <div class="form-group" style="margin-bottom:0">
+          <label class="form-label" style="font-size:11px">Production Type</label>
+          <select class="fsel" id="qcHistSegment" onchange="renderQualityLog()">
+            <option value="all">All</option>
+            <option value="wood">Wood</option>
+            <option value="ext">Extrusion</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin-bottom:0">
+          <label class="form-label" style="font-size:11px">QC Status</label>
+          <select class="fsel" id="qcHistStatus" onchange="renderQualityLog()">
+            <option value="all">All</option>
+            <option value="Pass">Passed / Accepted</option>
+            <option value="Reject">Rejected</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin-bottom:0">
+          <label class="form-label" style="font-size:11px">Machine / Process</label>
+          <select class="fsel" id="qcHistMachine" onchange="renderQualityLog()">
+            <option value="all">All</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin-bottom:0">
+          <label class="form-label" style="font-size:11px">Date</label>
+          <select class="fsel" id="qcHistDatePreset" onchange="onQcHistDatePresetChange()">
+            <option value="month" selected>Current Month</option>
+            <option value="today">Today</option>
+            <option value="yesterday">Yesterday</option>
+            <option value="custom">Custom Date</option>
+            <option value="range">Custom Date Range</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin-bottom:0;display:none" id="qcHistCustomDateWrap">
+          <label class="form-label" style="font-size:11px">Date</label>
+          <input type="date" class="form-input" id="qcHistCustomDate" onchange="renderQualityLog()">
+        </div>
+        <div class="form-group" style="margin-bottom:0;display:none" id="qcHistFromWrap">
+          <label class="form-label" style="font-size:11px">From</label>
+          <input type="date" class="form-input" id="qcHistFrom" onchange="renderQualityLog()">
+        </div>
+        <div class="form-group" style="margin-bottom:0;display:none" id="qcHistToWrap">
+          <label class="form-label" style="font-size:11px">To</label>
+          <input type="date" class="form-input" id="qcHistTo" onchange="renderQualityLog()">
+        </div>
+        <div class="form-group" style="margin-bottom:0;flex:1;min-width:180px">
+          <label class="form-label" style="font-size:11px">Search Project No.</label>
+          <input type="text" class="form-input" id="qcHistProjectSearch" placeholder="e.g. CD-26-27-10048" oninput="onQcHistProjectSearchInput()">
         </div>
         <button class="btn btn-outline btn-sm" onclick="exportQuality()">Export</button>
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Date</th><th>Project</th><th>Component</th><th>Machine/Stage</th><th>Qty Rejected</th><th>Category</th><th>QC Person</th><th>QC Instrument</th><th>Root Cause</th><th>Status</th><th>Photo</th></tr></thead>
+          <thead><tr><th>Date &amp; Time</th><th>Project No.</th><th>Project Name</th><th>Component</th><th>Type</th><th>Machine / Process</th><th>QC Status</th><th>Rejection Reason</th><th>QC Inspector</th></tr></thead>
           <tbody id="qualityLogBody"></tbody>
         </table>
       </div>
@@ -4047,7 +4100,7 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
         <div class="modal-title">📧 Final-Stage Handover Notification</div>
         <div class="text-xs text-muted" style="margin-top:2px">Review the details, pick recipients, edit the message if needed, then send — opens your default email client with the message ready to review and send.</div>
       </div>
-      <button class="modal-close" onclick="handoverModalClose()">×</button>
+      <button class="modal-close" onclick="dispatchHandoverModalClose()">×</button>
     </div>
     <div class="modal-body">
       <div id="handoverPreview" style="background:var(--surface2);border-radius:8px;padding:12px 14px;font-size:12.5px;line-height:1.7;margin-bottom:14px"></div>
@@ -4082,8 +4135,8 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
       </div>
     </div>
     <div class="modal-footer">
-      <button class="btn btn-outline" id="handoverLeftBtn" onclick="handoverModalClose()">Cancel</button>
-      <button class="btn btn-primary" onclick="sendHandoverNotification()">📧 Send Handover Notification</button>
+      <button class="btn btn-outline" id="handoverLeftBtn" onclick="dispatchHandoverModalClose()">Cancel</button>
+      <button class="btn btn-primary" onclick="dispatchSendHandover()">📧 Send Handover Notification</button>
     </div>
   </div>
 </div>
@@ -4331,6 +4384,16 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
   </div>
 </div>
 
+<!-- COMPONENT ROUTING VIEW MODAL -->
+<div class="modal-overlay" id="componentRoutingModal">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-header"><div class="modal-title" id="componentRoutingModalTitle">Component Routing</div><button class="modal-close" onclick="closeMod('componentRoutingModal')">x</button></div>
+    <div class="modal-body" style="max-height:60vh;overflow-y:auto"><div id="componentRoutingModalBody"></div></div>
+    <div class="modal-footer"><button class="btn btn-outline" onclick="closeMod('componentRoutingModal')">Close</button></div>
+  </div>
+</div>
+
+<datalist id="bomColorList"></datalist>
 <!-- TOAST -->
 <div id="toast" style="position:fixed;bottom:22px;right:22px;z-index:999;display:none;max-width:340px">
   <div style="background:var(--text-primary);color:#fff;padding:11px 15px;border-radius:8px;font-size:13px;box-shadow:var(--shadow-lg);display:flex;align-items:center;gap:9px"><span id="toastIcon" style="font-size:15px">✓</span><span id="toastMsg">Saved</span></div>
@@ -4339,7 +4402,7 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
 // ------ MASTER DATA (Admin-controlled, locked from regular users) ------
 const M = {
   productTypes:['CD','CR','AD','R&D'],
-  categories:['Cat 0','Cat 1','Cat 2','Cat 3','R&D'],
+  categories:['Cat 1','Cat 2','Cat 3'],
   projectManagers:['SHYAM','MANVEER','Dipendra','MANIRAJ','Harshit Kothari'],
   engineers:['RAJU','VAIBHAV','KUSHAGRA','Mohit','Aditya'],
   bomComponents:['Table Top','Table Top 2','Table Top 3','Shutter','Side Panel','Base Frame','40x54 Profile','Door Panel','Drawer Front'],
@@ -4385,7 +4448,13 @@ const M = {
   dimensionalStudyEnabledMachines:[],
   dimensionalCapabilityThresholds:{cpMin:1.33, cpkMin:1.33},
   dimensionalMeasurementLocations:['Top/Upper','Middle','Bottom'],
-  tatRules:{'Cat 0':{ext:7,wood:18},'Cat 1':{ext:7,wood:20},'Cat 2':{ext:7,wood:34},'Cat 3':{ext:7,wood:50},'R&D':{ext:14,wood:50}},
+  tatRules:{
+    'CD':  {'Cat 1':{ext:7,wood:20},'Cat 2':{ext:7,wood:34},'Cat 3':{ext:7,wood:50}},
+    'CR':  {'Cat 1':{ext:7,wood:20},'Cat 2':{ext:7,wood:34},'Cat 3':{ext:7,wood:50}},
+    'AD':  {'Cat 1':{ext:7,wood:20},'Cat 2':{ext:7,wood:34},'Cat 3':{ext:7,wood:50}},
+    'R&D': {'Cat 1':{ext:14,wood:50},'Cat 2':{ext:14,wood:50},'Cat 3':{ext:14,wood:50}},
+    'IOC': {ext:7,wood:20}
+  },
 
   // Maps production stage name → workstation id(s)
   // Used to auto-update Daily Capacity when a stage is marked complete
@@ -7616,8 +7685,8 @@ function renderExecKPIs(){
   const projs = fy ? DB.projects.filter(p=>projectInFY(p,fy)) : DB.projects;
   const src = _dashType==='ALL' ? projs : projs.filter(p=>p.type===_dashType);
   const comp=src.filter(p=>p.progress===100);
-  const otdN=comp.filter(p=>!isProductionDelay(p,'wood')&&!isProductionDelay(p,'ext')).length;
-  const otdPct=comp.length?Math.round(otdN/comp.length*100):100;
+  const dlyCount=src.filter(p=>isDashboardDelayed(p)).length;
+  const otdPct=src.length?Math.round((src.length-dlyCount)/src.length*100):100;
   const totalRej=(DB.rejectLog||[]).reduce((s,r)=>s+(r.qty||0),0);
   const totalProd=src.reduce((s,p)=>s+(p.bom||[]).reduce((a,b)=>a+(b.done||b.qty||0),0),0);
   const rejPct=totalProd>0?Math.round(totalRej/totalProd*100):0;
@@ -7943,14 +8012,10 @@ function renderKPIs(){
     const extLate  = p.hasExt  && !p.actExt  && p.planExt  && new Date().toISOString().split('T')[0] > effectivePlanDate(p,'ext');
     return woodDly||extDly||woodLate||extLate;
   }).length;
-  // OTD: completed within effective plan date (override = not penalised)
-  const otdN=src.filter(p=>{
-    if(p.progress!==100) return false;
-    const woodOk = !p.hasWood || !p.actWood || !isProductionDelay(p,'wood');
-    const extOk  = !p.hasExt  || !p.actExt  || !isProductionDelay(p,'ext');
-    return woodOk && extOk;
-  }).length;
-  const otd=comp>0?Math.round((otdN/comp)*100):0;
+  // OTD: total minus delayed. Delayed = completed after effective deadline OR still running
+  // and already past effective deadline. Running projects within their deadline count as on-time.
+  const otdN=total-dly;
+  const otd=total>0?Math.round((otdN/total)*100):0;
   const overrideCount = (DB.tatOverrideLog||[]).filter(o=>src.some(p=>p.id===o.projId)).length;
   const kpis=[
     {l:'OTD %',v:otd+'%',s:'Target: 95% (excl. approved overrides)',c:'green',bv:otd>=95?'On Target':'Below Target',bd:otd>=95?'up':'down'},
@@ -8007,10 +8072,9 @@ function renderDashCharts(){
       const rec=p.recWood||p.recExt||'';
       return rec.startsWith(mk);
     });
-    const comp=mSrc.filter(p=>p.progress===100);
-    if(!comp.length) return 0;
-    const onTime=comp.filter(p=>!isProductionDelay(p,'wood')&&!isProductionDelay(p,'ext')).length;
-    return Math.round(onTime/comp.length*100);
+    if(!mSrc.length) return 0;
+    const dlyCount=mSrc.filter(p=>isDashboardDelayed(p)).length;
+    return Math.round((mSrc.length-dlyCount)/mSrc.length*100);
   });
 
   // Update chart title
@@ -8355,7 +8419,7 @@ function renderTracker(){
   let d=all;
   if(_statusFilter!=='all') d=d.filter(p=>getProjectStatusCat(p)===_statusFilter);
   // Search
-  if(q) d=d.filter(p=>[p.sap,p.customer,p.id,p.type,p.pm,p.eng,p.cat,p.holdReason].some(v=>(v||'').toLowerCase().includes(q)));
+  if(q) d=d.filter(p=>[p.sap,p.customer,p.id,p.type,p.pm,p.eng,p.cat,p.holdReason,p.po,p.jobWorkPO].some(v=>(v||'').toLowerCase().includes(q)));
 
   // Footer info
   const afEl=document.getElementById('trackerActiveFilter');
@@ -9000,10 +9064,10 @@ function makeSegBOMRow(i, seg){
       +'<td class="bom-col-profile"><input type="text" class="form-input" style="height:27px;width:75px" placeholder="40x54"></td>'
       +'<td><input type="number" class="form-input dim-input" style="height:27px;width:70px" placeholder="6000"></td>'
       +'<td class="bom-col-uom"><select class="form-select" style="height:27px;width:55px"><option>PC</option><option>MTR</option><option>NOS</option></select></td>'
-      +'<td><input type="number" class="form-input" style="height:27px;width:52px" value="1" min="1"></td>'
-      +'<td><input type="text" class="form-input" id="bom_finish_ext_'+i+'" style="height:27px;width:100px" placeholder="e.g. Powder Coating"></td>'
+      +'<td><input type="number" class="form-input qty-no-spin" style="height:27px;width:52px" min="1"></td>'
+      +'<td><input type="text" class="form-input" id="bom_finish_ext_'+i+'" list="bomColorList" oninput="onBomColorInput(this)" onchange="onBomColorCommit(this)" style="height:27px;width:100px" placeholder="e.g. Powder Coating"></td>'
       +'<td><div class="ms-dropdown" id="ms_ext_'+i+'"><button type="button" class="ms-toggle" id="ms_toggle_ext_'+i+'" onclick="toggleMsPanel(\'ext\','+i+')"><span class="ms-toggle-text ms-placeholder" id="ms_text_ext_'+i+'">Select...</span><span class="ms-caret">▾</span></button><div class="ms-panel" id="ms_panel_ext_'+i+'">'+msOptionsHTML('ext',i)+'</div></div></td>'
-      +'<td class="bom-col-route"><div id="bom_route_ext_'+i+'" style="min-width:180px"><div style="font-size:11px;color:var(--text-muted);font-style:italic">Select component for routing</div></div></td>'
+      +'<td class="bom-col-route"><div id="bom_route_ext_'+i+'" style="min-width:80px"><div style="font-size:11px;color:var(--text-muted);font-style:italic">Select component for routing</div></div></td>'
       +'<td><button class="btn btn-danger btn-sm" style="height:26px;padding:0 7px" onclick="this.closest(\'tr\').remove()">x</button></td>'
       +'</tr>';
   }
@@ -9015,11 +9079,11 @@ function makeSegBOMRow(i, seg){
     +'<td><input type="number" class="form-input dim-input" style="height:27px;width:65px" placeholder="W"></td>'
     +'<td><input type="number" class="form-input dim-input" style="height:27px;width:58px" placeholder="T"></td>'
     +'<td class="bom-col-uom"><select class="form-select" style="height:27px;width:55px"><option>PC</option><option>SET</option><option>NOS</option></select></td>'
-    +'<td title="Total COMPONENTS to manufacture (BOM quantity)"><input type="number" class="form-input" style="height:27px;width:52px" value="1" min="1"></td>'
+    +'<td title="Total COMPONENTS to manufacture (BOM quantity)"><input type="number" class="form-input qty-no-spin" style="height:27px;width:52px" min="1"></td>'
     +'<td title="Boards Planned for Hot Press / Beam Saw. Auto = Qty if blank. Enter 0 to share the board with a previous line."><input type="number" class="form-input board-qty-input" style="height:27px;width:52px;background:#ede9fe;color:#7c3aed;font-weight:700" min="0" placeholder="Auto" oninput="onBoardsPlannedChange(this)"><select class="form-select board-source-select" style="height:24px;width:150px;margin-top:3px;display:none;font-size:10px" onchange="onBoardSourceChange(this)"><option value="">— Select Parent —</option></select></td>'
-    +'<td><input type="text" class="form-input" id="bom_finish_wood_'+i+'" style="height:27px;width:100px" placeholder="e.g. Walnut, White"></td>'
+    +'<td><input type="text" class="form-input" id="bom_finish_wood_'+i+'" list="bomColorList" oninput="onBomColorInput(this)" onchange="onBomColorCommit(this)" style="height:27px;width:100px" placeholder="e.g. Walnut, White"></td>'
     +'<td><div class="ms-dropdown" id="ms_wood_'+i+'"><button type="button" class="ms-toggle" id="ms_toggle_wood_'+i+'" onclick="toggleMsPanel(\'wood\','+i+')"><span class="ms-toggle-text ms-placeholder" id="ms_text_wood_'+i+'">Select...</span><span class="ms-caret">▾</span></button><div class="ms-panel" id="ms_panel_wood_'+i+'">'+msOptionsHTML('wood',i)+'</div></div></td>'
-    +'<td class="bom-col-route"><div id="bom_route_wood_'+i+'" style="min-width:200px"><div style="font-size:11px;color:var(--text-muted);font-style:italic">Select component for routing</div></div></td>'
+    +'<td class="bom-col-route"><div id="bom_route_wood_'+i+'" style="min-width:80px"><div style="font-size:11px;color:var(--text-muted);font-style:italic">Select component for routing</div></div></td>'
     +'<td><button class="btn btn-danger btn-sm" style="height:26px;padding:0 7px" onclick="this.closest(\'tr\').remove()">x</button></td>'
     +'</tr>';
 }
@@ -9100,18 +9164,64 @@ function autoFillRoutingSeg(i, seg){
   const div=document.getElementById(divId);
   if(!sel||!div)return;
   const comp=sel.value;
-  const routes=M.componentRouting[comp]||[];
-  const col=seg==='ext'?{bg:'#dbeafe',c:'#1e40af'}:{bg:'#d1fae5',c:'#065f46'};
-  if(!routes.length){
-    div.innerHTML='<div style="font-size:11px;color:var(--text-muted);font-style:italic">No routing defined &#8212; configure in Admin &#8250; BOM Routing</div>';
+  if(!comp){
+    div.innerHTML='<div style="font-size:11px;color:var(--text-muted);font-style:italic">Select component for routing</div>';
     return;
   }
-  div.innerHTML=routes.map((r,ri)=>'<span style="display:inline-flex;align-items:center;gap:2px;margin:1px">'
-    +(ri>0?'<span style="color:var(--text-muted);font-size:10px">&#8594;</span>':'')
-    +'<span style="background:'+col.bg+';color:'+col.c+';font-size:10px;font-weight:600;padding:2px 6px;border-radius:4px;white-space:nowrap">'+r+'</span>'
-    +'</span>').join('')
-    +'<div style="font-size:9.5px;color:var(--text-muted);margin-top:2px">&#128274; Auto-assigned from Admin routing rules</div>';
+  const routes=M.componentRouting[comp]||[];
+  if(!routes.length){
+    div.innerHTML='<button type="button" class="btn btn-outline btn-sm" style="height:26px;padding:0 8px;color:var(--text-muted)" onclick="viewComponentRouting(\''+seg+'\','+i+')" title="No routing defined">Route</button>';
+    return;
+  }
+  div.innerHTML='<button type="button" class="btn btn-outline btn-sm" style="height:26px;padding:0 8px" onclick="viewComponentRouting(\''+seg+'\','+i+')" title="View routing (' + routes.length + ' steps)">Route (' + routes.length + ')</button>';
 }
+function viewComponentRouting(seg, i){
+  const comp=document.getElementById('bom_comp_'+seg+'_'+i)?.value;
+  if(!comp){ toast('Select a component first.','!'); return; }
+  const routes=M.componentRouting[comp]||[];
+  const col=seg==='ext'?{bg:'#dbeafe',c:'#1e40af'}:{bg:'#d1fae5',c:'#065f46'};
+  const titleEl=document.getElementById('componentRoutingModalTitle');
+  if(titleEl) titleEl.textContent='Routing - '+comp;
+  const body=document.getElementById('componentRoutingModalBody');
+  if(!body) return;
+  if(!routes.length){
+    body.innerHTML='<div style="font-size:12px;color:var(--text-muted);font-style:italic">No routing defined - configure in Admin > BOM Routing</div>';
+  } else {
+    body.innerHTML='<div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px">'+routes.map((r,ri)=>'<span style="display:inline-flex;align-items:center;gap:2px">'
+      +(ri>0?'<span style="color:var(--text-muted);font-size:12px">&#8594;</span>':'')
+      +'<span style="background:'+col.bg+';color:'+col.c+';font-size:11px;font-weight:600;padding:3px 8px;border-radius:4px;white-space:nowrap">'+r+'</span>'
+      +'</span>').join('')+'</div>'
+      +'<div style="font-size:10px;color:var(--text-muted);margin-top:10px">&#128274; Auto-assigned from Admin routing rules</div>';
+  }
+  document.getElementById('componentRoutingModal').classList.add('open');
+}
+// BOM Color / Finish autocomplete -- pure data-entry convenience layered on
+// top of the existing Color fields. Does not touch BOM/routing/quantity/
+// board-planning logic at all: colors are tracked in-memory only, ranked by
+// most-recent-then-most-frequent, and offered via a native <datalist> so the
+// field itself keeps working exactly as before (free typing always allowed).
+let _bomColorHistory = [];
+function recordBomColorUsage(color){
+  const v = (color||'').trim().toUpperCase();
+  if(!v) return;
+  const existing = _bomColorHistory.find(function(c){ return c.value===v; });
+  if(existing){ existing.count++; existing.lastUsed = Date.now(); }
+  else{ _bomColorHistory.push({ value:v, count:1, lastUsed:Date.now() }); }
+  _bomColorHistory.sort(function(a,b){ return (b.lastUsed-a.lastUsed) || (b.count-a.count); });
+  const dl = document.getElementById('bomColorList');
+  if(dl) dl.innerHTML = _bomColorHistory.map(function(c){
+    return '<option value="'+c.value.replace(/"/g,'&quot;')+'">';
+  }).join('');
+}
+function onBomColorInput(el){
+  const pos = el.selectionStart;
+  el.value = el.value.toUpperCase();
+  try{ el.setSelectionRange(pos, pos); }catch(e){}
+}
+function onBomColorCommit(el){
+  recordBomColorUsage(el.value);
+}
+
 function autoFillRouting(i){ autoFillRoutingSeg(i,'wood'); }
 
 
@@ -9119,10 +9229,34 @@ function addBOM(){ addBOMToSegment('wood'); } // legacy shim — delegates to ad
 
 function toggleExt(){document.getElementById('ext_info').style.display=document.getElementById('chk_ext').checked?'block':'none';}
 
+function onNpTypeChange(){
+  const type=document.getElementById('np_type')?.value;
+  const catSel=document.getElementById('np_cat');
+  const catGroup=catSel?catSel.closest('.form-group'):null;
+  if(type==='IOC'){
+    if(catGroup)catGroup.style.display='none';
+    if(catSel)catSel.value='';
+  } else {
+    if(catGroup)catGroup.style.display='';
+  }
+  calcTAT();
+}
+function tatKey(type,cat){
+  return (type+(cat?('_'+cat):'')).replace(/\s/g,'_').replace(/&/g,'');
+}
 function calcTAT(){
-  const cat=document.getElementById('np_cat')?.value;
-  if(!cat||!M.tatRules[cat])return;
-  const rule=M.tatRules[cat];
+  const type=document.getElementById('np_type')?.value;
+  if(!type||!M.tatRules[type])return;
+  let rule, label;
+  if(type==='IOC'){
+    rule=M.tatRules[type];
+    label='IOC';
+  } else {
+    const cat=document.getElementById('np_cat')?.value;
+    if(!cat||!M.tatRules[type][cat])return;
+    rule=M.tatRules[type][cat];
+    label=type+' '+cat;
+  }
   const setTAT=(recId,tatId,hintId,days)=>{
     const rec=document.getElementById(recId)?.value;
     const tatEl=document.getElementById(tatId);
@@ -9130,7 +9264,7 @@ function calcTAT(){
     if(rec&&tatEl){
       const d=new Date(rec); d.setDate(d.getDate()+days);
       tatEl.value=d.toISOString().split('T')[0];
-      if(hintEl)hintEl.textContent=cat+': '+days+' working days from file receipt';
+      if(hintEl)hintEl.textContent=label+': '+days+' working days from file receipt';
     }
   };
   setTAT('np_wood_received','np_wood_tat','wood_tat_hint',rule.wood);
@@ -10094,17 +10228,18 @@ function isHandoverReady(b){
   return !!(sd && sd.qcApproved > 0);
 }
 
-// Production Admin gate for the auto-open Handover Notification trigger.
-// Master Admin (superadmin) passes, mirroring the pattern used elsewhere
-// (hasPermission() in this file, requireRole() on the backend). The manual
-// "Notify Handover" button in the component detail view has no such gate
-// and remains available to anyone who can reach the component — so QC and
-// Maintenance admins can still notify handovers manually if needed; only
-// the automatic-on-QC-approve trigger is scoped to Production admins.
+// Production/Quality Admin gate for the auto-open Handover Notification
+// trigger. Master Admin (superadmin) passes, mirroring the pattern used
+// elsewhere (hasPermission() in this file, requireRole() on the backend).
+// The manual "Notify Handover" button in the component detail view has no
+// such gate and remains available to anyone who can reach the component.
+// Widened (v54.7) to also include Quality department admins -- in practice
+// final-stage QC clearance is performed by the Quality department account,
+// so the auto-trigger needs to fire for them too, not just Production.
 function isProductionAdminUser(){
   if(!CURRENT_USER) return false;
   if(CURRENT_USER.role === 'superadmin') return true;
-  return CURRENT_USER.role === 'admin' && CURRENT_USER.department === 'Production';
+  return CURRENT_USER.role === 'admin' && (CURRENT_USER.department === 'Production' || CURRENT_USER.department === 'Quality');
 }
 
 // Auto-open trigger — invoked once from the QC-decision confirm handler
@@ -10469,10 +10604,12 @@ function renderStageQcStatus(){
 
 // Selection + segment state for the BOM table
 let _bomSelState = { selectedLineIds: new Set(), lockedStage: null, activeSeg: null };
+let _handoverSelState = { selectedLineIds: new Set() };
 
 function setStageBomSegmentTab(seg){
   _bomSelState.activeSeg = seg;
   _bomSelState.selectedLineIds.clear();
+  _handoverSelState.selectedLineIds.clear();
   _bomSelState.lockedStage = null;
   ['wood','ext'].forEach(s => {
     const tab = document.getElementById('bomSegTab_'+s);
@@ -10500,7 +10637,19 @@ function currentActiveStageOfLine(b){
     const elig = typeof eligibleInputQty === 'function' ? eligibleInputQty(b, st) : b.qty;
     if((sd.completed || 0) < elig) return st;
   }
-  return null;
+  // Every stage looked satisfied by eligible-qty math, but that can also
+  // happen when nothing has actually been produced yet (e.g. board_qty was
+  // never set for this line, so every downstream stage sees 0 eligible
+  // input). Only treat the line as genuinely complete if the FINAL stage has
+  // actually approved the full committed quantity -- otherwise this line is
+  // stuck/blocked, not done, so surface its first stage instead of falsely
+  // showing "Complete".
+  const route=b.route||[];
+  const lastStage=route[route.length-1];
+  const finalApproved=lastStage?(b.stageData[lastStage]?.qcApproved||0):0;
+  const committedQty=b.componentsReleased||b.originalQty||b.qty;
+  if(finalApproved>=committedQty && committedQty>0) return null;
+  return route[0]||null;
 }
 
 function renderBomComponentPicker(p){
@@ -10547,6 +10696,7 @@ function renderBomComponentPicker(p){
   if(!bomFiltered.length){
     container.innerHTML = '<div class="text-sm text-muted" style="padding:14px">No BOM components in this segment.</div>';
     updateStageBomToolbar();
+  updateHandoverSelToolbar();
     return;
   }
   container.innerHTML = '<div style="overflow:auto"><table style="width:100%"><thead><tr>'
@@ -10609,12 +10759,20 @@ function renderBomComponentPicker(p){
         } else {
           currentStageCell = activeStage;
         }
-        return '<tr' + (!canSelect && !isChecked ? ' style="opacity:.5"' : '') + '>'
-          + '<td style="text-align:center">'
-            + '<input type="checkbox" class="stage-bom-check" data-lineid="'+b.lineId+'" data-stage="'+(activeStage||'').replace(/"/g,'&quot;')+'"'
+        const handoverEligible = isComplete && isHandoverReady(b);
+        const handoverChecked = _handoverSelState.selectedLineIds.has(b.lineId);
+        const checkboxCell = handoverEligible
+          ? ('<input type="checkbox" class="stage-bom-check" data-lineid="'+b.lineId+'"'
+            + (handoverChecked?' checked':'')
+            + ' title="Select for Handover Notification"'
+            + ' onchange="onHandoverRowToggle(\''+b.lineId+'\')">')
+          : ('<input type="checkbox" class="stage-bom-check" data-lineid="'+b.lineId+'" data-stage="'+(activeStage||'').replace(/"/g,'&quot;')+'"'
             + (isChecked?' checked':'')
             + (!canSelect ? ' disabled title="'+tooltip.replace(/"/g,'&quot;')+'"' : '')
-            + ' onchange="onStageBomRowToggle(\''+b.lineId+'\')">'
+            + ' onchange="onStageBomRowToggle(\''+b.lineId+'\')">');
+        return '<tr' + (!canSelect && !isChecked ? ' style="opacity:.5"' : '') + '>'
+          + '<td style="text-align:center">'
+            + checkboxCell
           + '</td>'
           + '<td>'
             + '<a href="javascript:void(0)" onclick="selectBomComponent('+idx+')" style="color:var(--accent);font-weight:600;text-decoration:none">'+b.item+'</a>'
@@ -10632,6 +10790,7 @@ function renderBomComponentPicker(p){
       }).join('')
     + '</tbody></table></div>';
   updateStageBomToolbar();
+  updateHandoverSelToolbar();
 }
 
 // Called when a row checkbox is toggled — updates selectedLineIds and
@@ -10694,6 +10853,25 @@ function toggleStageBomSelectAll(){
   renderBomComponentPicker(CUR_PROJ);
 }
 
+function onHandoverRowToggle(lineId){
+  if(_handoverSelState.selectedLineIds.has(lineId)) _handoverSelState.selectedLineIds.delete(lineId);
+  else _handoverSelState.selectedLineIds.add(lineId);
+  updateHandoverSelToolbar();
+}
+function updateHandoverSelToolbar(){
+  const n = _handoverSelState.selectedLineIds.size;
+  const btn = document.getElementById('stageBomNotifyBtn');
+  if(btn){
+    btn.disabled = n === 0;
+    btn.textContent = n === 0 ? 'Notify Handover' : 'Notify Handover - ' + n + ' selected';
+  }
+}
+function openHandoverForSelected(){
+  if(!CUR_PROJ) return;
+  const lines = (CUR_PROJ.bom||[]).filter(function(b){return _handoverSelState.selectedLineIds.has(b.lineId);});
+  if(!lines.length) return;
+  openBulkHandoverNotifyModal(CUR_PROJ, lines);
+}
 function updateStageBomToolbar(){
   const n = _bomSelState.selectedLineIds.size;
   const btn = document.getElementById('stageBomProceedBtn');
@@ -10717,6 +10895,7 @@ function updateStageBomToolbar(){
 // Reset all selection state when leaving/entering a project
 function resetStageBomSelection(){
   _bomSelState.selectedLineIds.clear();
+  _handoverSelState.selectedLineIds.clear();
   _bomSelState.lockedStage = null;
 }
 
@@ -10815,6 +10994,253 @@ function renderComponentTrace(){
 // Compiles the handover details for the current component and opens the
 // notification modal — shown only once the final production stage has
 // QC-approved quantity (mirrors isHandoverReady(), used to show the button).
+window._handoverBulkContext = null;
+
+// Bulk counterpart to openHandoverNotifyModal() -- builds ONE consolidated
+// notification for multiple BOM lines from the same bulk QC approval batch,
+// instead of one popup per line. Written as a separate function (rather than
+// modifying the existing single-line one) so the already-working single-line
+// flow is never touched. Reuses the SAME modal HTML/DOM elements.
+async function openBulkHandoverNotifyModal(p, lines){
+  if(!p || !lines || !lines.length) return;
+  window._handoverBulkContext = { projectId:p.id, proj:p.sap, lines:lines, autoOpened:true, _sent:false };
+
+  const components = lines.map(function(b,i){
+    const finalStage = getFinalProductionStage(b.route);
+    const sd = b.stageData[finalStage] || {qcApproved:0};
+    const size = b.seg==='ext' ? (b.profile||'-') : ([b.l,b.w,b.t].filter(Boolean).join(' x ')||'-')+' mm';
+    return {
+      sr:i+1, lineId:b.lineId, item:b.item, description:b.description||'',
+      colorFinish:b.colorFinish||'-', materialFinish:(typeof getLatestMaterialFinish==='function'?getLatestMaterialFinish(b):''),
+      size:size, totalQty:b.qty, handoverQty:sd.qcApproved,
+      pendingQty:Math.max(0,(b.qty||0)-(sd.qcApproved||0)),
+      status:(sd.qcApproved>=b.qty)?'Complete':'Ready',
+      segment: b.seg==='ext'?'ext':'wood', finalStage:finalStage,
+    };
+  });
+
+  const segList = components.map(function(c){return c.segment;}).filter(function(v,i,a){return a.indexOf(v)===i;});
+  const stageList = components.map(function(c){return c.finalStage;}).filter(function(v,i,a){return a.indexOf(v)===i;});
+  const segmentDisplay = segList.length===1 ? (segList[0]==='ext'?'Aluminium Extrusion':'Wood Production') : 'Multiple Segments';
+  const finalStageDisplay = stageList.length===1 ? stageList[0] : 'Multiple Stages';
+
+  const tdBase = 'padding:6px 10px;border-right:1px solid var(--border);border-bottom:1px solid var(--border);vertical-align:top';
+  const tdLast = 'padding:6px 10px;border-bottom:1px solid var(--border);vertical-align:top';
+  const thBase = 'text-align:left;padding:7px 10px;background:var(--surface2);border-right:1px solid var(--border);border-bottom:1px solid var(--border);font-weight:600;font-size:12px';
+  const thLast = 'text-align:left;padding:7px 10px;background:var(--surface2);border-bottom:1px solid var(--border);font-weight:600;font-size:12px';
+  const projInfo = [
+    ['Project No', p.sap||'-', 'Manufacturing Segment', segmentDisplay],
+    ['Customer', p.customer||'-', 'Product Type', p.type||'-'],
+    ['Final Stage', finalStageDisplay, 'QC Status', '<span style="color:var(--green,#2b8a3e);font-weight:600">Approved</span>'],
+  ];
+  const infoTable = '<table style="width:100%;border-collapse:collapse;font-size:12px;background:var(--surface);border:1px solid var(--border);border-radius:6px;overflow:hidden;margin-bottom:12px">'
+    + '<thead><tr>'
+    + '<th style="'+thBase+';width:22%">Project Information</th>'
+    + '<th style="'+thBase+';width:28%">Value</th>'
+    + '<th style="'+thBase+';width:22%">Production Information</th>'
+    + '<th style="'+thLast+';width:28%">Value</th>'
+    + '</tr></thead><tbody>'
+    + projInfo.map(function(r,i){
+        const bb = (i===projInfo.length-1) ? ';border-bottom:none' : '';
+        return '<tr>'
+          +'<td class="text-muted" style="'+tdBase+bb+'">'+r[0]+'</td>'
+          +'<td class="fw-600" style="'+tdBase+bb+'">'+r[1]+'</td>'
+          +'<td class="text-muted" style="'+tdBase+bb+'">'+r[2]+'</td>'
+          +'<td class="fw-600" style="'+tdLast+bb+'">'+r[3]+'</td>'
+          +'</tr>';
+      }).join('')
+    + '</tbody></table>';
+
+  const compsHeader = '<div style="font-weight:600;font-size:12.5px;margin:2px 0 6px 0;color:var(--text-primary,#111)">Components Ready for Handover</div>';
+  const compsTable = '<table style="width:100%;border-collapse:collapse;font-size:12px;background:var(--surface);border:1px solid var(--border);border-radius:6px;overflow:hidden">'
+    + '<thead><tr>'
+    + '<th style="'+thBase+';width:40px;text-align:center">Sr.</th>'
+    + '<th style="'+thBase+'">Component</th>'
+    + '<th style="'+thBase+'">Color / Finish</th>'
+    + '<th style="'+thBase+'">Size / Dimensions</th>'
+    + '<th style="'+thBase+';text-align:right;width:70px">Total Qty</th>'
+    + '<th style="'+thBase+';text-align:right;width:90px">Handover Qty</th>'
+    + '<th style="'+thBase+';text-align:right;width:80px">Pending Qty</th>'
+    + '<th style="'+thLast+';width:80px">Status</th>'
+    + '</tr></thead><tbody>'
+    + components.map(function(c,i){
+        const bb = (i===components.length-1) ? ';border-bottom:none' : '';
+        const statusColor = c.status==='Complete' ? 'var(--green,#2b8a3e)' : 'var(--accent,#1971c2)';
+        return '<tr>'
+          +'<td style="'+tdBase+bb+';text-align:center">'+c.sr+'</td>'
+          +'<td class="fw-600" style="'+tdBase+bb+'">'+c.item+(c.description?'<div style="font-size:10.5px;font-weight:500;color:#4b5563">'+c.description+'</div>':'')+'</td>'
+          +'<td style="'+tdBase+bb+'">'+c.colorFinish+(c.materialFinish?'<div style="font-size:10.5px;font-weight:500;color:#065f46;margin-top:2px">Applied: '+c.materialFinish+'</div>':'')+'</td>'
+          +'<td style="'+tdBase+bb+'">'+c.size+'</td>'
+          +'<td class="font-mono" style="'+tdBase+bb+';text-align:right">'+c.totalQty+'</td>'
+          +'<td class="font-mono" style="'+tdBase+bb+';text-align:right">'+c.handoverQty+'</td>'
+          +'<td class="font-mono" style="'+tdBase+bb+';text-align:right">'+c.pendingQty+'</td>'
+          +'<td style="'+tdLast+bb+';font-weight:600;color:'+statusColor+'">'+c.status+'</td>'
+          +'</tr>';
+      }).join('')
+    + '</tbody></table>';
+
+  document.getElementById('handoverPreview').innerHTML = infoTable + compsHeader + compsTable;
+
+  const segFilter = segList.length===1 ? segList[0] : null;
+  const adminRecipients = (M.handoverRecipients||[]).filter(function(r){return r.segment==='all'||!segFilter||r.segment===segFilter;});
+  let historyAddrs = [];
+  try{
+    const resp = await apiLoadHandoverAddressHistory();
+    historyAddrs = resp.addresses || [];
+  } catch(err){
+    console.warn('Could not load handover address history:', err.message);
+  }
+  const merged = new Map();
+  adminRecipients.forEach(function(r){
+    if(!r.email) return;
+    const key = r.email.toLowerCase();
+    merged.set(key, {email:r.email, adminLabel:r.department||'', useCount:0});
+  });
+  historyAddrs.forEach(function(h){
+    if(!h.email) return;
+    const key = h.email.toLowerCase();
+    const existing = merged.get(key);
+    if(existing){ existing.useCount = h.useCount; }
+    else { merged.set(key, {email:h.email, adminLabel:'', useCount:h.useCount}); }
+  });
+  const addresses = Array.from(merged.values()).sort(function(a,z){
+    if(!!a.adminLabel !== !!z.adminLabel) return a.adminLabel ? -1 : 1;
+    if(z.useCount !== a.useCount) return z.useCount - a.useCount;
+    return a.email.localeCompare(z.email);
+  });
+  renderHandoverAddressList('handoverToList', addresses, 'to');
+  renderHandoverAddressList('handoverCcList', addresses, 'cc');
+  document.getElementById('handoverToNew').value = '';
+  document.getElementById('handoverCcNew').value = '';
+
+  document.getElementById('handoverSubject').value =
+    'Handover Notification - '+p.sap+' - '+components.length+' Component(s) Ready for Handover';
+
+  const bodyComponents = components.map(function(c){
+      return '  # '+c.sr+'. '+c.item+(c.description?' - '+c.description:'')+'\n'
+        + '    Final Stage      : '+c.finalStage+'\n'
+        + '    Color / Finish   : '+c.colorFinish+'\n'
+        + (c.materialFinish ? '    Applied Finish   : '+c.materialFinish+'\n' : '')
+        + '    Size / Dimensions: '+c.size+'\n'
+        + '    Total Qty        : '+c.totalQty+'\n'
+        + '    Handover Qty     : '+c.handoverQty+'\n'
+        + '    Pending Qty      : '+c.pendingQty+'\n'
+        + '    Status           : '+c.status;
+    }).join('\n\n');
+
+  document.getElementById('handoverBody').value =
+      'Dear Team,\n\n'
+    + 'The following material has successfully completed all required production stages and has been approved by Quality Control.\n\n'
+    + 'Kindly arrange to receive and hand over the material as per the details provided below.\n\n'
+    + 'PROJECT INFORMATION\n'
+    + '  Project No     : '+(p.sap||'-')+'\n'
+    + '  Customer       : '+(p.customer||'-')+'\n\n'
+    + 'PRODUCTION INFORMATION\n'
+    + '  Manufacturing Segment : '+segmentDisplay+'\n'
+    + '  Product Type          : '+(p.type||'-')+'\n'
+    + '  QC Status             : Approved\n\n'
+    + 'COMPONENTS READY FOR HANDOVER ('+components.length+')\n\n'
+    + bodyComponents+'\n\n'
+    + 'This is an auto-generated notification from the ONEPWS Production Control Portal.';
+
+  const leftBtn = document.getElementById('handoverLeftBtn');
+  if(leftBtn) leftBtn.textContent = "Skip - Don't notify for these lines";
+
+  document.getElementById('handoverNotifyModal').classList.add('open');
+}
+
+// Bulk counterpart to sendHandoverNotification(). Logs ONE handover_log row
+// per component (the backend schema is per-line), all sharing the same
+// recipients/timestamp/sender, so a bulk send creates N linked audit rows.
+async function sendBulkHandoverNotification(){
+  const ctx = window._handoverBulkContext;
+  if(!ctx){ toast('Handover context lost - reopen the modal.','!'); return; }
+
+  const toAddrs = getCheckedHandoverAddresses('to');
+  const ccAddrs = getCheckedHandoverAddresses('cc');
+  if(!toAddrs.length){
+    toast('Pick at least one To address (or type one and click + Add).','!');
+    return;
+  }
+  const toSet = new Set(toAddrs.map(function(a){return a.toLowerCase();}));
+  const ccClean = ccAddrs.filter(function(a){return !toSet.has(a.toLowerCase());});
+
+  const subject = document.getElementById('handoverSubject').value;
+  const body = document.getElementById('handoverBody').value;
+
+  const mailto = 'mailto:'+encodeURIComponent(toAddrs.join(','))
+    + '?subject='+encodeURIComponent(subject)
+    + (ccClean.length ? '&cc='+encodeURIComponent(ccClean.join(',')) : '')
+    + '&body='+encodeURIComponent(body);
+  window.location.href = mailto;
+
+  const primaryTo = toAddrs[0];
+  const additionalTo = toAddrs.slice(1);
+  const auditCc = additionalTo.concat(ccClean);
+
+  try{
+    for(const b of ctx.lines){
+      const finalStage = getFinalProductionStage(b.route);
+      const sd = b.stageData[finalStage] || {qcApproved:0};
+      const payload = {
+        lineId:b.lineId, projectId:ctx.projectId, proj:ctx.proj, item:b.item,
+        qty: sd.qcApproved, uom:b.uom||'PC', segment:b.seg==='ext'?'ext':'wood', finalStage:finalStage,
+        details:{ projectNo:ctx.proj, component:b.item, finalStage:finalStage, bulk:true, bulkCount:ctx.lines.length },
+        department:'', email:primaryTo, ccEmails:auditCc,
+        triggeredBy: CURRENT_USER ? CURRENT_USER.fullName : 'Unknown',
+      };
+      const resp = await apiCreateHandover(payload);
+      DB.handoverLog.unshift(resp.handover);
+    }
+  } catch(err){
+    toast('Notification opened in your mail client, but could not be fully recorded in the audit trail: '+err.message,'!');
+    closeMod('handoverNotifyModal');
+    window._handoverBulkContext = null;
+    return;
+  }
+
+  for(const b of ctx.lines){
+    try{ await apiMarkEmailPromptShown(b.lineId); b.emailPromptShown = true; }
+    catch(err){ console.warn('Could not set email_prompt_shown flag on send:', err.message); }
+  }
+  ctx._sent = true;
+
+  const ts = new Date().toISOString().replace('T',' ').slice(0,16);
+  const displayLabel = primaryTo + (auditCc.length ? ' + '+auditCc.length+' more' : '');
+  DB.auditLog.unshift({ts:ts, user:CURRENT_USER?CURRENT_USER.fullName:'Admin', action:'Handover Notification', module:'Stage-wise Production',
+    entity: ctx.lines.length+' components', field:ctx.proj, old:'--', nw:'Notified '+displayLabel+' - '+ctx.lines.length+' component(s)', ip:'192.168.1.1'});
+
+  toast('Handover notification opened for '+displayLabel+' ('+ctx.lines.length+' components) and recorded.','OK');
+  closeMod('handoverNotifyModal');
+  window._handoverBulkContext = null;
+  _handoverSelState.selectedLineIds.clear();
+  if(CUR_PROJ && typeof renderBomComponentPicker==='function') renderBomComponentPicker(CUR_PROJ);
+  if(typeof renderComponentHandoverHistory==='function') renderComponentHandoverHistory();
+}
+
+async function bulkHandoverModalClose(){
+  const ctx = window._handoverBulkContext;
+  if(ctx && !ctx._sent){
+    for(const b of ctx.lines){
+      try{ await apiMarkEmailPromptShown(b.lineId); b.emailPromptShown = true; }
+      catch(err){ console.warn('Could not set email_prompt_shown flag on skip:', err.message); }
+    }
+  }
+  window._handoverBulkContext = null;
+  closeMod('handoverNotifyModal');
+}
+
+// Both buttons on the shared modal now call these dispatchers, which route
+// to bulk logic when a bulk context is active, otherwise fall through to
+// the original single-line functions -- completely unchanged from before.
+async function dispatchSendHandover(){
+  if(window._handoverBulkContext && !window._handoverBulkContext._sent) return sendBulkHandoverNotification();
+  return sendHandoverNotification();
+}
+async function dispatchHandoverModalClose(){
+  if(window._handoverBulkContext && !window._handoverBulkContext._sent) return bulkHandoverModalClose();
+  return handoverModalClose();
+}
 async function openHandoverNotifyModal(autoOpened){
   const b=CUR_BOM_LINE, p=CUR_PROJ;
   if(!b || !p){ toast('Select a component first.','⚠'); return; }
@@ -12341,6 +12767,19 @@ async function submitQcInspBatchApproval(){
   if(okCount) toast('✓ Batch: '+okCount+' line(s) approved and advanced.'+(failCount?' '+failCount+' failed — see summary.':''), okCount ? '✓' : '⚠');
   // Refresh the inspection view — approved lines drop out, remaining lines stay
   renderQcQueue();
+  // Auto-trigger a consolidated Handover Notification for any successfully
+  // approved lines in this batch that have now cleared final-stage QC --
+  // mirrors the single-line auto-trigger in confirmQcDecision(), but groups
+  // all qualifying components from this one bulk action into ONE email.
+  if(isProductionAdminUser()){
+    const freshP = DB.projects.find(function(x){return x.id === _qcQueueActiveProjId;});
+    if(freshP){
+      const readyLines = results.filter(function(r){return r.ok;})
+        .map(function(r){return freshP.bom.find(function(x){return x.lineId===r.lineId;});})
+        .filter(function(b){return b && isHandoverReady(b) && !b.emailPromptShown;});
+      if(readyLines.length) openBulkHandoverNotifyModal(freshP, readyLines);
+    }
+  }
   const btn2 = document.getElementById('qcInspSubmitBtn');
   if(btn2){ btn2.disabled = false; btn2.textContent = originalText; }
 }
@@ -12731,11 +13170,12 @@ function refreshProjectProgress(p){
     totalDone += lastStage ? (b.stageData[lastStage]?.qcApproved||0) : 0;
   });
   p.progress = totalQty ? Math.round((totalDone/totalQty)*100) : p.progress;
-  if(p.progress>=100){ p.woodSt = p.hasWood?'Complete':p.woodSt; p.extSt = p.hasExt?'Complete':p.extSt;
-    const today=new Date().toISOString().split('T')[0];
-    if(p.hasWood && !p.actWood) p.actWood=today;
-    if(p.hasExt && !p.actExt) p.actExt=today;
-  }
+  // Stamp each segment's actual-complete date independently, based on that segment's
+  // OWN progress (matches computeSegmentCurrentStage's +[char]0x22+Completed+[char]0x22+ badge) -- not the
+  // combined total, which could stay under 100% while one segment is already fully done.
+  const today=new Date().toISOString().split('T')[0];
+  if(p.hasWood && computeSegmentProgress(p,'wood')>=100){ p.woodSt='Complete'; if(!p.actWood) p.actWood=today; }
+  if(p.hasExt && computeSegmentProgress(p,'ext')>=100){ p.extSt='Complete'; if(!p.actExt) p.actExt=today; }
   updatePendingBadge();
 }
 
@@ -13837,6 +14277,20 @@ function isProductionDelay(p, segment){
   const effPlan = effectivePlanDate(p, segment);
   if(!actual||!effPlan) return false;
   return actual > effPlan;
+}
+
+// OTD-dashboard-only classification: a project counts as Delayed if it completed after its
+// effective deadline, OR it is still running and has already passed its effective deadline.
+// A running project still within its effective deadline counts as On-Time (not excluded).
+// This does NOT change isProductionDelay() itself, which keeps its existing meaning
+// (+[char]0x22+completed late+[char]0x22+) for every other place that already uses it.
+function isDashboardDelayed(p){
+  const today=new Date().toISOString().split('T')[0];
+  const woodDly = p.hasWood && p.actWood && isProductionDelay(p,'wood');
+  const extDly  = p.hasExt  && p.actExt  && isProductionDelay(p,'ext');
+  const woodLate = p.hasWood && !p.actWood && p.planWood && today > effectivePlanDate(p,'wood');
+  const extLate  = p.hasExt  && !p.actExt  && p.planExt  && today > effectivePlanDate(p,'ext');
+  return woodDly||extDly||woodLate||extLate;
 }
 
 // -- Render the Project Timeline tab content --
@@ -20577,16 +21031,31 @@ function getAdminHTML(sec){
     <div class="card">
       <div class="card-header"><div class="card-title">TAT Rules Configuration${lockBadge('ADMIN ONLY')}</div></div>
       <div class="card-body">
-        <div class="alert alert-info mb-3" style="font-size:12px">TAT deadlines auto-calculate in New Project Entry. Only Admin can modify values below.</div>
-        <table><thead><tr><th>Category</th><th>Extrusion TAT (Days)</th><th>Wood TAT (Days)</th><th>Action</th></tr></thead>
-        <tbody>${Object.entries(M.tatRules).map(([k,v])=>`
-          <tr>
-            <td class="fw-600">${k}</td>
-            <td><input type="number" class="form-input" style="height:27px;width:65px;font-family:monospace" value="${v.ext}" id="tat_ext_${k.replace(/\s/g,'_')}" min="1"></td>
-            <td><input type="number" class="form-input" style="height:27px;width:65px;font-family:monospace" value="${v.wood}" id="tat_wood_${k.replace(/\s/g,'_')}" min="1"></td>
-            <td><button class="btn btn-success btn-sm" onclick="saveTAT('${k}')">💾 Save</button></td>
-          </tr>`).join('')}
-        </tbody></table>
+        <div class="alert alert-info mb-3" style="font-size:12px">TAT deadlines auto-calculate in New Project Entry based on Product Type + Category. Only Admin can modify values below.</div>
+        <div style="margin-bottom:14px"><button class="btn btn-outline btn-sm" onclick="recalcExistingProjectsTat()">Recalculate TAT for Running Projects</button><span class="text-xs text-muted" style="margin-left:8px">Applies the rules above to projects already in progress. Completed segments are never changed.</span></div>
+        ${['CD','CR','AD','R&D'].map(pt=>`
+          <div style="margin-bottom:18px">
+            <div class="fw-600" style="margin-bottom:6px">${pt}</div>
+            <table><thead><tr><th>Category</th><th>Extrusion TAT (Days)</th><th>Wood TAT (Days)</th><th>Action</th></tr></thead>
+            <tbody>${['Cat 1','Cat 2','Cat 3'].map(cat=>{
+              const v=(M.tatRules[pt]&&M.tatRules[pt][cat])||{ext:'',wood:''};
+              const ek=tatKey(pt,cat);
+              return `<tr><td class="fw-600">${cat}</td>
+                <td><input type="number" class="form-input" style="height:27px;width:65px;font-family:monospace" value="${v.ext}" id="tat_ext_${ek}" min="1"></td>
+                <td><input type="number" class="form-input" style="height:27px;width:65px;font-family:monospace" value="${v.wood}" id="tat_wood_${ek}" min="1"></td>
+                <td><button class="btn btn-success btn-sm" onclick="saveTAT('${pt}','${cat}')">Save</button></td></tr>`;
+            }).join('')}
+            </tbody></table>
+          </div>`).join('')}
+        <div style="margin-bottom:4px">
+          <div class="fw-600" style="margin-bottom:6px">IOC (single TAT - no category)</div>
+          <table><thead><tr><th>Extrusion TAT (Days)</th><th>Wood TAT (Days)</th><th>Action</th></tr></thead>
+          <tbody><tr>
+            <td><input type="number" class="form-input" style="height:27px;width:65px;font-family:monospace" value="${(M.tatRules.IOC&&M.tatRules.IOC.ext)||''}" id="tat_ext_IOC" min="1"></td>
+            <td><input type="number" class="form-input" style="height:27px;width:65px;font-family:monospace" value="${(M.tatRules.IOC&&M.tatRules.IOC.wood)||''}" id="tat_wood_IOC" min="1"></td>
+            <td><button class="btn btn-success btn-sm" onclick="saveTAT('IOC',null)">Save</button></td>
+          </tr></tbody></table>
+        </div>
       </div>
     </div>`;
 
@@ -22270,13 +22739,72 @@ function exportAdminList(key,title){
 }
 
 // -- TAT save --
-function saveTAT(cat){
-  const ek=cat.replace(/\s/g,'_');
-  const ev=parseInt(document.getElementById('tat_ext_'+ek)?.value)||M.tatRules[cat].ext;
-  const wv=parseInt(document.getElementById('tat_wood_'+ek)?.value)||M.tatRules[cat].wood;
-  M.tatRules[cat].ext=ev; M.tatRules[cat].wood=wv;
-  toast('TAT rule for '+cat+' saved. Ext:'+ev+'d, Wood:'+wv+'d','✓');
+function saveTAT(type,cat){
+  const ek=tatKey(type,cat);
+  const ev=parseInt(document.getElementById('tat_ext_'+ek)?.value);
+  const wv=parseInt(document.getElementById('tat_wood_'+ek)?.value);
+  if(cat){
+    if(!M.tatRules[type]) M.tatRules[type]={};
+    if(!M.tatRules[type][cat]) M.tatRules[type][cat]={};
+    if(!isNaN(ev)) M.tatRules[type][cat].ext=ev;
+    if(!isNaN(wv)) M.tatRules[type][cat].wood=wv;
+    toast('TAT rule for '+type+' - '+cat+' saved. Ext:'+M.tatRules[type][cat].ext+'d, Wood:'+M.tatRules[type][cat].wood+'d','OK');
+  } else {
+    if(!M.tatRules[type]) M.tatRules[type]={};
+    if(!isNaN(ev)) M.tatRules[type].ext=ev;
+    if(!isNaN(wv)) M.tatRules[type].wood=wv;
+    toast('TAT rule for '+type+' saved. Ext:'+M.tatRules[type].ext+'d, Wood:'+M.tatRules[type].wood+'d','OK');
+  }
   persistAdminConfig('tatRules');
+}
+
+async function recalcExistingProjectsTat(){
+  if(!(await electronConfirm(
+    'This will recalculate the planned deadline (Wood/Extrusion TAT) for EVERY project using the CURRENT TAT Rules shown above -- INCLUDING already-completed projects. For completed projects this will change their On-Time/Delayed classification and delay-day count to match the new rule. This rewrites historical delivery data. Continue?'
+  ))) return;
+
+  const updated=[]; let skippedNoRule=0;
+
+  for(const p of DB.projects){
+    const rule = p.type==='IOC' ? M.tatRules['IOC'] : (M.tatRules[p.type] && M.tatRules[p.type][p.cat]);
+    if(!rule){ skippedNoRule++; continue; }
+
+    if(p.hasWood && p.recWood){
+      const d=new Date(p.recWood); d.setDate(d.getDate()+rule.wood);
+      const newPlan=d.toISOString().split('T')[0];
+      const payload={};
+      if(newPlan!==p.planWood) payload.planWood=newPlan;
+      if(p.actWood){
+        const newDly=Math.round((new Date(p.actWood)-new Date(newPlan))/86400000);
+        if(newDly!==p.dlyWood) payload.dlyWood=newDly;
+      }
+      if(Object.keys(payload).length){
+        try{ await apiUpdateProject(p.id, payload); Object.assign(p, payload); updated.push(p.sap+' (Wood)'); }
+        catch(err){ console.error('Recalc failed for '+p.sap+' (Wood):', err); }
+      }
+    }
+
+    if(p.hasExt && p.recExt){
+      const d=new Date(p.recExt); d.setDate(d.getDate()+rule.ext);
+      const newPlan=d.toISOString().split('T')[0];
+      const payload={};
+      if(newPlan!==p.planExt) payload.planExt=newPlan;
+      if(p.actExt){
+        const newDly=Math.round((new Date(p.actExt)-new Date(newPlan))/86400000);
+        if(newDly!==p.dlyExt) payload.dlyExt=newDly;
+      }
+      if(Object.keys(payload).length){
+        try{ await apiUpdateProject(p.id, payload); Object.assign(p, payload); updated.push(p.sap+' (Ext)'); }
+        catch(err){ console.error('Recalc failed for '+p.sap+' (Ext):', err); }
+      }
+    }
+  }
+
+  if(typeof renderTracker==='function') renderTracker();
+  if(typeof renderDashCharts==='function') renderDashCharts();
+  if(typeof renderExecKPIs==='function') renderExecKPIs();
+
+  toast(updated.length+' segment(s) recalculated.'+(skippedNoRule?' '+skippedNoRule+' project(s) skipped (no matching TAT rule).':''), 'OK');
 }
 
 // -- Production Stages CRUD --
@@ -22478,6 +23006,7 @@ function showNotif(){
 
 let _currentReport = null; // active report type
 let _reportData = [];       // current filtered dataset
+let _reportSegment = 'Both'; // current Wood/Extrusion/Both filter, used by PDF export header
 
 // -- Report definitions --
 const REPORT_DEFS = {
@@ -22620,24 +23149,38 @@ function buildReportPreview(type){
     filterBar.innerHTML=rptFilter('rptFY','Financial Year','',true)
       +rptFilter('rptType','Project Type',['All Types',...M.productTypes])
       +rptFilter('rptCustomer','Customer',['All Customers',...custList])
-      +rptFilter('rptPM','Project Manager',['All PMs',...pmList]);
+      +rptFilter('rptPM','Project Manager',['All PMs',...pmList])
+      +rptFilter('rptStatus','Status',['All Status','Running','Completed','Hold'])
+      +rptFilter('rptSegment','Segment',['Both','Wood','Extrusion']);
     const fType=document.getElementById('rptType')?.value||'All Types';
     const fCust=document.getElementById('rptCustomer')?.value||'All Customers';
     const fPM=document.getElementById('rptPM')?.value||'All PMs';
-    let src=fyProjects().filter(p=>inDateRange('reports',p.recWood||p.recExt));
+    const fStatus=document.getElementById('rptStatus')?.value||'All Status';
+    const fSegment=document.getElementById('rptSegment')?.value||'Both';
+    _reportSegment=fSegment;
+    const RPT_STATUS_LABELS={running:'Running',completed:'Completed',hold:'Hold'};
+    const rptSegRec=p=>fSegment==='Wood'?p.recWood:fSegment==='Extrusion'?p.recExt:(p.recWood||p.recExt);
+    const rptSegPlan=p=>fSegment==='Wood'?p.planWood:fSegment==='Extrusion'?p.planExt:(p.planWood||p.planExt);
+    const rptSegAct=p=>fSegment==='Wood'?p.actWood:fSegment==='Extrusion'?p.actExt:(p.actWood||p.actExt);
+    const rptSegDly=p=>fSegment==='Wood'?(p.dlyWood||0):fSegment==='Extrusion'?(p.dlyExt||0):Math.max(p.dlyWood||0,p.dlyExt||0);
+    const rptSegDelayed=p=>fSegment==='Wood'?isProductionDelay(p,'wood'):fSegment==='Extrusion'?isProductionDelay(p,'ext'):(isProductionDelay(p,'wood')||isProductionDelay(p,'ext'));
+    let src=fyProjects().filter(p=>inDateRange('reports',rptSegRec(p)));
+    if(fSegment==='Wood') src=src.filter(p=>p.hasWood);
+    if(fSegment==='Extrusion') src=src.filter(p=>p.hasExt);
     if(fType!=='All Types') src=src.filter(p=>p.type===fType);
     if(fCust!=='All Customers') src=src.filter(p=>p.customer===fCust);
     if(fPM!=='All PMs') src=src.filter(p=>p.pm===fPM);
+    if(fStatus!=='All Status') src=src.filter(p=>RPT_STATUS_LABELS[getProjectStatusCat(p)]===fStatus);
     _reportData=src.map(p=>({
       'Project No':p.sap,'Type':p.type,'Category':p.cat,'Customer':p.customer,'PM':p.pm,
-      'File Received':p.recWood||p.recExt||'','Planned Date':p.planWood||p.planExt||'',
-      'Actual Date':p.actWood||p.actExt||'','Delay (days)':Math.max(p.dlyWood||0,p.dlyExt||0),
+      'File Received':dateOnly(rptSegRec(p)),'Planned Date':dateOnly(rptSegPlan(p)),
+      'Actual Date':dateOnly(rptSegAct(p)),'Delay (days)':rptSegDly(p),
       'Status':p.progress===100?'Complete':'In Progress',
-      'OTD':(!isProductionDelay(p,'wood')&&!isProductionDelay(p,'ext'))?'✅ On-Time':'❌ Delayed',
+      'OTD':(!rptSegDelayed(p))?'✅ On-Time':'❌ Delayed',
       'Override':((DB.tatOverrideLog||[]).some(o=>o.projId===p.id))?'Yes':'No'
     }));
     const total=src.length,comp=src.filter(p=>p.progress===100).length;
-    const otdN=src.filter(p=>p.progress===100&&!isProductionDelay(p,'wood')&&!isProductionDelay(p,'ext')).length;
+    const otdN=src.filter(p=>p.progress===100&&!rptSegDelayed(p)).length;
     const otdPct=comp?Math.round(otdN/comp*100):0;
     kpiEl.innerHTML=kpiCards([
       {l:'Total Projects',v:total,c:'blue'},{l:'Completed',v:comp,c:'green'},
@@ -22646,11 +23189,11 @@ function buildReportPreview(type){
 
     const monthMap={};
     src.forEach(p=>{
-      const d=p.recWood||p.recExt; if(!d) return;
+      const d=rptSegRec(p); if(!d) return;
       const mk=String(d).slice(0,7);
       if(!monthMap[mk]) monthMap[mk]={total:0,otd:0};
       monthMap[mk].total++;
-      if(p.progress===100 && !isProductionDelay(p,'wood') && !isProductionDelay(p,'ext')) monthMap[mk].otd++;
+      if(p.progress===100 && !rptSegDelayed(p)) monthMap[mk].otd++;
     });
     const months=Object.keys(monthMap).sort();
     const custGroups={};
@@ -22658,10 +23201,10 @@ function buildReportPreview(type){
       const c=p.customer||'Unspecified';
       if(!custGroups[c]) custGroups[c]={total:0,otd:0};
       custGroups[c].total++;
-      if(p.progress===100 && !isProductionDelay(p,'wood') && !isProductionDelay(p,'ext')) custGroups[c].otd++;
+      if(p.progress===100 && !rptSegDelayed(p)) custGroups[c].otd++;
     });
     const custEntries=Object.entries(custGroups).sort((a,b)=>b[1].total-a[1].total).slice(0,8);
-    const delayed=src.filter(p=>isProductionDelay(p,'wood')||isProductionDelay(p,'ext'));
+    const delayed=src.filter(p=>rptSegDelayed(p));
     const reasonMap=rptGroupSum(delayed, p=>p.dlyReason||'Not Specified');
     const reasonEntries=rptSortedEntries(reasonMap,8);
 
@@ -22678,7 +23221,7 @@ function buildReportPreview(type){
     ]);
 
     tableEl.innerHTML=rptTable(_reportData,['Project No','Type','Category','Customer','PM','File Received','Planned Date','Actual Date','Delay (days)','Status','OTD','Override']);
-    countEl.textContent=total+' projects in preview'+((fType!=='All Types'||fCust!=='All Customers'||fPM!=='All PMs')?' (filtered)':'');
+    countEl.textContent=total+' projects in preview'+((fType!=='All Types'||fCust!=='All Customers'||fPM!=='All PMs'||fStatus!=='All Status'||fSegment!=='Both')?' (filtered)':'');
     dlEl.innerHTML=dlBtns('OTD_Performance',['csv','pdf']);
   }
 
@@ -22686,16 +23229,25 @@ function buildReportPreview(type){
     const pmList=[...new Set(fyProjects().map(p=>p.pm).filter(Boolean))].sort();
     filterBar.innerHTML=rptFilter('rptFY','Financial Year','',true)
       +rptFilter('rptType','Project Type',['All Types',...M.productTypes])
+      +rptFilter('rptSegment','Segment',['Both','Wood','Extrusion'])
       +rptFilter('rptPM','Project Manager',['All PMs',...pmList]);
     const fType=document.getElementById('rptType')?.value||'All Types';
     const fPM=document.getElementById('rptPM')?.value||'All PMs';
-    let src=fyProjects().filter(p=>((p.dlyWood||0)>0||(p.dlyExt||0)>0)&&inDateRange('reports',p.recWood||p.recExt));
+    const fSegment=document.getElementById('rptSegment')?.value||'Both';
+    _reportSegment=fSegment;
+    const rptSegRec=p=>fSegment==='Wood'?p.recWood:fSegment==='Extrusion'?p.recExt:(p.recWood||p.recExt);
+    const rptSegPlan=p=>fSegment==='Wood'?p.planWood:fSegment==='Extrusion'?p.planExt:(p.planWood||p.planExt);
+    const rptSegAct=p=>fSegment==='Wood'?p.actWood:fSegment==='Extrusion'?p.actExt:(p.actWood||p.actExt);
+    const rptSegDly=p=>fSegment==='Wood'?(p.dlyWood||0):fSegment==='Extrusion'?(p.dlyExt||0):Math.max(p.dlyWood||0,p.dlyExt||0);
+    let src=fyProjects().filter(p=>rptSegDly(p)>0&&inDateRange('reports',rptSegRec(p)));
+    if(fSegment==='Wood') src=src.filter(p=>p.hasWood);
+    if(fSegment==='Extrusion') src=src.filter(p=>p.hasExt);
     if(fType!=='All Types') src=src.filter(p=>p.type===fType);
     if(fPM!=='All PMs') src=src.filter(p=>p.pm===fPM);
     _reportData=src.map(p=>({
       'Project No':p.sap,'Type':p.type,'Customer':p.customer,'PM':p.pm,
-      'File Received':p.recWood||p.recExt||'','Planned':p.planWood||p.planExt||'',
-      'Actual':p.actWood||p.actExt||'','Delay (days)':Math.max(p.dlyWood||0,p.dlyExt||0),
+      'File Received':dateOnly(rptSegRec(p)),'Planned':dateOnly(rptSegPlan(p)),
+      'Actual':dateOnly(rptSegAct(p)),'Delay (days)':rptSegDly(p),
       'Delay Reason':p.dlyReason||'Not Specified',
       'Override Applied':((DB.tatOverrideLog||[]).some(o=>o.projId===p.id))?'Yes':'No',
       'Override Reason':((DB.tatOverrideLog||[]).filter(o=>o.projId===p.id).map(o=>o.reasonCategory)).join('; ')||'—'
@@ -22703,14 +23255,14 @@ function buildReportPreview(type){
     const reasons=rptGroupSum(src, p=>p.dlyReason||'Not Specified');
     const topReason=rptSortedEntries(reasons,1)[0]||['None',0];
     kpiEl.innerHTML=kpiCards([
-      {l:'Delayed Projects',v:src.length,c:'red'},{l:'Total Delay Days',v:src.reduce((s,p)=>s+Math.max(p.dlyWood||0,p.dlyExt||0),0),c:'orange'},
+      {l:'Delayed Projects',v:src.length,c:'red'},{l:'Total Delay Days',v:src.reduce((s,p)=>s+rptSegDly(p),0),c:'orange'},
       {l:'Top Reason',v:topReason[0],c:'yellow'},{l:'With Override',v:src.filter(p=>(DB.tatOverrideLog||[]).some(o=>o.projId===p.id)).length,c:'blue'}
     ]);
 
     const reasonEntries=rptSortedEntries(reasons,8);
-    const pmDelay=rptGroupSum(src, p=>p.pm||'Unspecified', p=>Math.max(p.dlyWood||0,p.dlyExt||0));
+    const pmDelay=rptGroupSum(src, p=>p.pm||'Unspecified', p=>rptSegDly(p));
     const pmEntries=rptSortedEntries(pmDelay,8);
-    const monthMap=rptGroupSum(src, p=>String(p.recWood||p.recExt||'').slice(0,7));
+    const monthMap=rptGroupSum(src, p=>String(rptSegRec(p)||'').slice(0,7));
     delete monthMap[''];
     const months=Object.keys(monthMap).sort();
 
@@ -22721,7 +23273,7 @@ function buildReportPreview(type){
     ]);
 
     tableEl.innerHTML=rptTable(_reportData,['Project No','Type','Customer','PM','File Received','Planned','Actual','Delay (days)','Delay Reason','Override Applied','Override Reason']);
-    countEl.textContent=src.length+' delayed projects'+((fType!=='All Types'||fPM!=='All PMs')?' (filtered)':'');
+    countEl.textContent=src.length+' delayed projects'+((fType!=='All Types'||fPM!=='All PMs'||fSegment!=='Both')?' (filtered)':'');
     dlEl.innerHTML=dlBtns('Delay_Analysis',['csv','pdf']);
   }
 
@@ -23169,8 +23721,69 @@ function downloadReport(format, filename){
     const th=cols.map(c=>`<th>${c}</th>`).join('');
     const trs=_reportData.map(r=>'<tr>'+cols.map(c=>`<td>${r[c]??'—'}</td>`).join('')+'</tr>').join('');
     const kpiHtml=document.getElementById('reportPreviewKPIs')?.innerHTML||'';
+
+    if(_currentReport==='otd' || _currentReport==='delay'){
+      const logoSrc=location.origin+'/logo-full.png';
+      const seg=_reportSegment||'Both';
+      const segLabel=seg==='Wood'?'Wood Production':seg==='Extrusion'?'Aluminium Extrusion':'Wood Production & Aluminium Extrusion';
+      const reportLabel=_currentReport==='otd'?'OTD Tracker':'Delay Analysis Report';
+      const fyLabel=getFYLabel();
+      const html2=`<!DOCTYPE html><html><head><title>${def.title||filename}</title><style>
+        *{box-sizing:border-box;margin:0;padding:0}
+        @page{size:A4 landscape;margin:10mm}
+        body{font-family:Calibri,Arial,sans-serif;font-size:11px;color:#0f1b2d;padding:14px}
+        .doc-header{display:flex;border:1px solid #333;margin-bottom:10px}
+        .doc-logo{width:140px;border-right:1px solid #333;display:flex;align-items:center;justify-content:center;padding:6px}
+        .doc-logo img{max-width:100%;max-height:70px}
+        .doc-titles{flex:1;border-right:1px solid #333;display:flex;flex-direction:column;justify-content:center;text-align:center;padding:6px}
+        .doc-titles .l1{font-size:16px;font-weight:700}
+        .doc-titles .l2{font-size:13px;font-weight:700;margin-top:4px}
+        .doc-titles .l3{font-size:13px;font-weight:700;margin-top:4px}
+        .doc-control{width:230px;font-size:9.5px;font-weight:600;display:flex;flex-direction:column;justify-content:center;padding:6px 8px;gap:3px}
+        .doc-classified{text-align:right;font-size:9.5px;padding:2px 4px 8px;border-bottom:1px solid #333;margin-bottom:10px}
+        .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px}
+        .kpi{background:#f8f9fc;border:1px solid #e2e6ed;border-radius:6px;padding:8px;text-align:center}
+        .kpi-label{font-size:9px;color:#8492a6;text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px}
+        .kpi-value{font-size:17px;font-weight:700;color:#0f1b2d}
+        table{width:100%;border-collapse:collapse;font-size:9.5px}
+        th{background:#f0f2f5;font-size:8.5px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:.3px;padding:5px 6px;border:1px solid #333;text-align:left}
+        td{padding:5px 6px;border:1px solid #333;vertical-align:top}
+        tr:nth-child(even){background:#f8f9fc}
+        .footer{margin-top:14px;font-size:9px;color:#374151;border-top:1px solid #333;padding-top:6px;text-align:center}
+        @media print{.print-btn{display:none}}
+      </style></head><body>
+        <button class="print-btn" onclick="window.print()" style="position:fixed;top:10px;right:10px;padding:8px 14px;background:#1a56db;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px">Print / Save as PDF</button>
+        <div class="doc-header">
+          <div class="doc-logo">${logoSrc?`<img src="${logoSrc}">`:''}</div>
+          <div class="doc-titles">
+            <div class="l1">ONEPWS Private Limited<br>(Formerly Known As: Pyrotech Workspace Solutions Pvt. Ltd.)</div>
+            <div class="l2">${segLabel} Department</div>
+            <div class="l3">${reportLabel} for ${segLabel} for FY: ${fyLabel}</div>
+          </div>
+          <div class="doc-control">
+            <div>Doc No: IMS-11-01-L4-03</div>
+            <div>Original Issue Date: 5-Dec-2019</div>
+            <div>Latest Revision no.-03</div>
+            <div>Effective date of Latest Rev:- 11-Feb-2026</div>
+            <div>STANDARD: QMS, EMS, OHSMS</div>
+          </div>
+        </div>
+        <div class="doc-classified">Document Classified As: INTERNAL &ndash; (Limited Distribution)</div>
+        <div class="kpis">${kpiHtml.replace(/class="kpi-card [^"]+"/g,'class="kpi"').replace(/<div class="kpi-label">/g,'<div class="kpi-label">').replace(/<div class="kpi-sub">[^<]*<\/div>/g,'')}</div>
+        <table><thead><tr>${th}</tr></thead><tbody>${trs}</tbody></table>
+        <div class="footer">This report is generated by automated system.<br>ONEPWS Production Control Portal - ${filename} - Generated: ${new Date().toLocaleString()} - Total Records: ${_reportData.length}</div>
+      </body></html>`;
+      const w2=window.open('','_blank');
+      if(!w2){ toast('Pop-up blocked. Allow pop-ups to download PDF.','OK'); return; }
+      w2.document.write(html2); w2.document.close();
+      setTimeout(()=>{ w2.focus(); w2.print(); },400);
+      toast('PDF report opened in new window - use Print to Save as PDF','OK');
+      return;
+    }
+
     const html=`<!DOCTYPE html><html><head><title>${def.title||filename}</title><style>
       *{box-sizing:border-box;margin:0;padding:0}
+      @page{size:A4 landscape;margin:10mm}
       body{font-family:Arial,sans-serif;font-size:11px;color:#0f1b2d;padding:20px}
       .header{background:${def.color||'#1a56db'};color:#fff;padding:14px 18px;border-radius:6px;margin-bottom:16px}
       .header h1{font-size:17px;font-weight:700;margin-bottom:3px}
@@ -23217,7 +23830,7 @@ function showQualityTab(t, el){
   el.classList.add('active');
   if(t==='pareto') renderParetoAnalysis();
   if(t==='ppm') renderPPMTrend();
-  if(t==='history') renderQualityLog();
+  if(t==='history'){ loadQcHistMachineOptions(); renderQualityLog(); }
   if(t==='dimensional') initDimStudyTab();
   if(t==='jwo') renderJwoQualityTab();
 }
@@ -23308,32 +23921,121 @@ function renderDailyRejFeed(){
   ).join('');
 }
 
-// Quality Reporting table — same DB.rejectLog data as Reject & Rework Log, full history view
-function renderQualityLog(){
+let _qcHistDebounceTimer = null;
+function onQcHistProjectSearchInput(){
+  clearTimeout(_qcHistDebounceTimer);
+  _qcHistDebounceTimer = setTimeout(renderQualityLog, 350);
+}
+function onQcHistDatePresetChange(){
+  const preset = document.getElementById('qcHistDatePreset')?.value;
+  const customWrap = document.getElementById('qcHistCustomDateWrap');
+  const fromWrap = document.getElementById('qcHistFromWrap');
+  const toWrap = document.getElementById('qcHistToWrap');
+  if(customWrap) customWrap.style.display = preset==='custom' ? '' : 'none';
+  if(fromWrap) fromWrap.style.display = preset==='range' ? '' : 'none';
+  if(toWrap) toWrap.style.display = preset==='range' ? '' : 'none';
+  renderQualityLog();
+}
+
+// Complete QC History (Pass + Reject + Partial) -- server-filtered via
+// GET /api/qc-log, defaults to current month. Function name/signature kept
+// identical to the old renderQualityLog() so every existing call site
+// (tab switch, post-QC-decision refresh, general Quality refresh) keeps
+// working unchanged; only the internals moved from a client-side filter
+// over a capped DB.rejectLog array to a real server query.
+// Populates the Machine/Process filter dropdown from every machine/stage
+// that has ever appeared in QC history (all-time, not date-filtered), via
+// GET /api/qc-log/machines. Called once when the History sub-tab opens.
+async function loadQcHistMachineOptions(){
+  const sel = document.getElementById('qcHistMachine');
+  if(!sel) return;
+  try{
+    const resp = await apiRequest('/qc-log/machines', { method:'GET' });
+    const machines = resp.machines || [];
+    const current = sel.value;
+    sel.innerHTML = '<option value="all">All</option>' + machines.map(function(m){
+      return '<option value="'+m.replace(/"/g,'&quot;')+'">'+m+'</option>';
+    }).join('');
+    if(machines.indexOf(current) !== -1) sel.value = current;
+  } catch(err){
+    console.warn('Could not load machine list for QC history filter:', err.message);
+  }
+}
+
+async function renderQualityLog(){
   const tbody = document.getElementById('qualityLogBody');
   if(!tbody) return;
-  const rows = (DB.rejectLog||[]).filter(r=>inDateRange('quality',r.date));
-  window._qualityLogRenderRows = rows; // referenced by viewQcPhotoAt() below for safe indexed lookup
-  if(!rows.length){
-    const f=DATE_FILTER.quality;
-    tbody.innerHTML='<tr><td colspan="11" class="text-muted text-sm" style="padding:16px;text-align:center">'+((f.from||f.to)?'No rejections recorded in the selected date range ('+dateRangeStatusText('quality')+').':'No rejections recorded yet. This table updates automatically when QC records a rejection.')+'</td></tr>';
+
+  const preset = document.getElementById('qcHistDatePreset')?.value || 'month';
+  let from, to;
+  const todayStr = new Date().toISOString().split('T')[0];
+  if(preset==='today'){ from = todayStr; to = todayStr; }
+  else if(preset==='yesterday'){
+    const y = new Date(); y.setDate(y.getDate()-1);
+    const yStr = y.toISOString().split('T')[0];
+    from = yStr; to = yStr;
+  } else if(preset==='custom'){
+    const d = document.getElementById('qcHistCustomDate')?.value;
+    if(d){ from = d; to = d; }
+  } else if(preset==='range'){
+    from = document.getElementById('qcHistFrom')?.value || undefined;
+    to = document.getElementById('qcHistTo')?.value || undefined;
+  }
+
+  const segment = document.getElementById('qcHistSegment')?.value || 'all';
+  const status = document.getElementById('qcHistStatus')?.value || 'all';
+  const stage = document.getElementById('qcHistMachine')?.value || 'all';
+  const project = (document.getElementById('qcHistProjectSearch')?.value || '').trim();
+
+  const params = new URLSearchParams();
+  if(from) params.set('from', from);
+  if(to) params.set('to', to);
+  if(segment !== 'all') params.set('segment', segment);
+  if(status !== 'all') params.set('status', status);
+  if(stage !== 'all') params.set('stage', stage);
+  if(project) params.set('project', project);
+
+  tbody.innerHTML = '<tr><td colspan="8" class="text-muted text-sm" style="padding:16px;text-align:center">Loading...</td></tr>';
+
+  let resp;
+  try{
+    resp = await apiRequest('/qc-log?'+params.toString(), { method:'GET' });
+  } catch(err){
+    tbody.innerHTML = '<tr><td colspan="8" class="text-danger text-sm" style="padding:16px;text-align:center">Could not load QC history: '+err.message+'</td></tr>';
     return;
   }
-  tbody.innerHTML = rows.slice(0,50).map((r,i)=>
-    '<tr>'
-    +'<td class="font-mono text-sm">'+(r.date||'—')+'</td>'
-    +'<td class="text-sm fw-600">'+(r.proj||'—')+'</td>'
-    +'<td class="text-sm">'+r.item+'</td>'
-    +'<td class="text-sm">'+(r.workstation||r.stage)+'</td>'
-    +'<td class="fw-600 text-danger">'+r.qty+'</td>'
-    +'<td class="text-xs">'+(r.category||'Uncategorized')+'</td>'
-    +'<td class="text-xs" style="color:var(--accent);font-weight:600">'+(r.qcPerson||'—')+'</td>'
-    +'<td class="text-xs" style="max-width:150px;overflow:hidden;text-overflow:ellipsis" title="'+(r.qcInstrument||'')+'">'+(r.qcInstrument||'—')+(r.qcInstrumentDueDate?' <span class="text-muted">(Due: '+r.qcInstrumentDueDate+')</span>':'')+'</td>'
-    +'<td class="text-muted text-xs" style="max-width:140px;overflow:hidden;text-overflow:ellipsis">'+(r.rootCause||'—')+'</td>'
-    +'<td><span class="badge '+(r.status==='Closed'?'badge-complete':'badge-delayed')+'" style="font-size:9.5px">'+r.status+'</span></td>'
-    +'<td>'+(r.photoData?'<button type="button" onclick="viewQcPhotoAt(\'_qualityLogRenderRows\','+i+')" title="View defect photo" aria-label="View defect photo" style="border:none;background:transparent;cursor:pointer;font-size:16px;line-height:1">📷</button>':'<span class="text-muted">—</span>')+'</td>'
-    +'</tr>'
-  ).join('');
+
+  const rows = resp.qcLog || [];
+  window._qualityLogRenderRows = rows;
+
+  const rangeLabel = document.getElementById('qcHistoryRangeLabel');
+  if(rangeLabel) rangeLabel.textContent = 'Showing: '+(resp.from||'-')+' to '+(resp.to||'-')+' - '+rows.length+' record(s)';
+
+  if(!rows.length){
+    tbody.innerHTML = '<tr><td colspan="8" class="text-muted text-sm" style="padding:16px;text-align:center">No QC records found for the selected filters.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = rows.map(function(r){
+    const ts = (r.ts||'').toString().replace('T',' ').slice(0,16);
+    const segLabel = r.segment==='ext' ? 'Extrusion' : (r.segment==='wood' ? 'Wood' : (r.segment||'-'));
+    const statusBadge = r.qc_status==='Reject'
+      ? '<span class="badge badge-delayed">Rejected</span>'
+      : (r.qc_status==='Partial'
+        ? '<span class="badge" style="background:#fef3c7;color:#92400e">Partial</span>'
+        : '<span class="badge badge-complete">Passed</span>');
+    return '<tr>'
+      + '<td class="font-mono text-sm">'+ts+'</td>'
+      + '<td class="text-sm fw-600">'+(r.proj_sap||'-')+'</td>'
+      + '<td class="text-sm">'+(r.customer||'-')+'</td>'
+      + '<td class="text-sm">'+(r.item||'-')+'</td>'
+      + '<td class="text-xs">'+segLabel+'</td>'
+      + '<td class="text-xs">'+(r.stage||r.workstation||'-')+'</td>'
+      + '<td>'+statusBadge+'</td>'
+      + '<td class="text-muted text-xs" style="max-width:160px;overflow:hidden;text-overflow:ellipsis">'+(r.root_cause||'-')+'</td>'
+      + '<td class="text-xs" style="color:var(--accent);font-weight:600">'+(r.qc_person||'-')+'</td>'
+      + '</tr>';
+  }).join('');
 }
 
 function renderRejChart(){

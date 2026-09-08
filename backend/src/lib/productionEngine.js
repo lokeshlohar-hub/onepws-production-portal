@@ -265,29 +265,41 @@ async function getEffectivePlanDate(client, projectId, segment, fallbackPlanDate
 async function refreshProjectProgress(client, projectId) {
   const { rows } = await client.query('SELECT * FROM bom_lines WHERE project_id = $1', [projectId]);
   let totalQty = 0, totalDone = 0;
+  let woodQty = 0, woodDone = 0, extQty = 0, extDone = 0;
   rows.forEach((row) => {
     const line = withDefaults({ ...row, stage_data: row.stage_data, route: row.route });
     const lastStage = line.route[line.route.length - 1];
+    const done = lastStage ? (line.stage_data[lastStage] || {}).qc_approved || 0 : 0;
     totalQty += line.qty;
-    totalDone += lastStage ? (line.stage_data[lastStage] || {}).qc_approved || 0 : 0;
+    totalDone += done;
+    if (line.seg === 'wood') { woodQty += line.qty; woodDone += done; }
+    else if (line.seg === 'ext') { extQty += line.qty; extDone += done; }
   });
   const progress = totalQty > 0 ? Math.round((totalDone / totalQty) * 100) : 0;
   await client.query('UPDATE projects SET progress = $1 WHERE id = $2', [progress, projectId]);
-  if (progress >= 100) {
+
+  // Segment-independent completion stamping (v54.6) -- a segment stamps its own
+  // act_wood/act_ext the moment ITS OWN progress hits 100%, instead of waiting
+  // for the combined total across both segments. Matches the frontend fix in
+  // refreshProjectProgress() (index.html) -- this backend copy is the real
+  // source of truth for live QC-approval events and was missed in that fix.
+  const woodProgress = woodQty > 0 ? Math.round((woodDone / woodQty) * 100) : 0;
+  const extProgress  = extQty  > 0 ? Math.round((extDone  / extQty ) * 100) : 0;
+  if (woodProgress >= 100 || extProgress >= 100) {
     const { rows: pRows } = await client.query('SELECT has_wood, has_ext, plan_wood, plan_ext, act_wood, act_ext FROM projects WHERE id = $1', [projectId]);
     const proj = pRows[0] || {};
-    const effWood = proj.has_wood ? await getEffectivePlanDate(client, projectId, 'wood', proj.plan_wood) : null;
-    const effExt  = proj.has_ext  ? await getEffectivePlanDate(client, projectId, 'ext',  proj.plan_ext)  : null;
+    const effWood = (proj.has_wood && woodProgress >= 100) ? await getEffectivePlanDate(client, projectId, 'wood', proj.plan_wood) : null;
+    const effExt  = (proj.has_ext  && extProgress  >= 100) ? await getEffectivePlanDate(client, projectId, 'ext',  proj.plan_ext)  : null;
     await client.query(
       `UPDATE projects SET
-         wood_status = CASE WHEN has_wood THEN 'Complete' ELSE wood_status END,
-         ext_status  = CASE WHEN has_ext  THEN 'Complete' ELSE ext_status END,
-         act_wood = CASE WHEN has_wood AND act_wood IS NULL THEN CURRENT_DATE ELSE act_wood END,
-         act_ext  = CASE WHEN has_ext  AND act_ext  IS NULL THEN CURRENT_DATE ELSE act_ext END,
-         dly_wood = CASE WHEN has_wood AND act_wood IS NULL AND $2::date IS NOT NULL THEN (CURRENT_DATE - $2::date) ELSE dly_wood END,
-         dly_ext  = CASE WHEN has_ext  AND act_ext  IS NULL AND $3::date IS NOT NULL THEN (CURRENT_DATE - $3::date)  ELSE dly_ext  END
+         wood_status = CASE WHEN has_wood AND $4 THEN 'Complete' ELSE wood_status END,
+         ext_status  = CASE WHEN has_ext  AND $5 THEN 'Complete' ELSE ext_status END,
+         act_wood = CASE WHEN has_wood AND $4 AND act_wood IS NULL THEN CURRENT_DATE ELSE act_wood END,
+         act_ext  = CASE WHEN has_ext  AND $5 AND act_ext  IS NULL THEN CURRENT_DATE ELSE act_ext END,
+         dly_wood = CASE WHEN has_wood AND $4 AND act_wood IS NULL AND $2::date IS NOT NULL THEN (CURRENT_DATE - $2::date) ELSE dly_wood END,
+         dly_ext  = CASE WHEN has_ext  AND $5 AND act_ext  IS NULL AND $3::date IS NOT NULL THEN (CURRENT_DATE - $3::date)  ELSE dly_ext  END
        WHERE id = $1`,
-      [projectId, effWood, effExt]
+      [projectId, effWood, effExt, woodProgress >= 100, extProgress >= 100]
     );
   }
   return progress;
@@ -312,8 +324,9 @@ async function processQcDecision(lineId, { stageName, approveQty, rejectQty, dis
     }
     if (!sd) throw new Error(`Stage "${stageName}" is not on this line's route`);
 
-    const projRes = await client.query('SELECT sap FROM projects WHERE id = $1', [line.project_id]);
+    const projRes = await client.query('SELECT sap, customer FROM projects WHERE id = $1', [line.project_id]);
     const projSap = projRes.rows[0] ? projRes.rows[0].sap : line.project_id;
+    const projCustomer = projRes.rows[0] ? projRes.rows[0].customer : '';
 
     sd.qc_queue -= approveQty + rejectQty;
     sd.qc_approved += approveQty;
@@ -383,6 +396,21 @@ async function processQcDecision(lineId, { stageName, approveQty, rejectQty, dis
         ]
       );
     }
+
+    // v54.8 -- Complete QC History (both Pass and Reject) -- additive, does
+    // not touch reject_log or any existing rejection reporting/Pareto logic.
+    // Fires exactly once per QC decision, regardless of approve/reject split.
+    const qcStatus = rejectQty > 0 && approveQty > 0 ? 'Partial' : (rejectQty > 0 ? 'Reject' : 'Pass');
+    await client.query(
+      `INSERT INTO qc_log (date, project_id, proj_sap, customer, item, segment, stage, workstation,
+         approve_qty, reject_qty, qc_status, category, root_cause, qc_person, qc_instrument, source_line_id)
+       VALUES (CURRENT_DATE,$1,$2,$3,$4,$5,$6,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+      [
+        line.project_id, projSap, projCustomer, line.item, line.seg, stageName,
+        approveQty, rejectQty, qcStatus, category || null, remarks || null, qcPerson,
+        instrumentLabel, line.line_id,
+      ]
+    );
 
     sd.history.push({
       ts: new Date().toISOString(),

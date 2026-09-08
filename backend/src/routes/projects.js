@@ -214,6 +214,7 @@ router.patch('/:id', requireRole('admin', 'superadmin'), async (req, res) => {
     sap: 'sap', type: 'type', category: 'category', customer: 'customer',
     pm: 'pm', eng: 'eng', po: 'po', jobWorkPO: 'job_work_po', remarks: 'remarks',
     recWood: 'rec_wood', planWood: 'plan_wood', recExt: 'rec_ext', planExt: 'plan_ext',
+    dlyWood: 'dly_wood', dlyExt: 'dly_ext',
     certifications: 'certifications',
   };
 

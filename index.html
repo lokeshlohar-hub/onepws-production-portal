@@ -25824,5 +25824,115 @@ window.toggleAutoRefresh = () => {
 
 <!-- v54.4 dialog-helpers.js (electronPrompt/electronConfirm replacements for blocked window.prompt/confirm) -->
 <script src="dialog-helpers.js"></script>
+
+<!-- ============================================================ -->
+<!-- v55 TABLET ADAPTATION (additive block — safe to remove whole) -->
+<!-- Sidebar collapse toggle, responsive topbar for tablet widths, -->
+<!-- and a manual Sync button driving the existing auto-refresh.   -->
+<!-- ============================================================ -->
+<style id="v55TabletCss">
+.sb-toggle{display:flex;align-items:center;justify-content:center;width:36px;height:36px;border:1px solid var(--border);border-radius:8px;background:var(--surface);cursor:pointer;color:var(--text-secondary);flex-shrink:0;padding:0}
+.sb-toggle:hover{background:var(--surface2)}
+.sb-toggle svg{width:18px;height:18px}
+.sync-btn{display:flex;align-items:center;justify-content:center;width:34px;height:34px;border:1px solid var(--border);border-radius:8px;background:var(--surface);cursor:pointer;color:var(--text-secondary);flex-shrink:0;padding:0}
+.sync-btn:hover{background:var(--surface2)}
+.sync-btn svg{width:16px;height:16px}
+.sync-btn.spinning svg{animation:v55spin .8s linear infinite}
+@keyframes v55spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+.sidebar{transition:transform .22s ease}
+body.sidebar-collapsed .sidebar{transform:translateX(-105%)}
+body.sidebar-collapsed .main{margin-left:0}
+.v55-backdrop{display:none}
+@media (max-width:1100px){
+  .main{margin-left:0}
+  .sidebar{box-shadow:4px 0 24px rgba(0,0,0,.35)}
+  body:not(.sidebar-collapsed):not(.app-locked) .v55-backdrop{display:block;position:fixed;inset:0;background:rgba(15,27,45,.45);z-index:99}
+  .topbar{height:auto;min-height:var(--header-h);flex-wrap:wrap;padding:8px 12px;row-gap:6px}
+  .topbar-right{margin-left:auto;row-gap:6px}
+  .content{padding-left:12px;padding-right:12px}
+}
+@media print{.sb-toggle,.sync-btn,.v55-backdrop{display:none!important}}
+</style>
+<script>
+(function () {
+  'use strict';
+  var SMALL = function () { return window.innerWidth <= 1100; };
+  var LS_KEY = 'onepws_ui_sidebar_collapsed';
+
+  function setCollapsed(on, persist) {
+    document.body.classList.toggle('sidebar-collapsed', on);
+    if (persist && !SMALL()) {
+      try { localStorage.setItem(LS_KEY, on ? '1' : '0'); } catch (e) {}
+    }
+  }
+
+  // Initial state: tablets start collapsed (full-width content); desktops
+  // remember the user's last choice, defaulting to expanded.
+  var initial;
+  if (SMALL()) { initial = true; }
+  else {
+    try { initial = localStorage.getItem(LS_KEY) === '1'; } catch (e) { initial = false; }
+  }
+  setCollapsed(initial, false);
+
+  var topbar = document.querySelector('.topbar');
+  var topbarRight = document.querySelector('.topbar-right');
+  if (!topbar) return;
+
+  // --- Sidebar toggle (hamburger), first element in the topbar -------------
+  var tgl = document.createElement('button');
+  tgl.className = 'sb-toggle';
+  tgl.setAttribute('aria-label', 'Toggle menu');
+  tgl.title = 'Show / hide menu';
+  tgl.innerHTML = '<svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clip-rule="evenodd"/></svg>';
+  tgl.addEventListener('click', function () {
+    setCollapsed(!document.body.classList.contains('sidebar-collapsed'), true);
+  });
+  topbar.insertBefore(tgl, topbar.firstChild);
+
+  // Backdrop: on tablets the open sidebar overlays content; tapping outside closes it.
+  var bd = document.createElement('div');
+  bd.className = 'v55-backdrop';
+  bd.addEventListener('click', function () { setCollapsed(true, false); });
+  document.body.appendChild(bd);
+
+  // Navigating from the overlay sidebar closes it (tablets only).
+  var sb = document.querySelector('.sidebar');
+  if (sb) {
+    sb.addEventListener('click', function (e) {
+      if (SMALL() && e.target.closest('.nav-item')) setCollapsed(true, false);
+    });
+  }
+
+  // --- Manual Sync button, leftmost in topbar-right ------------------------
+  var sync = document.createElement('button');
+  sync.className = 'sync-btn';
+  sync.setAttribute('aria-label', 'Sync latest data');
+  sync.title = 'Sync latest data';
+  sync.innerHTML = '<svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd"/></svg>';
+  var syncing = false;
+  sync.addEventListener('click', async function () {
+    if (syncing) return;
+    syncing = true;
+    sync.classList.add('spinning');
+    try {
+      if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+      if (typeof performAutoRefresh === 'function') {
+        await performAutoRefresh();
+        if (typeof toast === 'function') toast('Data synced');
+      } else {
+        location.reload();
+        return;
+      }
+    } catch (e) {
+      if (typeof toast === 'function') toast('Sync failed — check connection', '⚠');
+    } finally {
+      syncing = false;
+      sync.classList.remove('spinning');
+    }
+  });
+  if (topbarRight) topbarRight.insertBefore(sync, topbarRight.firstChild);
+})();
+</script>
 </body>
 </html>

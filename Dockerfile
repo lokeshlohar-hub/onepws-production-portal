@@ -25,6 +25,8 @@ RUN python3 -m venv /opt/extractor-venv \
 COPY backend ./backend
 COPY extractor ./extractor
 COPY index.html dialog-helpers.js csv-import.js ./
+# Tablet shell self-update feed: /tablet/latest.json + the APK itself.
+COPY tablet ./tablet
 
 # Cloud Run sends traffic to $PORT (default 8080). The extractor stays
 # localhost-only inside the container, exactly like on sys160.

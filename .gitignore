@@ -54,3 +54,14 @@ extractor/__pycache__/
 
 # Update-server runtime
 update-server/node_modules/
+# Tablet app (Capacitor) — secrets and build output stay local
+*.keystore
+keystore.properties
+local.properties
+tablet-app/android/.gradle/
+tablet-app/android/app/build/
+tablet-app/android/build/
+tablet-app/*.apk
+tablet-app/node_modules/
+electron/node_modules/
+electron/dist/

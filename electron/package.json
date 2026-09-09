@@ -1,0 +1,63 @@
+{
+  "name": "onepws-portal",
+  "version": "1.0.3",
+  "description": "ONEPWS Production Portal desktop wrapper",
+  "main": "src/main.js",
+  "author": "ONEPWS",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder",
+    "publish": "electron-builder --publish always"
+  },
+  "dependencies": {
+    "electron-log": "^5.0.0",
+    "electron-updater": "^6.8.9"
+  },
+  "devDependencies": {
+    "electron": "^43.3.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.onepws.portal",
+    "productName": "ONEPWS Production Portal",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "package.json",
+      "!**/*.md"
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowElevation": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "ONEPWS Portal",
+      "uninstallDisplayName": "ONEPWS Production Portal",
+      "artifactName": "ONEPWS-Portal-Setup-${version}.${ext}",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico"
+    },
+    "publish": {
+      "provider": "generic",
+      "url": "http://192.168.100.160:8080/",
+      "channel": "latest",
+      "useMultipleRangeRequest": false
+    }
+  }
+}

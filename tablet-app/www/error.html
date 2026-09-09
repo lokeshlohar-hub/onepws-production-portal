@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ONEPWS Portal — Offline</title>
+<style>
+  body { margin:0; font-family:system-ui,sans-serif; background:#0b1c33; color:#fff;
+         display:flex; align-items:center; justify-content:center; height:100vh; }
+  .box { text-align:center; max-width:420px; padding:24px; }
+  h2 { margin:0 0 8px; }
+  p { color:#9fb3d1; line-height:1.5; }
+  button { margin-top:16px; padding:12px 28px; font-size:16px; border:0; border-radius:8px;
+           background:#2563eb; color:#fff; }
+  button:active { background:#1d4ed8; }
+</style>
+</head>
+<body>
+  <div class="box">
+    <h2>Cannot reach the portal</h2>
+    <p>The tablet is offline or the server is unreachable.
+       Check the Wi-Fi connection, then retry.</p>
+    <button onclick="location.href='https://onepws-portal-409434899744.asia-south1.run.app'">Retry now</button>
+  </div>
+  <script>
+    setTimeout(function () {
+      location.href = 'https://onepws-portal-409434899744.asia-south1.run.app';
+    }, 15000);
+  </script>
+</body>
+</html>

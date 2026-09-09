@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">ONEPWS Portal</string>
+    <string name="title_activity_main">ONEPWS Portal</string>
+    <string name="package_name">com.onepws.portal</string>
+    <string name="custom_url_scheme">com.onepws.portal</string>
+</resources>

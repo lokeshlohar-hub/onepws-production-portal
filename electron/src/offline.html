@@ -1,0 +1,57 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>ONEPWS Portal - Reconnecting</title>
+<style>
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: #1e293b; color: #e2e8f0;
+    display: flex; align-items: center; justify-content: center;
+    height: 100vh; margin: 0;
+  }
+  .card {
+    background: #0f172a; padding: 40px 60px; border-radius: 12px;
+    text-align: center; max-width: 480px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+  }
+  h1 { margin: 0 0 12px; font-size: 24px; }
+  p { margin: 8px 0; color: #94a3b8; }
+  .spinner {
+    width: 32px; height: 32px;
+    border: 3px solid #334155; border-top-color: #38bdf8;
+    border-radius: 50%; margin: 20px auto;
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  button {
+    margin-top: 16px; padding: 10px 24px;
+    background: #38bdf8; color: #0f172a;
+    border: none; border-radius: 6px;
+    font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+  button:hover { background: #7dd3fc; }
+  code { color: #38bdf8; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Reconnecting to portal...</h1>
+  <div class="spinner"></div>
+  <p>Cannot reach <code>https://onepws-portal-409434899744.asia-south1.run.app</code></p>
+  <p>Retrying in <span id="countdown">10</span> seconds.</p>
+  <button onclick="location.href='https://onepws-portal-409434899744.asia-south1.run.app'">Retry now</button>
+</div>
+<script>
+  let t = 10;
+  const cd = document.getElementById('countdown');
+  const tick = setInterval(() => {
+    t -= 1; cd.textContent = t;
+    if (t <= 0) {
+      clearInterval(tick);
+      location.href = 'https://onepws-portal-409434899744.asia-south1.run.app';
+    }
+  }, 1000);
+</script>
+</body>
+</html>

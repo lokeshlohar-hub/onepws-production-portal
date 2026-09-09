@@ -1,0 +1,13 @@
+{
+  "appId": "com.onepws.portal",
+  "appName": "ONEPWS Portal",
+  "webDir": "www",
+  "server": {
+    "url": "https://onepws-portal-409434899744.asia-south1.run.app",
+    "errorPath": "error.html"
+  },
+  "android": {
+    "allowMixedContent": false,
+    "backgroundColor": "#0b1c33"
+  }
+}

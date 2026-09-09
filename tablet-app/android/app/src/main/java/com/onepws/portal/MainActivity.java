@@ -28,7 +28,7 @@ public class MainActivity extends BridgeActivity {
 
     // Must match server.url in capacitor.config.json. The backend serves
     // /tablet/latest.json and the APK from its static root.
-    private static final String PORTAL_URL = "https://onepws-portal-409434899744.asia-south1.run.app";
+    private static final String PORTAL_URL = "https://onepws-portal-207920932496.asia-south1.run.app";
     private static final String UPDATE_APK_NAME = "onepws-portal-update.apk";
 
     private static boolean updateCheckDone = false;

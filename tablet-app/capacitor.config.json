@@ -3,7 +3,7 @@
   "appName": "ONEPWS Portal",
   "webDir": "www",
   "server": {
-    "url": "https://onepws-portal-409434899744.asia-south1.run.app",
+    "url": "https://onepws-portal-207920932496.asia-south1.run.app",
     "errorPath": "error.html"
   },
   "android": {

@@ -5,7 +5,7 @@ const { autoUpdater } = require('electron-updater');
 const log = require('electron-log');
 const path = require('path');
 
-const PORTAL_URL = 'https://onepws-portal-409434899744.asia-south1.run.app';
+const PORTAL_URL = 'https://onepws-portal-207920932496.asia-south1.run.app';
 const UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
 
 log.transports.file.level = 'info';

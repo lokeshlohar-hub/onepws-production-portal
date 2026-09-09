@@ -8,7 +8,7 @@ from sys160. After completing this checklist, no PC holds anything exclusive.
 | Piece | Location |
 |---|---|
 | Production database | Supabase project `onepws-dispatch` (ap-south-1), schema `portal`, role `portal_app` |
-| Backend + frontend | Cloud Run service `onepws-portal`, GCP project `rivet-onepws`, region `asia-south1` — URL: https://onepws-portal-409434899744.asia-south1.run.app |
+| Backend + frontend | Cloud Run service `onepws-portal`, GCP project `studio-9093266581-e412a`, region `asia-south1` — URL: https://onepws-portal-207920932496.asia-south1.run.app |
 | This repo | github.com/lokeshlohar-hub/onepws-production-portal — includes `tablet-app/` (Capacitor Android shell) and `electron/` (desktop wrapper) |
 | Tablet update feed | `tablet/latest.json` + APK, served by the backend itself |
 | Desktop update feed | still `C:\onepws\updates\` on sys160 (port 8080) — only used if the Electron shell changes again |
@@ -23,7 +23,7 @@ winget install --id EclipseAdoptium.Temurin.21.JDK --silent --accept-package-agr
 ```
 
 Then `gcloud auth login` **with lokesh.lohar@onepws.com** (access granted via IAM —
-no shared passwords) and `gcloud config set project rivet-onepws`.
+no shared passwords) and `gcloud config set project studio-9093266581-e412a`.
 
 For APK builds, install Android command-line tools:
 download https://dl.google.com/android/repository/commandlinetools-win-13114758_latest.zip,
@@ -53,7 +53,7 @@ credentials are already stored on the Cloud Run service as env vars, and every
 new revision inherits them — so a routine code deploy needs NO credentials:
 
 ```powershell
-gcloud run deploy onepws-portal --source . --project rivet-onepws --region asia-south1 --quiet
+gcloud run deploy onepws-portal --source . --project studio-9093266581-e412a --region asia-south1 --quiet
 ```
 
 Desktops and tablets pick the change up on next load — no installer, no APK.
@@ -72,7 +72,7 @@ NODE_ENV: "production"
 ```
 
 ```powershell
-gcloud run deploy onepws-portal --source . --project rivet-onepws --region asia-south1 --allow-unauthenticated --memory 512Mi --cpu 1 --max-instances 1 --min-instances 0 --cpu-boost --env-vars-file portal-env.yaml --quiet
+gcloud run deploy onepws-portal --source . --project studio-9093266581-e412a --region asia-south1 --allow-unauthenticated --memory 512Mi --cpu 1 --max-instances 1 --min-instances 0 --cpu-boost --env-vars-file portal-env.yaml --quiet
 ```
 
 ## Releasing a tablet APK update (rare — only when the shell itself changes)

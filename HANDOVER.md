@@ -46,10 +46,23 @@ extract to `%LOCALAPPDATA%\Android\Sdk\cmdline-tools\latest\`, then:
 3. The Supabase `postgres` admin password (dashboard + schema-admin work only;
    day-to-day dev never needs it).
 
-## Deploying backend/frontend changes
+## Deploying backend/frontend changes (the routine command)
 
-Frontend (`index.html`) and backend both ship in one deploy. Create
-`portal-env.yaml` once (values from `backend/.env`):
+Frontend (`index.html`) and backend both ship in one deploy. The database
+credentials are already stored on the Cloud Run service as env vars, and every
+new revision inherits them — so a routine code deploy needs NO credentials:
+
+```powershell
+gcloud run deploy onepws-portal --source . --project rivet-onepws --region asia-south1 --quiet
+```
+
+Desktops and tablets pick the change up on next load — no installer, no APK.
+Resource settings (512Mi / min-instances 0 / max-instances 1) also carry over
+between deploys; they're what keep the bill ≈ ₹0 — don't raise them casually.
+
+### Only when changing credentials or recreating the service from scratch
+
+Create `portal-env.yaml` (values from `backend/.env` — delete the file after):
 
 ```yaml
 DATABASE_URL: "<the DATABASE_URL from backend/.env>"
@@ -58,14 +71,9 @@ JWT_SECRET: "<the JWT_SECRET from backend/.env>"
 NODE_ENV: "production"
 ```
 
-Then from the repo root:
-
 ```powershell
 gcloud run deploy onepws-portal --source . --project rivet-onepws --region asia-south1 --allow-unauthenticated --memory 512Mi --cpu 1 --max-instances 1 --min-instances 0 --cpu-boost --env-vars-file portal-env.yaml --quiet
 ```
-
-Desktops and tablets pick the change up on next load — no installer, no APK.
-Keep `--min-instances 0 --max-instances 1` (that's what keeps the bill ≈ ₹0).
 
 ## Releasing a tablet APK update (rare — only when the shell itself changes)
 

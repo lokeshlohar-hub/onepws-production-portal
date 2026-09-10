@@ -460,7 +460,7 @@ async function processQcDecision(lineId, { stageName, approveQty, rejectQty, dis
 
 // Operator submits a completed quantity at a stage — moves it from "pending"
 // into "awaiting QC" (qc_queue). Mirrors the frontend's submitStageEntry().
-async function submitStageEntry(lineId, { stageName, qty, operator, shift, remark, assBatchNos, adhesiveBatchNo, adhesiveExpiryDate, chosenWsId, wsLabel, roomTemperature, materialFinish }) {
+async function submitStageEntry(lineId, { stageName, qty, operator, shift, remark, assBatchNos, adhesiveBatchNo, adhesiveExpiryDate, chosenWsId, wsLabel, roomTemperature, materialFinish, date }) {
   console.log('[submitStageEntry] v2-healing lineId=' + lineId + ' stage="' + stageName + '" qty=' + qty);
   const client = await pool.connect();
   try {
@@ -480,13 +480,19 @@ async function submitStageEntry(lineId, { stageName, qty, operator, shift, remar
 
     sd.completed += qty;
     sd.qc_queue += qty;
-    // Offered Date tracking (additive, append-only). Records the exact moment
-    // completed material was offered to QC at this stage. Never mutated or
-    // removed; a re-offer after rejection/rework appends a NEW entry so the
-    // original offer history is preserved. Read only by the QC queue display —
-    // no approval / rejection / rework / routing logic consumes this.
+    // Offered Date tracking (additive, append-only). Records when completed
+    // material was offered to QC at this stage. Uses the production date the
+    // user picked in the entry form (so back-dated entries show the real
+    // offer date); falls back to today only if no valid date was sent.
+    // Never mutated or removed; a re-offer after rejection/rework appends a
+    // NEW entry so the original offer history is preserved. Read only by the
+    // QC queue display — no approval / rejection / rework / routing logic
+    // consumes this.
     if (!Array.isArray(sd.offered_log)) sd.offered_log = [];
-    sd.offered_log.push({ ts: new Date().toISOString(), qty });
+    const offeredTs = (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}/.test(date))
+      ? date.slice(0, 10)
+      : new Date().toISOString().slice(0, 10);
+    sd.offered_log.push({ ts: offeredTs, qty });
     const historyEntry = {
       ts: new Date().toISOString(),
       ws: stageName,

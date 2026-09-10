@@ -12015,7 +12015,7 @@ async function submitStageEntry(btn){
   const originalBtnText = btn ? btn.textContent : '';
   if(btn){ btn.disabled=true; btn.textContent='Saving to server…'; }
   try{
-    await apiSubmitStageEntry(b.lineId, { stage:st, qty, operator, shift, remark, assBatchNos, adhesiveBatchNo, adhesiveExpiryDate, roomTemperature, materialFinish, chosenWsId, wsLabel });
+    await apiSubmitStageEntry(b.lineId, { stage:st, qty, operator, shift, remark, date, assBatchNos, adhesiveBatchNo, adhesiveExpiryDate, roomTemperature, materialFinish, chosenWsId, wsLabel });
   } catch(err){
     toast('Could not save this entry to the server: '+err.message,'⚠');
     if(btn){ btn.disabled=false; btn.textContent=originalBtnText||'✓ Submit to QC Queue'; }
@@ -12035,10 +12035,12 @@ async function submitStageEntry(btn){
   sd.completed += qty;
   sd.qcQueue += qty;
   // Offered Date tracking — mirrors productionEngine.submitStageEntry so the
-  // local copy matches the server's stage_data after refresh. Append-only:
-  // a re-offer after rejection/rework adds a new entry, never overwrites.
+  // local copy matches the server's stage_data after refresh. Uses the
+  // production date picked in the form (back-dated entries show the real
+  // offer date). Append-only: a re-offer after rejection/rework adds a new
+  // entry, never overwrites.
   if(!Array.isArray(sd.offeredLog)) sd.offeredLog = [];
-  sd.offeredLog.push({ ts: new Date().toISOString(), qty });
+  sd.offeredLog.push({ ts: (/^\d{4}-\d{2}-\d{2}/.test(date||'') ? date.slice(0,10) : new Date().toISOString().slice(0,10)), qty });
   const historyEntry = {
     ts, date, ws:wsLabel, wsId:chosenWsId||undefined, operator, qty, shift, shiftLabel,
     action:'Completed '+qty+' '+unit+' ['+shiftLabel+'] → sent to QC'+(remark?' | '+remark:'')
@@ -12394,7 +12396,7 @@ async function submitBulkStageUpdate(){
       continue;
     }
     try{
-      const payload = { stage: st, qty, operator, shift, remark };
+      const payload = { stage: st, qty, operator, shift, remark, date };
       if(assBatchNos.length) payload.assBatchNos = assBatchNos;
       if(adhesiveBatchNo) payload.adhesiveBatchNo = adhesiveBatchNo;
       if(adhesiveExpiryDate) payload.adhesiveExpiryDate = adhesiveExpiryDate;
@@ -12588,22 +12590,28 @@ function qcOfferedTsForStage(sd){
   }
   return log[log.length-1] && log[log.length-1].ts;
 }
-// Display an offered timestamp as e.g. "10-Sep-2026" in IST. Always parses
-// through Date + an explicit Asia/Kolkata format so a UTC ISO string from
-// the server never shows a day behind for IST users (see CODE_PATTERNS).
+// Display an offered value as e.g. "10-Sep-2026". offeredLog.ts is normally a
+// bare YYYY-MM-DD (the production date the user picked) — formatted straight
+// from the string so there is no Date()/timezone round-trip that could shift
+// the day. Full ISO timestamps (older rows / fallback) go through an explicit
+// Asia/Kolkata format instead (see CODE_PATTERNS IST trap).
+var OFFERED_MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 function fmtOfferedDate(ts){
   if(!ts) return '—';
+  const bare = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(ts));
+  if(bare) return bare[3] + '-' + OFFERED_MON[(+bare[2]) - 1] + '-' + bare[1];
   const d = new Date(ts);
   if(isNaN(d.getTime())) return '—';
   const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric'
+    timeZone: 'Asia/Kolkata', day: '2-digit', month: '2-digit', year: 'numeric'
   }).formatToParts(d);
   const g = t => (parts.find(x => x.type === t) || {}).value || '';
-  return g('day') + '-' + g('month') + '-' + g('year');
+  return g('day') + '-' + OFFERED_MON[(+g('month')) - 1] + '-' + g('year');
 }
 function fmtOfferedDateTimeTitle(ts){
   const strip = s => String(s).replace(/["<>]/g, '');   // attribute-safe; no global escapeHtml in this scope
   if(!ts) return 'Not yet offered to QC';
+  if(/^\d{4}-\d{2}-\d{2}$/.test(String(ts))) return 'Offered to QC on ' + strip(fmtOfferedDate(ts));
   const d = new Date(ts);
   if(isNaN(d.getTime())) return strip(ts);
   return 'Offered to QC: ' + strip(new Intl.DateTimeFormat('en-GB', {

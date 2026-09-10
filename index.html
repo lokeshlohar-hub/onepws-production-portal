@@ -5489,6 +5489,7 @@ function serverBomLineToLocal(row) {
       rework: sd.rework || 0,
       scrap: sd.scrap || 0,
       history: sd.history || [],
+      offeredLog: sd.offered_log || [],
     };
   });
   return {
@@ -5675,6 +5676,7 @@ function stageDataToServerShape(stageData){
       rework: sd.rework||0,
       scrap: sd.scrap||0,
       history: sd.history||[],
+      offered_log: sd.offeredLog||[],
     };
   });
   return out;
@@ -10394,7 +10396,7 @@ function ensureBomLineStructure(b){
 
   if(!b.stageData){
     b.stageData = {};
-    b.route.forEach(st=>{ b.stageData[st] = {completed:0, qcQueue:0, qcApproved:0, qcRejected:0, rework:0, scrap:0, history:[]}; });
+    b.route.forEach(st=>{ b.stageData[st] = {completed:0, qcQueue:0, qcApproved:0, qcRejected:0, rework:0, scrap:0, history:[], offeredLog:[]}; });
     if(b.done){
       const first = b.route[0];
       if(first){
@@ -10403,8 +10405,11 @@ function ensureBomLineStructure(b){
       }
     }
   } else {
-    b.route.forEach(st=>{ if(!b.stageData[st]) b.stageData[st]={completed:0,qcQueue:0,qcApproved:0,qcRejected:0,rework:0,scrap:0,history:[]}; });
+    b.route.forEach(st=>{ if(!b.stageData[st]) b.stageData[st]={completed:0,qcQueue:0,qcApproved:0,qcRejected:0,rework:0,scrap:0,history:[],offeredLog:[]}; });
   }
+  // Backward-compat: stage entries saved before Offered Date tracking have no
+  // offeredLog — default it so the QC queue display can read it unconditionally.
+  b.route.forEach(st=>{ if(b.stageData[st] && !Array.isArray(b.stageData[st].offeredLog)) b.stageData[st].offeredLog = []; });
   return b;
 }
 
@@ -12029,6 +12034,11 @@ async function submitStageEntry(btn){
   // Record completion and push to QC queue
   sd.completed += qty;
   sd.qcQueue += qty;
+  // Offered Date tracking — mirrors productionEngine.submitStageEntry so the
+  // local copy matches the server's stage_data after refresh. Append-only:
+  // a re-offer after rejection/rework adds a new entry, never overwrites.
+  if(!Array.isArray(sd.offeredLog)) sd.offeredLog = [];
+  sd.offeredLog.push({ ts: new Date().toISOString(), qty });
   const historyEntry = {
     ts, date, ws:wsLabel, wsId:chosenWsId||undefined, operator, qty, shift, shiftLabel,
     action:'Completed '+qty+' '+unit+' ['+shiftLabel+'] → sent to QC'+(remark?' | '+remark:'')
@@ -12560,6 +12570,47 @@ function backToQcProjectList(){
   renderQcQueue();
 }
 
+// "Offered Date" for a stage = when the material currently waiting in that
+// stage's QC queue was submitted from production. sd.offeredLog is an
+// append-only list of {ts, qty} entries (one per stage submission); a
+// re-offer after rework/rejection appends a new entry and never rewrites an
+// earlier one. We surface the OLDEST entry that still has un-inspected
+// quantity — i.e. "awaiting QC since" — so Offered → Inspected can be compared.
+function qcOfferedTsForStage(sd){
+  if(!sd) return null;
+  const log = Array.isArray(sd.offeredLog) ? sd.offeredLog : [];
+  if(!log.length) return null;
+  const inspected = (sd.qcApproved||0) + (sd.qcRejected||0);
+  let cum = 0;
+  for(const e of log){
+    cum += (e && e.qty) || 0;
+    if(cum > inspected) return e && e.ts;
+  }
+  return log[log.length-1] && log[log.length-1].ts;
+}
+// Display an offered timestamp as e.g. "10-Sep-2026" in IST. Always parses
+// through Date + an explicit Asia/Kolkata format so a UTC ISO string from
+// the server never shows a day behind for IST users (see CODE_PATTERNS).
+function fmtOfferedDate(ts){
+  if(!ts) return '—';
+  const d = new Date(ts);
+  if(isNaN(d.getTime())) return '—';
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric'
+  }).formatToParts(d);
+  const g = t => (parts.find(x => x.type === t) || {}).value || '';
+  return g('day') + '-' + g('month') + '-' + g('year');
+}
+function fmtOfferedDateTimeTitle(ts){
+  if(!ts) return 'Not yet offered to QC';
+  const d = new Date(ts);
+  if(isNaN(d.getTime())) return String(ts);
+  return 'Offered to QC: ' + new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', hour12: true
+  }).format(d) + ' IST';
+}
+
 function renderQcProjectInspection(projId){
   const p = DB.projects.find(x => x.id === projId);
   const projView = document.getElementById('qcQueueProjectsView');
@@ -12586,6 +12637,7 @@ function renderQcProjectInspection(projId){
           length: b.l, width: b.w, thickness: b.t, uom: b.uom||'pcs',
           totalQty: b.qty, approvedToDate: sd.qcApproved || 0,
           pending: sd.qcQueue, stage: st,
+          offeredTs: qcOfferedTsForStage(sd),   // when this queued material was sent to QC
           approveQty: sd.qcQueue,               // default = whatever's currently pending
           selected: false,
         });
@@ -12612,10 +12664,11 @@ function renderQcProjectInspection(projId){
       +'<td class="text-center font-mono text-success">'+r.approvedToDate+'</td>'
       +'<td class="text-center font-mono fw-600">'+r.pending+' <span class="text-xs text-muted">'+r.uom+'</span></td>'
       +'<td class="text-xs">'+r.stage+'</td>'
+      +'<td class="text-xs" title="'+escapeHtml(fmtOfferedDateTimeTitle(r.offeredTs))+'">'+fmtOfferedDate(r.offeredTs)+'</td>'
       +'<td><input type="number" class="form-input qc-insp-qty-input" data-idx="'+i+'" style="height:28px;text-align:center" min="0" max="'+r.pending+'" value="'+r.approveQty+'" onchange="onQcInspQtyChange('+i+',this.value)"></td>'
       +'<td class="text-center"><button class="btn btn-outline btn-sm" style="height:26px;font-size:11px;padding:2px 8px" onclick="openQcInspect(\''+p.id+'\',\''+r.lineId+'\',\''+r.stage.replace(/'/g,"\\'")+'\')" title="Open single-line inspection to reject with disposition + category + photo">⛔ Reject…</button></td>'
       +'</tr>';
-  }).join('') : '<tr><td colspan="10" class="text-sm text-muted" style="padding:14px;text-align:center">No pending '+(seg==='wood'?'Wood':'Aluminum')+' lines for this project.</td></tr>';
+  }).join('') : '<tr><td colspan="11" class="text-sm text-muted" style="padding:14px;text-align:center">No pending '+(seg==='wood'?'Wood':'Aluminum')+' lines for this project.</td></tr>';
   inspView.innerHTML =
     // Breadcrumb / back
     '<div style="padding:12px 14px 6px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
@@ -12667,6 +12720,7 @@ function renderQcProjectInspection(projId){
         +'<th style="width:110px;text-align:center">Approved to Date</th>'
         +'<th style="width:110px;text-align:center">Balance in Queue</th>'
         +'<th style="width:110px">Current Stage</th>'
+        +'<th style="width:120px">Offered Date</th>'
         +'<th style="width:120px;text-align:center">Approval Qty</th>'
         +'<th style="width:120px;text-align:center">Reject</th>'
       +'</tr></thead>'

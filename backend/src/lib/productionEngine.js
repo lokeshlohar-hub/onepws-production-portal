@@ -97,7 +97,7 @@ async function ensureLineHasStage(client, line, stageName) {
   line.route.splice(insertAt, 0, canonicalStageName);
   line.stage_data[canonicalStageName] = {
     completed: 0, qc_queue: 0, qc_approved: 0, qc_rejected: 0,
-    rework: 0, scrap: 0, history: []
+    rework: 0, scrap: 0, history: [], offered_log: []
   };
   await client.query(
     'UPDATE bom_lines SET route = $1, stage_data = $2 WHERE line_id = $3',
@@ -162,7 +162,7 @@ function isComponentComplete(line) {
 }
 
 function emptyStageData() {
-  return { completed: 0, qc_queue: 0, qc_approved: 0, qc_rejected: 0, rework: 0, scrap: 0, history: [] };
+  return { completed: 0, qc_queue: 0, qc_approved: 0, qc_rejected: 0, rework: 0, scrap: 0, history: [], offered_log: [] };
 }
 
 // mirrors ensureBomLineStructure() defaults — used whenever a line comes back
@@ -172,6 +172,11 @@ function withDefaults(line) {
   line.stage_data = line.stage_data || {};
   (line.route || []).forEach((st) => {
     if (!line.stage_data[st]) line.stage_data[st] = emptyStageData();
+  });
+  // Backward-compat: rows written before Offered Date tracking existed have
+  // stage entries with no offered_log — default it so reads/writes are safe.
+  Object.keys(line.stage_data).forEach((st) => {
+    if (!Array.isArray(line.stage_data[st].offered_log)) line.stage_data[st].offered_log = [];
   });
   if (line.original_qty == null) line.original_qty = line.qty;
   if (line.components_released == null) line.components_released = 0;
@@ -475,6 +480,13 @@ async function submitStageEntry(lineId, { stageName, qty, operator, shift, remar
 
     sd.completed += qty;
     sd.qc_queue += qty;
+    // Offered Date tracking (additive, append-only). Records the exact moment
+    // completed material was offered to QC at this stage. Never mutated or
+    // removed; a re-offer after rejection/rework appends a NEW entry so the
+    // original offer history is preserved. Read only by the QC queue display —
+    // no approval / rejection / rework / routing logic consumes this.
+    if (!Array.isArray(sd.offered_log)) sd.offered_log = [];
+    sd.offered_log.push({ ts: new Date().toISOString(), qty });
     const historyEntry = {
       ts: new Date().toISOString(),
       ws: stageName,

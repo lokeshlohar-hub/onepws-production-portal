@@ -12602,13 +12602,14 @@ function fmtOfferedDate(ts){
   return g('day') + '-' + g('month') + '-' + g('year');
 }
 function fmtOfferedDateTimeTitle(ts){
+  const strip = s => String(s).replace(/["<>]/g, '');   // attribute-safe; no global escapeHtml in this scope
   if(!ts) return 'Not yet offered to QC';
   const d = new Date(ts);
-  if(isNaN(d.getTime())) return String(ts);
-  return 'Offered to QC: ' + new Intl.DateTimeFormat('en-GB', {
+  if(isNaN(d.getTime())) return strip(ts);
+  return 'Offered to QC: ' + strip(new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric',
     hour: '2-digit', minute: '2-digit', hour12: true
-  }).format(d) + ' IST';
+  }).format(d)) + ' IST';
 }
 
 function renderQcProjectInspection(projId){
@@ -12664,7 +12665,7 @@ function renderQcProjectInspection(projId){
       +'<td class="text-center font-mono text-success">'+r.approvedToDate+'</td>'
       +'<td class="text-center font-mono fw-600">'+r.pending+' <span class="text-xs text-muted">'+r.uom+'</span></td>'
       +'<td class="text-xs">'+r.stage+'</td>'
-      +'<td class="text-xs" title="'+escapeHtml(fmtOfferedDateTimeTitle(r.offeredTs))+'">'+fmtOfferedDate(r.offeredTs)+'</td>'
+      +'<td class="text-xs" title="'+fmtOfferedDateTimeTitle(r.offeredTs)+'">'+fmtOfferedDate(r.offeredTs)+'</td>'
       +'<td><input type="number" class="form-input qc-insp-qty-input" data-idx="'+i+'" style="height:28px;text-align:center" min="0" max="'+r.pending+'" value="'+r.approveQty+'" onchange="onQcInspQtyChange('+i+',this.value)"></td>'
       +'<td class="text-center"><button class="btn btn-outline btn-sm" style="height:26px;font-size:11px;padding:2px 8px" onclick="openQcInspect(\''+p.id+'\',\''+r.lineId+'\',\''+r.stage.replace(/'/g,"\\'")+'\')" title="Open single-line inspection to reject with disposition + category + photo">⛔ Reject…</button></td>'
       +'</tr>';

@@ -4098,7 +4098,7 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
     <div class="modal-header">
       <div>
         <div class="modal-title">📧 Final-Stage Handover Notification</div>
-        <div class="text-xs text-muted" style="margin-top:2px">Review the details, pick recipients, edit the message if needed, then send — opens your default email client with the message ready to review and send.</div>
+        <div class="text-xs text-muted" style="margin-top:2px">Review the details, pick recipients, edit the message if needed, then send — opens your default email client plus a formatted PDF of this notification in a new tab. Save the PDF and attach it to the email before sending.</div>
       </div>
       <button class="modal-close" onclick="dispatchHandoverModalClose()">×</button>
     </div>
@@ -11036,6 +11036,14 @@ async function openBulkHandoverNotifyModal(p, lines){
   const segmentDisplay = segList.length===1 ? (segList[0]==='ext'?'Aluminium Extrusion':'Wood Production') : 'Multiple Segments';
   const finalStageDisplay = stageList.length===1 ? stageList[0] : 'Multiple Stages';
 
+  // Carried on the context so sendBulkHandoverNotification() can regenerate
+  // the printable PDF at send-time without rebuilding this data from scratch.
+  window._handoverBulkContext.pdfData = {
+    sap: p.sap, customer: p.customer, type: p.type,
+    segmentDisplay, finalStageDisplay,
+    components,
+  };
+
   const tdBase = 'padding:6px 10px;border-right:1px solid var(--border);border-bottom:1px solid var(--border);vertical-align:top';
   const tdLast = 'padding:6px 10px;border-bottom:1px solid var(--border);vertical-align:top';
   const thBase = 'text-align:left;padding:7px 10px;background:var(--surface2);border-right:1px solid var(--border);border-bottom:1px solid var(--border);font-weight:600;font-size:12px';
@@ -11144,6 +11152,7 @@ async function openBulkHandoverNotifyModal(p, lines){
       'Dear Team,\n\n'
     + 'The following material has successfully completed all required production stages and has been approved by Quality Control.\n\n'
     + 'Kindly arrange to receive and hand over the material as per the details provided below.\n\n'
+    + 'Please see the attached PDF for a fully formatted copy of this notification.\n\n'
     + 'PROJECT INFORMATION\n'
     + '  Project No     : '+(p.sap||'-')+'\n'
     + '  Customer       : '+(p.customer||'-')+'\n\n'
@@ -11185,6 +11194,7 @@ async function sendBulkHandoverNotification(){
     + (ccClean.length ? '&cc='+encodeURIComponent(ccClean.join(',')) : '')
     + '&body='+encodeURIComponent(body);
   window.location.href = mailto;
+  openHandoverPdfWindow(ctx.pdfData);
 
   const primaryTo = toAddrs[0];
   const additionalTo = toAddrs.slice(1);
@@ -11222,7 +11232,7 @@ async function sendBulkHandoverNotification(){
   DB.auditLog.unshift({ts:ts, user:CURRENT_USER?CURRENT_USER.fullName:'Admin', action:'Handover Notification', module:'Stage-wise Production',
     entity: ctx.lines.length+' components', field:ctx.proj, old:'--', nw:'Notified '+displayLabel+' - '+ctx.lines.length+' component(s)', ip:'192.168.1.1'});
 
-  toast('Handover notification opened for '+displayLabel+' ('+ctx.lines.length+' components) and recorded.','OK');
+  toast('Mail draft + handover PDF opened for '+displayLabel+' ('+ctx.lines.length+' components) — attach the saved PDF before sending.','OK');
   closeMod('handoverNotifyModal');
   window._handoverBulkContext = null;
   _handoverSelState.selectedLineIds.clear();
@@ -11292,6 +11302,14 @@ async function openHandoverNotifyModal(autoOpened){
     pendingQty: Math.max(0, (b.qty||0) - (sd.qcApproved||0)),
     status: (sd.qcApproved >= b.qty) ? 'Complete' : 'Ready',
   }];
+
+  // Carried on the context so sendHandoverNotification() can regenerate the
+  // printable PDF at send-time without rebuilding this data from scratch.
+  window._handoverContext.pdfData = {
+    sap: p.sap, customer: p.customer, type: p.type,
+    segmentDisplay: segment, finalStageDisplay: finalStage,
+    components,
+  };
 
   // Portal preview — two bordered tables that mirror the target layout:
   // (1) a 4-column key/value table pairing Project Information with
@@ -11441,6 +11459,7 @@ async function openHandoverNotifyModal(autoOpened){
       'Dear Team,\n\n'
     + 'The following material has successfully completed all required production stages and has been approved by Quality Control.\n\n'
     + 'Kindly arrange to receive and hand over the material as per the details provided below.\n\n'
+    + 'Please see the attached PDF for a fully formatted copy of this notification.\n\n'
     + 'PROJECT INFORMATION\n'
     + '  Project No     : '+(p.sap||asciiDash)+'\n'
     + '  Customer       : '+(p.customer||asciiDash)+'\n'
@@ -11552,6 +11571,69 @@ function updateHandoverBodyCounter(){
   }
 }
 
+// mailto: can carry neither HTML tables nor attachments (RFC 6068 — the body
+// is plain text only, and there's no attachment parameter any mail client
+// honors), so a formatted version of the notification can't travel inside
+// the email itself. This generates that formatted version as a standalone
+// printable HTML document — the same Project/Production Information +
+// Components Ready for Handover tables as the in-app preview — opened in a
+// new tab so the sender can Print -> Save as PDF and manually attach it to
+// the mailto: draft that opens alongside it.
+function buildHandoverPdfHtml(pdfData){
+  const dash = v => (v===undefined || v===null || v==='') ? '&mdash;' : v;
+  const infoRows = [
+    ['Project No', dash(pdfData.sap), 'Manufacturing Segment', dash(pdfData.segmentDisplay)],
+    ['Customer', dash(pdfData.customer), 'Product Type', dash(pdfData.type)],
+    ['Final Stage', dash(pdfData.finalStageDisplay), 'QC Status', 'Approved'],
+  ].map(r =>
+    '<tr><td class="lbl">'+r[0]+'</td><td class="val">'+r[1]+'</td><td class="lbl">'+r[2]+'</td><td class="val">'+r[3]+'</td></tr>'
+  ).join('');
+  const compRows = pdfData.components.map(c =>
+    '<tr>'
+      +'<td style="text-align:center">'+c.sr+'</td>'
+      +'<td><b>'+c.item+'</b>'+(c.description?'<div style="font-size:8.5px;color:#555">'+c.description+'</div>':'')+'</td>'
+      +'<td>'+dash(c.colorFinish)+(c.materialFinish?'<div style="font-size:8.5px;color:#065f46">Applied: '+c.materialFinish+'</div>':'')+'</td>'
+      +'<td>'+dash(c.size)+'</td>'
+      +'<td style="text-align:right">'+c.totalQty+'</td>'
+      +'<td style="text-align:right">'+c.handoverQty+'</td>'
+      +'<td style="text-align:right">'+c.pendingQty+'</td>'
+      +'<td style="font-weight:700;color:'+(c.status==='Complete'?'#2b8a3e':'#1971c2')+'">'+c.status+'</td>'
+    +'</tr>'
+  ).join('');
+
+  return '<!DOCTYPE html><html><head><title>Handover Notification - '+(pdfData.sap||'')+'</title>'
+    +'<style>@page{size:A4;margin:12mm}body{font-family:Arial,sans-serif;font-size:11px;color:#111}'
+    +'h1{font-size:16px;margin:0 0 2px 0}.sub{font-size:10.5px;color:#555;margin:0 0 14px 0}'
+    +'table{width:100%;border-collapse:collapse;margin-bottom:16px}'
+    +'th,td{border:1px solid #333;padding:6px 8px;text-align:left;vertical-align:top}'
+    +'th{background:#f0f0f0;font-size:10px}'
+    +'.lbl{background:#fafafa;color:#555;width:20%}.val{font-weight:700;width:30%}'
+    +'.print-btn{position:fixed;top:10px;right:10px;padding:8px 14px;background:#1a56db;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px}'
+    +'@media print{.print-btn{display:none}}</style></head><body>'
+    +'<button class="print-btn" onclick="window.print()">&#128424; Print / Save as PDF</button>'
+    +'<h1>ONEPWS Production Control Portal</h1>'
+    +'<div class="sub">Final-Stage Handover Notification</div>'
+    +'<table><thead><tr><th style="width:20%">Project Information</th><th style="width:30%">Value</th><th style="width:20%">Production Information</th><th style="width:30%">Value</th></tr></thead><tbody>'+infoRows+'</tbody></table>'
+    +'<div style="font-weight:700;margin-bottom:6px">Components Ready for Handover</div>'
+    +'<table><thead><tr><th style="width:6%">Sr.</th><th>Component</th><th>Color / Finish</th><th>Size / Dimensions</th><th style="width:9%">Total Qty</th><th style="width:10%">Handover Qty</th><th style="width:9%">Pending Qty</th><th style="width:10%">Status</th></tr></thead>'
+    +'<tbody>'+compRows+'</tbody></table>'
+    +'<div style="margin-top:10px;font-size:9px;color:#888">Generated: '+new Date().toLocaleString()+' &middot; ONEPWS Production Control Portal</div>'
+    +'</body></html>';
+}
+
+// Opens the generated handover PDF in a new tab for the sender to
+// Print -> Save as PDF and attach to the mailto: draft manually — mailto:
+// has no attachment parameter, so this is the closest an unmodified
+// mailto:-based flow can get to "send a formatted document".
+function openHandoverPdfWindow(pdfData){
+  if(!pdfData || !pdfData.components || !pdfData.components.length) return;
+  const w = window.open('','_blank');
+  if(!w){ toast('Pop-up blocked — allow pop-ups to generate the handover PDF.','⚠'); return; }
+  w.document.write(buildHandoverPdfHtml(pdfData));
+  w.document.close();
+  setTimeout(()=>{ w.focus(); w.print(); }, 400);
+}
+
 // Opens the user's own mail client with the handover message pre-filled
 // (this app has no outbound email service configured, so a human reviews
 // and sends via their own client) and records the event to the audit trail
@@ -11589,6 +11671,7 @@ async function sendHandoverNotification(){
     + (ccClean.length ? '&cc='+encodeURIComponent(ccClean.join(',')) : '')
     + '&body='+encodeURIComponent(body);
   window.location.href = mailto;
+  openHandoverPdfWindow(ctx.pdfData);
 
   // Audit trail schema stores a single primary To (email column) plus an
   // array (cc_emails). Multi-To sends record the first To as primary and
@@ -11634,7 +11717,7 @@ async function sendHandoverNotification(){
   DB.auditLog.unshift({ts,user:CURRENT_USER?CURRENT_USER.fullName:'Admin',action:'Handover Notification',module:'Stage-wise Production',
     entity:ctx.item,field:ctx.proj,old:'--',nw:'Notified '+displayLabel+' — '+ctx.qty+' '+ctx.uom,ip:'192.168.1.1'});
 
-  toast('Handover notification opened for '+displayLabel+' and recorded.','✓');
+  toast('Mail draft + handover PDF opened for '+displayLabel+' — attach the saved PDF before sending.','✓');
   closeMod('handoverNotifyModal');
   if(typeof renderComponentHandoverHistory==='function') renderComponentHandoverHistory();
 }

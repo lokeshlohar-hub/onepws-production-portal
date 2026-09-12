@@ -138,11 +138,16 @@ async function tick(transport) {
 }
 
 async function main() {
+  // `node agent.js --check` verifies the configuration and exits, without
+  // entering the poll loop — used by setup.ps1 to confirm the password and
+  // token are right before anything is installed as a service.
+  const checkOnly = process.argv.includes('--check');
+
   requireConfig();
-  log(`ONEPWS mail relay agent starting`);
+  log(checkOnly ? 'ONEPWS mail relay agent — configuration check' : 'ONEPWS mail relay agent starting');
   log(`  portal : ${PORTAL_URL}`);
   log(`  smtp   : ${SMTP_HOST}:${SMTP_PORT} (secure=${SMTP_SECURE}) as ${SMTP_USER}`);
-  log(`  poll   : every ${POLL_SECONDS}s`);
+  if (!checkOnly) log(`  poll   : every ${POLL_SECONDS}s`);
 
   const transport = makeTransport();
 
@@ -153,6 +158,9 @@ async function main() {
     log('SMTP connection OK');
   } catch (err) {
     console.error('SMTP check FAILED:', err.message);
+    if (/535|authentication/i.test(err.message)) {
+      console.error('  -> The mailbox username or password in mail-agent\\.env is wrong.');
+    }
     process.exit(1);
   }
   try {
@@ -160,7 +168,18 @@ async function main() {
     log('portal OK, queue:', JSON.stringify(health.queue || {}));
   } catch (err) {
     console.error('Portal check FAILED:', err.message);
-    process.exit(1);
+    if (/401/.test(err.message)) {
+      console.error('  -> MAIL_AGENT_TOKEN does not match the one set on the portal.');
+    } else if (/503/.test(err.message)) {
+      console.error('  -> The portal has not enabled the relay yet. That is expected before go-live;');
+      console.error('     the SMTP side above is what matters right now.');
+    }
+    if (!checkOnly) process.exit(1);
+  }
+
+  if (checkOnly) {
+    log('configuration check passed');
+    process.exit(0);
   }
 
   const loop = async () => {

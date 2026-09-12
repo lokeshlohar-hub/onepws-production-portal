@@ -30,8 +30,21 @@ no firewall change, and nothing exposed to the internet.
 
 ## Install on sys160
 
+The repo clone on sys160 lives at
+`C:\Users\lokesh.lohar\Documents\GitHub\onepws-production-portal` — adjust the
+paths below if it ever moves.
+
+The quickest route is the setup script, which does all of this and verifies the
+password before installing anything:
+
 ```powershell
-cd C:\onepws\onepws-production-portal\mail-agent
+powershell -ExecutionPolicy Bypass -File .\mail-agent\setup.ps1 -AgentToken "<token>"
+```
+
+To do it by hand instead:
+
+```powershell
+cd C:\Users\lokesh.lohar\Documents\GitHub\onepws-production-portal\mail-agent
 npm install
 copy .env.example .env
 notepad .env
@@ -68,8 +81,8 @@ portal OK, queue: {}
 Matches the existing NSSM pattern used by `ONEPWSExtractor` and `ONEPWSUpdates`:
 
 ```powershell
-nssm install ONEPWSMailAgent "C:\Program Files\nodejs\node.exe" "C:\onepws\onepws-production-portal\mail-agent\agent.js"
-nssm set ONEPWSMailAgent AppDirectory "C:\onepws\onepws-production-portal\mail-agent"
+nssm install ONEPWSMailAgent "C:\Program Files\nodejs\node.exe" "C:\Users\lokesh.lohar\Documents\GitHub\onepws-production-portal\mail-agent\agent.js"
+nssm set ONEPWSMailAgent AppDirectory "C:\Users\lokesh.lohar\Documents\GitHub\onepws-production-portal\mail-agent"
 nssm set ONEPWSMailAgent AppStdout "C:\onepws\logs\mail-agent-stdout.log"
 nssm set ONEPWSMailAgent AppStderr "C:\onepws\logs\mail-agent-stderr.log"
 nssm set ONEPWSMailAgent Start SERVICE_AUTO_START

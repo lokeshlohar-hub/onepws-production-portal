@@ -83,9 +83,19 @@ Write-Host "[6/6] Installing the Windows service..."
 $nssm = (Get-Command nssm -ErrorAction SilentlyContinue)
 if ($nssm) { $nssmExe = $nssm.Source }
 else {
-  $candidates = @("C:\onepws\nssm\nssm.exe", "C:\nssm\nssm.exe",
-                  "C:\onepws\nssm\win64\nssm.exe", "C:\Program Files\nssm\nssm.exe")
+  $repoRoot = Split-Path -Parent $AgentDir
+  $candidates = @("C:\onepws\nssm\nssm.exe", "C:\onepws\nssm\win64\nssm.exe",
+                  "C:\nssm\nssm.exe", "C:\Program Files\nssm\nssm.exe",
+                  (Join-Path $repoRoot "nssm\nssm.exe"),
+                  (Join-Path $repoRoot "nssm\win64\nssm.exe"))
   $nssmExe = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+  # Last resort: the existing services were installed with some copy of nssm —
+  # find it rather than making the operator hunt for it.
+  if (-not $nssmExe) {
+    $found = Get-ChildItem -Path "C:\onepws" -Filter "nssm.exe" -Recurse -ErrorAction SilentlyContinue |
+             Select-Object -First 1
+    if ($found) { $nssmExe = $found.FullName }
+  }
 }
 
 if (-not $nssmExe) {
@@ -97,7 +107,9 @@ if (-not $nssmExe) {
   exit 0
 }
 
-$logDir = "C:\onepws\logs"
+# Prefer the existing ops log folder if this machine has one; otherwise keep
+# logs beside the agent rather than creating a stray C:\onepws on a dev box.
+if (Test-Path "C:\onepws") { $logDir = "C:\onepws\logs" } else { $logDir = Join-Path $AgentDir "logs" }
 if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
 
 $existing = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue

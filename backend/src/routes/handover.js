@@ -1,6 +1,8 @@
 const express = require('express');
 const { pool } = require('../db');
 const { requireAuth } = require('../middleware/auth');
+const { isMailConfigured, sendHandoverMail, verifyConnection, mailConfigSummary } = require('../lib/mailer');
+const { buildEmailHtml, buildEmailText, buildPdfBuffer, pdfFileName } = require('../lib/handoverDoc');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -91,6 +93,91 @@ router.post('/', async (req, res) => {
      b.triggeredBy || 'Unknown', JSON.stringify(b.details || {})]
   );
   res.json({ handover: rowToHandover(rows[0]) });
+});
+
+// GET /api/handover-log/mail-status — is server-side sending available?
+// The frontend calls this when the handover modal opens so it can show the
+// real "Send Email" button when SMTP is live, and keep the existing mailto: +
+// printable-document flow when it isn't. `verify` runs a real connection/login
+// check (used by the admin diagnostic, not on every modal open).
+router.get('/mail-status', async (req, res) => {
+  const summary = mailConfigSummary();
+  if (!summary.configured || String(req.query.verify) !== 'true') {
+    return res.json(summary);
+  }
+  try {
+    await verifyConnection();
+    res.json(Object.assign({}, summary, { verified: true }));
+  } catch (err) {
+    res.json(Object.assign({}, summary, { verified: false, error: err.message }));
+  }
+});
+
+// POST /api/handover-log/send — send the notification as a real email:
+// an Outlook-safe HTML table in the body plus the same content attached as a
+// PDF. Returns 503 (not 500) when SMTP isn't configured so the frontend can
+// tell "not set up yet" apart from "tried and failed" and fall back cleanly.
+//
+// This only sends. Audit rows are still written by POST / (one per component),
+// exactly as before — keeping the two concerns separate means a mail outage
+// can never cost us the audit trail.
+router.post('/send', async (req, res) => {
+  const b = req.body || {};
+  const to = Array.isArray(b.to) ? b.to.filter((e) => e && typeof e === 'string') : [];
+  const cc = Array.isArray(b.cc) ? b.cc.filter((e) => e && typeof e === 'string') : [];
+
+  if (!to.length) return res.status(400).json({ error: 'At least one To address is required' });
+  if (!b.pdfData || !Array.isArray(b.pdfData.components) || !b.pdfData.components.length) {
+    return res.status(400).json({ error: 'pdfData with at least one component is required' });
+  }
+  if (!isMailConfigured()) {
+    return res.status(503).json({
+      error: 'Email sending is not configured on the server',
+      configured: false,
+    });
+  }
+
+  const subject = (b.subject || '').trim()
+    || `Handover Notification — ${b.pdfData.sap || 'Production'}`;
+
+  try {
+    const pdf = await buildPdfBuffer(b.pdfData);
+    const result = await sendHandoverMail({
+      to,
+      cc,
+      subject,
+      html: buildEmailHtml(b.pdfData),
+      text: buildEmailText(b.pdfData),
+      attachments: [{
+        filename: pdfFileName(b.pdfData),
+        content: pdf,
+        contentType: 'application/pdf',
+      }],
+    });
+    res.json({ sent: true, messageId: result.messageId, accepted: result.accepted, rejected: result.rejected });
+  } catch (err) {
+    // Surface the real reason — bad credentials, blocked port and unreachable
+    // host all look identical from the UI otherwise.
+    res.status(502).json({ error: 'Could not send the email: ' + err.message, sent: false });
+  }
+});
+
+// POST /api/handover-log/preview-pdf — returns just the PDF, no email sent.
+// Lets the sender check the attachment before committing, and gives us a way
+// to validate PDF generation without SMTP configured.
+router.post('/preview-pdf', async (req, res) => {
+  const b = req.body || {};
+  if (!b.pdfData || !Array.isArray(b.pdfData.components)) {
+    return res.status(400).json({ error: 'pdfData with a components array is required' });
+  }
+  try {
+    const pdf = await buildPdfBuffer(b.pdfData);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${pdfFileName(b.pdfData)}"`);
+    res.send(pdf);
+  } catch (err) {
+    res.status(500).json({ error: 'Could not generate the PDF: ' + err.message });
+  }
 });
 
 module.exports = router;

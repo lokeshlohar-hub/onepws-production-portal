@@ -21,6 +21,8 @@
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.2.0",
+    "nodemailer": "^10.0.9",
+    "pdfmake": "^0.2.23",
     "pg": "^8.22.0"
   }
 }

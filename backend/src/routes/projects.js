@@ -13,10 +13,15 @@ router.use(requireAuth);
 //   - job_work_po   : v54.1, Aluminum Extrusion Job Work PO No.
 //   - remarks       : v54.1, project-level remarks (Update Stage + Overview)
 //   - on_hold + hold_reason/remarks/date/held_by : v54.1, Project Hold persistence
+//   - drawing_wood, drawing_ext : v54.6, per-segment Drawing/File Reference —
+//     previously entered at project creation but only kept in an in-memory
+//     sub-object that was never sent to the server, so it vanished on reload
 (async () => {
   try {
     await pool.query(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS docs JSONB DEFAULT '[]'::jsonb`);
     await pool.query(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS job_work_po TEXT NOT NULL DEFAULT ''`);
+    await pool.query(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS drawing_wood TEXT NOT NULL DEFAULT ''`);
+    await pool.query(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS drawing_ext TEXT NOT NULL DEFAULT ''`);
     await pool.query(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS remarks TEXT NOT NULL DEFAULT ''`);
     await pool.query(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS on_hold BOOLEAN NOT NULL DEFAULT FALSE`);
     await pool.query(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS hold_reason TEXT NOT NULL DEFAULT ''`);
@@ -41,6 +46,8 @@ function withAliases(p) {
     holdRemarks: p.hold_remarks || '',
     holdDate:    p.hold_date,
     jobWorkPO:   p.job_work_po  || '',
+    drawingWood: p.drawing_wood || '',
+    drawingExt:  p.drawing_ext  || '',
     // p.remarks passes through unchanged (name already matches)
   };
 }
@@ -80,8 +87,8 @@ router.post('/', requireRole('admin', 'superadmin'), async (req, res) => {
 
     await client.query(
       `INSERT INTO projects (id, sap, type, category, customer, pm, eng, po, has_wood, has_ext,
-         rec_wood, plan_wood, rec_ext, plan_ext, certifications, docs, job_work_po, remarks, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
+         rec_wood, plan_wood, rec_ext, plan_ext, certifications, docs, job_work_po, drawing_wood, drawing_ext, remarks, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
       [
         projectId, body.sap, body.type, body.category, body.customer, body.pm, body.eng, body.po || '',
         !!body.hasWood, !!body.hasExt,
@@ -89,6 +96,8 @@ router.post('/', requireRole('admin', 'superadmin'), async (req, res) => {
         JSON.stringify(body.certifications || []),
         JSON.stringify(Array.isArray(body.docs) ? body.docs : []),
         body.jobWorkPO || '',
+        body.drawingWood || '',
+        body.drawingExt || '',
         body.remarks || '',
         req.user.id,
       ]
@@ -150,20 +159,30 @@ router.post('/:id/add-segment', requireRole('admin', 'superadmin'), async (req, 
 
     if (!segmentAlreadyExists) {
       if (segment === 'wood') {
-        await client.query('UPDATE projects SET has_wood = true, rec_wood = $1, plan_wood = $2 WHERE id = $3',
-          [body.received || null, body.tat || null, req.params.id]);
+        await client.query(
+          `UPDATE projects SET has_wood = true, rec_wood = $1, plan_wood = $2,
+             drawing_wood = COALESCE(NULLIF($3, ''), drawing_wood)
+           WHERE id = $4`,
+          [body.received || null, body.tat || null, body.drawing || '', req.params.id]);
       } else {
-        // Extrusion — persist job_work_po alongside the new segment if provided
+        // Extrusion — persist job_work_po + drawing alongside the new segment if provided
         await client.query(
           `UPDATE projects SET has_ext = true, rec_ext = $1, plan_ext = $2,
-             job_work_po = COALESCE(NULLIF($3, ''), job_work_po)
-           WHERE id = $4`,
-          [body.received || null, body.tat || null, body.jobWorkPO || '', req.params.id]);
+             job_work_po = COALESCE(NULLIF($3, ''), job_work_po),
+             drawing_ext = COALESCE(NULLIF($4, ''), drawing_ext)
+           WHERE id = $5`,
+          [body.received || null, body.tat || null, body.jobWorkPO || '', body.drawing || '', req.params.id]);
       }
-    } else if (segment === 'ext' && body.jobWorkPO) {
-      // Segment already exists — still allow PO to be updated on re-save
-      await client.query('UPDATE projects SET job_work_po = $1 WHERE id = $2',
-        [body.jobWorkPO, req.params.id]);
+    } else {
+      // Segment already exists — still allow PO / drawing to be updated on re-save
+      if (segment === 'ext' && body.jobWorkPO) {
+        await client.query('UPDATE projects SET job_work_po = $1 WHERE id = $2',
+          [body.jobWorkPO, req.params.id]);
+      }
+      if (body.drawing) {
+        const col = segment === 'wood' ? 'drawing_wood' : 'drawing_ext';
+        await client.query(`UPDATE projects SET ${col} = $1 WHERE id = $2`, [body.drawing, req.params.id]);
+      }
     }
 
     const createdLines = [];
@@ -213,6 +232,7 @@ router.patch('/:id', requireRole('admin', 'superadmin'), async (req, res) => {
   const COL = {
     sap: 'sap', type: 'type', category: 'category', customer: 'customer',
     pm: 'pm', eng: 'eng', po: 'po', jobWorkPO: 'job_work_po', remarks: 'remarks',
+    drawingWood: 'drawing_wood', drawingExt: 'drawing_ext',
     recWood: 'rec_wood', planWood: 'plan_wood', recExt: 'rec_ext', planExt: 'plan_ext',
     dlyWood: 'dly_wood', dlyExt: 'dly_ext',
     certifications: 'certifications',

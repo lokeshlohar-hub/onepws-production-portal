@@ -31,7 +31,7 @@ The central table — one row per customer project.
 | `sap` | Human-facing project number, e.g. `CD-26-27-10048` (customer/business ID, NOT the DB primary key) |
 | `type` | Product Type: `CD`, `CR`, `AD`, `R&D`, or `IOC` |
 | `category` | `Cat 1` / `Cat 2` / `Cat 3`, or null for IOC (single-rule type) |
-| `customer`, `pm`, `eng`, `po`, `job_work_po`, `remarks`, `certifications` | header fields |
+| `customer`, `pm`, `eng`, `po`, `job_work_po`, `drawing_wood`, `drawing_ext`, `remarks`, `certifications` | header fields |
 | `has_wood`, `has_ext` | booleans — which segments this project runs |
 | `rec_wood`, `rec_ext` | file-received dates per segment |
 | `plan_wood`, `plan_ext` | planned/TAT-calculated dispatch dates per segment |

@@ -4792,7 +4792,7 @@ function openJwoHub(projId){
   if(!p.hasExt){ toast('This project has no Aluminium Extrusion segment.','⚠'); return; }
   _jwoCurrentProjId = projId;
   document.getElementById('jwoHubSummary').innerHTML =
-    '<div style="display:flex;gap:14px;flex-wrap:wrap"><span><b>Project:</b> '+p.sap+'</span><span><b>Customer:</b> '+(p.customer||'—')+'</span><span><b>Job Work PO:</b> '+(p.ext&&p.ext.jobWorkPO||'—')+'</span></div>';
+    '<div style="display:flex;gap:14px;flex-wrap:wrap"><span><b>Project:</b> '+p.sap+'</span><span><b>Customer:</b> '+(p.customer||'—')+'</span><span><b>Job Work PO:</b> '+(p.jobWorkPO||'—')+'</span></div>';
   document.getElementById('jwoHubModal').classList.add('open');
   jwoSwitchTab('send');
   jwoLoadEligible();
@@ -5060,8 +5060,8 @@ async function printJwoReport(jwoId){
   const p = DB.projects.find(x=>x.id===o.project_id);
   const sap = p ? p.sap : '—';
   const customer = p ? (p.customer||'—') : '—';
-  const jobWorkPO = p && p.ext ? (p.ext.jobWorkPO||'—') : '—';
-  const drawing = p && p.ext ? (p.ext.drawing||'—') : '—';
+  const jobWorkPO = p ? (p.jobWorkPO||'—') : '—';
+  const drawing = p ? (p.drawingExt||'—') : '—';
   const dateStr = o.date_of_inspection ? String(o.date_of_inspection).split('T')[0] : '—';
   const dash = v => (v===0||v==null||v==='') ? '-' : v;
 
@@ -5544,11 +5544,14 @@ function serverProjectToLocal(row) {
     eng: row.eng,
     po: row.po || '',
     jobWorkPO: row.jobWorkPO || row.job_work_po || '',   // v54.4 - was silently dropped from mapper, breaking Master Tracker PO column on reload
+    drawingWood: row.drawingWood || row.drawing_wood || '',
+    drawingExt: row.drawingExt || row.drawing_ext || '',
     hasWood: row.has_wood,
     hasExt: row.has_ext,
-    // p.wood / p.ext (segment-specific sub-objects) aren't modeled server-side
-    // yet — confirmed nothing in this app actually reads them back, only
-    // the flat fields below and the flat p.bom array, so this is safe.
+    // p.wood / p.ext (segment-specific sub-objects) aren't modeled server-side —
+    // only the flat fields below (jobWorkPO, drawingWood/drawingExt, etc.) and
+    // the flat p.bom array are. Anything reading p.wood/p.ext.* on a reloaded
+    // project will silently see null — use the flat fields instead.
     wood: null, ext: null,
     recWood: row.rec_wood, planWood: row.plan_wood, actWood: row.act_wood, dlyWood: row.dly_wood, woodSt: row.wood_status,
     recExt: row.rec_ext, planExt: row.plan_ext, actExt: row.act_ext, dlyExt: row.dly_ext, extSt: row.ext_status,
@@ -8726,11 +8729,11 @@ function setupSegmentForEdit(seg, p){
   [recEl,tatEl,drawEl,remEl].forEach(el=>{ if(el) el.disabled=true; });
   if(recEl) recEl.value = reliableReceived || data?.received || '';
   if(tatEl) tatEl.value = reliableTat || data?.tat || '';
-  if(drawEl) drawEl.value = data?.drawing||'';
+  if(drawEl) drawEl.value = (seg==='wood' ? p.drawingWood : p.drawingExt) || '';
   if(remEl) remEl.value = data?.remarks||'';
   if(seg==='ext'){
     const poEl=document.getElementById('np_ext_po'), planEl=document.getElementById('np_ext_plan_date');
-    if(poEl){ poEl.disabled=true; poEl.value=data?.jobWorkPO||''; }
+    if(poEl){ poEl.disabled=true; poEl.value=p.jobWorkPO||''; }
     if(planEl){ planEl.disabled=true; planEl.value=dateOnly(data?.plannedCuttingDate)||''; }
   }
 
@@ -9521,6 +9524,8 @@ async function saveProject(btn){
     serverResult = await apiCreateProject({
       sap, type, category:cat, customer, pm, eng, po:(document.getElementById('np_po')?.value||'').toUpperCase(),
       jobWorkPO:(document.getElementById('np_ext_po')?.value||'').toUpperCase(),
+      drawingWood:(document.getElementById('np_wood_drawing')?.value||'').toUpperCase(),
+      drawingExt:(document.getElementById('np_ext_drawing')?.value||'').toUpperCase(),
       hasWood:!!hasWood, hasExt:!!hasExt,
       recWood:woodData?.received||null, planWood:woodData?.tat||null,
       recExt:extData?.received||null, planExt:extData?.tat||null,
@@ -9579,6 +9584,7 @@ async function saveProject(btn){
     id:nid,sap,type,cat,customer,pm,eng,
     po:(document.getElementById('np_po')?.value||'').toUpperCase(),
     jobWorkPO:(document.getElementById('np_ext_po')?.value||'').toUpperCase(),
+    drawingWood:woodData?.drawing||'', drawingExt:extData?.drawing||'',
     hasWood:!!hasWood,hasExt:!!hasExt,
     wood:woodData, ext:extData,
     recWood:woodData?.received||null,  planWood:woodData?.tat||null,
@@ -9827,6 +9833,7 @@ async function saveProjectAddSegment(btn){
       serverResult = await apiAddSegmentToProject(p.id, {
         segment: seg, received: rec, tat,
         jobWorkPO: seg==='ext' ? (document.getElementById('np_ext_po')?.value||'').toUpperCase() : undefined,
+        drawing: (document.getElementById('np_'+seg+'_drawing')?.value||'').toUpperCase(),
         bom: bom.map(b=>({
           item:b.item, description:b.description||'', l:b.l, w:b.w, t:b.t, profile:b.profile, uom:b.uom, qty:b.qty,
           colorFinish:b.colorFinish, specialChars:b.specialChars,
@@ -9861,8 +9868,8 @@ async function saveProjectAddSegment(btn){
 
   results.forEach(({seg, isNewSegment, bom, segData, stages})=>{
     if(isNewSegment){
-      if(seg==='wood'){ p.hasWood=true; p.wood=segData; p.recWood=segData.received; p.planWood=segData.tat; p.woodSt='Running'; }
-      else { p.hasExt=true; p.ext=segData; p.recExt=segData.received; p.planExt=segData.tat; p.extSt='Running'; }
+      if(seg==='wood'){ p.hasWood=true; p.wood=segData; p.recWood=segData.received; p.planWood=segData.tat; p.woodSt='Running'; p.drawingWood=segData.drawing||''; }
+      else { p.hasExt=true; p.ext=segData; p.recExt=segData.received; p.planExt=segData.tat; p.extSt='Running'; p.drawingExt=segData.drawing||''; p.jobWorkPO=segData.jobWorkPO||p.jobWorkPO||''; }
       p.stages = [...(p.stages||[]), ...stages.filter(s=>!p.stages.some(e=>e.n===s.n))];
     }
     p.bom = [...(p.bom||[]), ...bom];
@@ -14031,9 +14038,7 @@ function openRouteCardForLine(lineId, projId){
     return m ? (m[3]+'-'+m[2]+'-'+m[1]) : s;
   };
   const nowStr = fmtDateOnly(new Date().toISOString());
-  const drawingRef = isWood
-    ? (p.wood && p.wood.drawing) || ''
-    : (p.ext  && p.ext.drawing)  || '';
+  const drawingRef = isWood ? (p.drawingWood || '') : (p.drawingExt || '');
   const latestFinish = getLatestMaterialFinish(b);
 
   const IMS_TICKS = ['FSC','CARB Certified','Fire Rated','Particle Board','A.S.S.','Marmoleum','Alucore','Prelam'];

@@ -12673,7 +12673,6 @@ function renderQcProjectInspection(projId){
     const sizeStr = [r.length, r.width, r.thickness].filter(v => v).map(v => v+'').join(' × ');
     return '<tr>'
       +'<td style="text-align:center"><input type="checkbox" class="qc-insp-row-check" data-idx="'+i+'" onchange="onQcInspRowToggle('+i+')"></td>'
-      +'<td class="font-mono text-xs">'+p.sap+'</td>'
       +'<td><div class="fw-600">'+r.item+'</div>'+(r.description?'<div class="text-xs text-muted">'+r.description+'</div>':'')+(r.isRework?'<span class="badge" style="background:#fef3c7;color:#92400e;font-size:9px;margin-left:4px">🔄 Rework</span>':'')+'</td>'
       +'<td class="text-xs">'+(sizeStr ? sizeStr+' mm' : '—')+'</td>'
       +'<td class="text-center font-mono">'+r.totalQty+'</td>'
@@ -12684,7 +12683,7 @@ function renderQcProjectInspection(projId){
       +'<td><input type="number" class="form-input qc-insp-qty-input" data-idx="'+i+'" style="height:28px;text-align:center" min="0" max="'+r.pending+'" value="'+r.approveQty+'" onchange="onQcInspQtyChange('+i+',this.value)"></td>'
       +'<td class="text-center"><button class="btn btn-outline btn-sm" style="height:26px;font-size:11px;padding:2px 8px" onclick="openQcInspect(\''+p.id+'\',\''+r.lineId+'\',\''+r.stage.replace(/'/g,"\\'")+'\')" title="Open single-line inspection to reject with disposition + category + photo">⛔ Reject…</button></td>'
       +'</tr>';
-  }).join('') : '<tr><td colspan="11" class="text-sm text-muted" style="padding:14px;text-align:center">No pending '+(seg==='wood'?'Wood':'Aluminum')+' lines for this project.</td></tr>';
+  }).join('') : '<tr><td colspan="10" class="text-sm text-muted" style="padding:14px;text-align:center">No pending '+(seg==='wood'?'Wood':'Aluminum')+' lines for this project.</td></tr>';
   inspView.innerHTML =
     // Breadcrumb / back
     '<div style="padding:12px 14px 6px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
@@ -12729,7 +12728,6 @@ function renderQcProjectInspection(projId){
     +'<table style="width:100%">'
       +'<thead><tr>'
         +'<th style="width:40px;text-align:center">✓</th>'
-        +'<th style="width:110px">Project</th>'
         +'<th>Component</th>'
         +'<th style="width:120px">Size (mm)</th>'
         +'<th style="width:80px;text-align:center">Total</th>'

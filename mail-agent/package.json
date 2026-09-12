@@ -1,0 +1,14 @@
+{
+  "name": "onepws-mail-agent",
+  "version": "1.0.0",
+  "description": "Relays ONEPWS handover notification emails from the cloud portal to the factory's internal mail server",
+  "main": "agent.js",
+  "private": true,
+  "scripts": {
+    "start": "node agent.js"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "nodemailer": "^7.0.9"
+  }
+}

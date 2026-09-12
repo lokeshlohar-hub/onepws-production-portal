@@ -13,6 +13,7 @@ const capacityRoutes = require('./routes/capacity');
 const jobWorkOutwardRoutes = require('./routes/jobWorkOutward');
 const adminConfigRoutes = require('./routes/adminConfig');
 const handoverRoutes = require('./routes/handover');
+const mailAgentRoutes = require('./routes/mailAgent');
 const qcLogRoutes = require('./routes/qcLog');
 const todoRoutes = require('./routes/todo');
 const mistakeRegisterRoutes = require('./routes/mistakeRegister');
@@ -95,6 +96,8 @@ app.use('/api/tat-overrides', tatOverrideRoutes);
 app.use('/api/job-work-outward', jobWorkOutwardRoutes);
 app.use('/api/admin-config', adminConfigRoutes);
 app.use('/api/handover-log', handoverRoutes);
+// Machine-to-machine: the sys160 mail relay agent (shared-token auth, not requireAuth)
+app.use('/api/mail-agent', mailAgentRoutes);
 app.use('/api/qc-log', qcLogRoutes);
 app.use('/api/todo-list', todoRoutes);
 app.use('/api/mistake-register', mistakeRegisterRoutes);

@@ -11193,8 +11193,7 @@ async function sendBulkHandoverNotification(){
     + '?subject='+encodeURIComponent(subject)
     + (ccClean.length ? '&cc='+encodeURIComponent(ccClean.join(',')) : '')
     + '&body='+encodeURIComponent(body);
-  window.location.href = mailto;
-  openHandoverPdfWindow(ctx.pdfData);
+  await deliverHandoverNotification(ctx.pdfData, toAddrs, ccClean, subject, mailto, ctx.projectId);
 
   const primaryTo = toAddrs[0];
   const additionalTo = toAddrs.slice(1);
@@ -11670,8 +11669,7 @@ async function sendHandoverNotification(){
     + '?subject='+encodeURIComponent(subject)
     + (ccClean.length ? '&cc='+encodeURIComponent(ccClean.join(',')) : '')
     + '&body='+encodeURIComponent(body);
-  window.location.href = mailto;
-  openHandoverPdfWindow(ctx.pdfData);
+  await deliverHandoverNotification(ctx.pdfData, toAddrs, ccClean, subject, mailto, ctx.projectId);
 
   // Audit trail schema stores a single primary To (email column) plus an
   // array (cc_emails). Multi-To sends record the first To as primary and
@@ -25973,6 +25971,116 @@ window.toggleAutoRefresh = () => {
 
 <!-- v54.4 dialog-helpers.js (electronPrompt/electronConfirm replacements for blocked window.prompt/confirm) -->
 <script src="dialog-helpers.js"></script>
+
+<!-- ============================================================== -->
+<!-- v56 HANDOVER EMAIL DELIVERY (additive block)                   -->
+<!-- Sends the notification as a real email — HTML table body plus  -->
+<!-- a PDF attachment — instead of a mailto: draft the sender has   -->
+<!-- to format by hand. Falls back to the original mailto: +        -->
+<!-- printable-document flow whenever the server can't send, so     -->
+<!-- behaviour is never worse than before this block existed.       -->
+<!-- ============================================================== -->
+<script>
+(function () {
+  'use strict';
+
+  // Cached once per page load; the modal opens often and this never changes
+  // between opens. Failure to fetch simply leaves sending disabled.
+  var mailStatus = null;
+  async function getMailStatus() {
+    if (mailStatus !== null) return mailStatus;
+    try {
+      mailStatus = await apiRequest('/handover-log/mail-status', { method: 'GET' });
+    } catch (e) {
+      mailStatus = { canSend: false };
+    }
+    return mailStatus;
+  }
+  window.getHandoverMailStatus = getMailStatus;
+
+  // After queueing, the message is delivered by the relay agent on sys160
+  // within a poll cycle. Watch briefly so the sender gets a definite outcome
+  // instead of a hopeful "queued" and silence.
+  async function watchHandoverDelivery(id) {
+    var deadline = Date.now() + 120000;
+    var delay = 4000;
+    while (Date.now() < deadline) {
+      await new Promise(function (r) { setTimeout(r, delay); });
+      var st;
+      try {
+        st = await apiRequest('/handover-log/outbox-status/' + encodeURIComponent(id), { method: 'GET' });
+      } catch (e) {
+        return; // transient; the message is still queued server-side
+      }
+      if (st.status === 'sent') { toast('Handover email delivered'); return; }
+      if (st.status === 'failed') {
+        toast('Delivery failed after retries: ' + (st.error || 'unknown error'), '⚠');
+        return;
+      }
+    }
+    // Still pending after two minutes — the agent is probably stopped.
+    toast('Still queued — the mail relay on sys160 may not be running.', '⚠');
+  }
+
+  // Returns true when the server took responsibility for delivery (sent or
+  // queued); false when the caller's mailto: fallback was used instead.
+  window.deliverHandoverNotification = async function (pdfData, toAddrs, ccAddrs, subject, mailtoUrl, projectId) {
+    var status = await getMailStatus();
+    if (status && status.canSend) {
+      try {
+        var resp = await apiRequest('/handover-log/send', {
+          method: 'POST',
+          body: JSON.stringify({
+            to: toAddrs, cc: ccAddrs, subject: subject,
+            pdfData: pdfData, projectId: projectId,
+            triggeredBy: (typeof CURRENT_USER !== 'undefined' && CURRENT_USER) ? CURRENT_USER.fullName : undefined,
+          }),
+        });
+        if (resp && resp.sent) { toast('Email sent with the PDF attached'); return true; }
+        if (resp && resp.queued) {
+          toast('Email queued — sending via the factory mail server');
+          watchHandoverDelivery(resp.id);
+          return true;
+        }
+      } catch (err) {
+        var msg = String((err && err.message) || '');
+        // "not configured" / an old backend without the route are expected
+        // states, not failures worth alarming the sender about — fall through
+        // to the mailto: flow silently. Anything else is a real problem.
+        if (!/not configured|isn't available on the currently deployed backend/i.test(msg)) {
+          toast('Could not send from the server (' + msg + ') — opening your mail client instead', '⚠');
+        }
+      }
+    }
+    // Original behaviour, unchanged.
+    window.location.href = mailtoUrl;
+    if (typeof openHandoverPdfWindow === 'function') openHandoverPdfWindow(pdfData);
+    return false;
+  };
+
+  // Reflect the active mode on the modal's send button so the operator knows
+  // whether they're about to send directly or hand off to their mail client.
+  async function labelSendButton() {
+    var modal = document.getElementById('handoverNotifyModal');
+    if (!modal || !modal.classList.contains('open')) return;
+    var btn = modal.querySelector('.modal-footer .btn-primary');
+    if (!btn || btn.dataset.v56Labelled === '1') return;
+    var status = await getMailStatus();
+    btn.dataset.v56Labelled = '1';
+    btn.textContent = (status && status.canSend)
+      ? '📧 Send Email (with PDF)'
+      : '📧 Open in Mail Client';
+  }
+
+  // The modal is opened from several call sites; rather than patching each,
+  // watch for the class that makes it visible.
+  var modalEl = document.getElementById('handoverNotifyModal');
+  if (modalEl && window.MutationObserver) {
+    new MutationObserver(function () { labelSendButton(); })
+      .observe(modalEl, { attributes: true, attributeFilter: ['class'] });
+  }
+})();
+</script>
 
 <!-- ============================================================ -->
 <!-- v55 TABLET ADAPTATION (additive block — safe to remove whole) -->

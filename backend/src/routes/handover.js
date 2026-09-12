@@ -102,14 +102,39 @@ router.post('/', async (req, res) => {
 // check (used by the admin diagnostic, not on every modal open).
 router.get('/mail-status', async (req, res) => {
   const summary = mailConfigSummary();
+  const relay = Boolean(process.env.MAIL_AGENT_TOKEN);
+  // `canSend` is the single flag the frontend acts on: true when either
+  // transport is available (direct SMTP, or the sys160 relay).
+  const base = Object.assign({}, summary, {
+    relayEnabled: relay,
+    mode: summary.configured ? 'direct' : (relay ? 'relay' : 'none'),
+    canSend: summary.configured || relay,
+  });
+
+  // In relay mode the useful health signal isn't an SMTP handshake (this
+  // server can't reach the mail host at all) but whether the agent is actually
+  // draining the queue — a stalled agent is the realistic failure here.
+  if (relay && !summary.configured) {
+    try {
+      const { rows } = await pool.query(
+        `SELECT count(*) FILTER (WHERE status='pending')::int AS pending,
+                count(*) FILTER (WHERE status='failed')::int  AS failed,
+                max(sent_at) AS last_sent
+           FROM mail_outbox`
+      );
+      base.queue = { pending: rows[0].pending, failed: rows[0].failed, lastSent: rows[0].last_sent };
+    } catch (_) { /* table may not exist yet on an older DB — not fatal */ }
+    return res.json(base);
+  }
+
   if (!summary.configured || String(req.query.verify) !== 'true') {
-    return res.json(summary);
+    return res.json(base);
   }
   try {
     await verifyConnection();
-    res.json(Object.assign({}, summary, { verified: true }));
+    res.json(Object.assign(base, { verified: true }));
   } catch (err) {
-    res.json(Object.assign({}, summary, { verified: false, error: err.message }));
+    res.json(Object.assign(base, { verified: false, error: err.message }));
   }
 });
 
@@ -130,7 +155,8 @@ router.post('/send', async (req, res) => {
   if (!b.pdfData || !Array.isArray(b.pdfData.components) || !b.pdfData.components.length) {
     return res.status(400).json({ error: 'pdfData with at least one component is required' });
   }
-  if (!isMailConfigured()) {
+  const relayEnabled = Boolean(process.env.MAIL_AGENT_TOKEN);
+  if (!isMailConfigured() && !relayEnabled) {
     return res.status(503).json({
       error: 'Email sending is not configured on the server',
       configured: false,
@@ -140,26 +166,69 @@ router.post('/send', async (req, res) => {
   const subject = (b.subject || '').trim()
     || `Handover Notification — ${b.pdfData.sap || 'Production'}`;
 
+  let pdf;
+  let html;
+  let text;
   try {
-    const pdf = await buildPdfBuffer(b.pdfData);
-    const result = await sendHandoverMail({
-      to,
-      cc,
-      subject,
-      html: buildEmailHtml(b.pdfData),
-      text: buildEmailText(b.pdfData),
-      attachments: [{
-        filename: pdfFileName(b.pdfData),
-        content: pdf,
-        contentType: 'application/pdf',
-      }],
-    });
-    res.json({ sent: true, messageId: result.messageId, accepted: result.accepted, rejected: result.rejected });
+    pdf = await buildPdfBuffer(b.pdfData);
+    html = buildEmailHtml(b.pdfData);
+    text = buildEmailText(b.pdfData);
   } catch (err) {
-    // Surface the real reason — bad credentials, blocked port and unreachable
-    // host all look identical from the UI otherwise.
-    res.status(502).json({ error: 'Could not send the email: ' + err.message, sent: false });
+    return res.status(500).json({ error: 'Could not build the notification document: ' + err.message, sent: false });
   }
+
+  // Direct send — only possible when the mail server is reachable from
+  // wherever this backend runs (e.g. a cloud-reachable provider on 587/TLS).
+  // The factory's own server is a private LAN address, so in production this
+  // branch is skipped in favour of the relay below.
+  if (isMailConfigured()) {
+    try {
+      const result = await sendHandoverMail({
+        to, cc, subject, html, text,
+        attachments: [{ filename: pdfFileName(b.pdfData), content: pdf, contentType: 'application/pdf' }],
+      });
+      return res.json({ sent: true, queued: false, messageId: result.messageId, accepted: result.accepted, rejected: result.rejected });
+    } catch (err) {
+      // Surface the real reason — bad credentials, blocked port and
+      // unreachable host all look identical from the UI otherwise.
+      return res.status(502).json({ error: 'Could not send the email: ' + err.message, sent: false });
+    }
+  }
+
+  // Relay path: park the fully-rendered message for the sys160 agent.
+  try {
+    const id = 'MO-' + Date.now().toString(36).toUpperCase() + '-' + Math.random().toString(36).slice(2, 6).toUpperCase();
+    await pool.query(
+      `INSERT INTO mail_outbox
+         (id, to_addrs, cc_addrs, subject, body_html, body_text, pdf_name, pdf_bytes,
+          project_id, proj_sap, queued_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [id, JSON.stringify(to), JSON.stringify(cc), subject, html, text,
+       pdfFileName(b.pdfData), pdf,
+       b.projectId || null, (b.pdfData && b.pdfData.sap) || null,
+       b.triggeredBy || (req.user && (req.user.fullName || req.user.username)) || 'Unknown']
+    );
+    res.json({ sent: false, queued: true, id });
+  } catch (err) {
+    res.status(500).json({ error: 'Could not queue the email: ' + err.message, sent: false });
+  }
+});
+
+// GET /api/handover-log/outbox-status/:id — has the relay delivered it yet?
+// The frontend polls this briefly after queueing so the sender gets a real
+// confirmation rather than a hopeful "queued" and nothing more.
+router.get('/outbox-status/:id', async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT status, attempts, last_error, sent_at FROM mail_outbox WHERE id = $1`,
+    [req.params.id]
+  );
+  if (!rows.length) return res.status(404).json({ error: 'Unknown message id' });
+  res.json({
+    status: rows[0].status,
+    attempts: rows[0].attempts,
+    error: rows[0].last_error,
+    sentAt: rows[0].sent_at,
+  });
 });
 
 // POST /api/handover-log/preview-pdf — returns just the PDF, no email sent.

@@ -65,3 +65,7 @@ tablet-app/*.apk
 tablet-app/node_modules/
 electron/node_modules/
 electron/dist/
+
+# Mail relay agent (sys160) — secrets and deps stay local
+mail-agent/node_modules/
+mail-agent/.env

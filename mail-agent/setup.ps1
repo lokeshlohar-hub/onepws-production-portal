@@ -16,7 +16,8 @@ param(
   [string]$PortalUrl = "https://onepws-portal-207920932496.asia-south1.run.app",
   [string]$SmtpHost  = "192.168.100.5",
   [int]   $SmtpPort  = 25,
-  [string]$SmtpUser  = "production@workspace.com",
+  [string]$SmtpFrom  = "portal@workspace.com",
+  [string]$ProbeTo   = "production@workspace.com",
   [string]$ServiceName = "ONEPWSMailAgent"
 )
 
@@ -26,7 +27,8 @@ Write-Host ""
 Write-Host "ONEPWS Mail Relay Agent setup" -ForegroundColor Cyan
 Write-Host "  folder : $AgentDir"
 Write-Host "  portal : $PortalUrl"
-Write-Host "  smtp   : ${SmtpHost}:${SmtpPort} as $SmtpUser"
+Write-Host "  smtp   : ${SmtpHost}:${SmtpPort}"
+Write-Host "  from   : $SmtpFrom"
 Write-Host ""
 
 # --- 1. Node present? -------------------------------------------------------
@@ -40,14 +42,47 @@ Push-Location $AgentDir
 try { npm install --no-audit --no-fund | Out-Null } finally { Pop-Location }
 Write-Host "      done."
 
-# --- 3. Password (asked once, never echoed) ---------------------------------
-Write-Host "[3/6] Password for $SmtpUser"
-Write-Host "      (typing is hidden; this is stored only in mail-agent\.env on this machine)"
-$secure = Read-Host "      Password" -AsSecureString
-$bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
-try   { $SmtpPass = [Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr) }
-finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
-if ([string]::IsNullOrWhiteSpace($SmtpPass)) { Write-Host "ERROR: empty password." -ForegroundColor Red; exit 1 }
+# --- 3. Does this machine need a login at all? ------------------------------
+# production@workspace.com is a distribution group, not a mailbox — it has no
+# password. Internal mail servers commonly let machines on their own subnet
+# send without any login, and sys160 is on the mail server's subnet, so check
+# before asking anyone for credentials. The probe sends nothing.
+Write-Host "[3/6] Checking whether this machine may send without a login..."
+Write-Host ""
+Push-Location $AgentDir
+try { & node probe.js --host $SmtpHost --port $SmtpPort --from $SmtpFrom --to $ProbeTo; $probeExit = $LASTEXITCODE }
+finally { Pop-Location }
+Write-Host ""
+
+$SmtpUser = ""
+$SmtpPass = ""
+
+if ($probeExit -eq 0) {
+  Write-Host "      No login required from this machine." -ForegroundColor Green
+}
+else {
+  if ($probeExit -eq 10) {
+    Write-Host "      This server wants a login." -ForegroundColor Yellow
+  } else {
+    Write-Host "      The probe was inconclusive; falling back to a login." -ForegroundColor Yellow
+  }
+  Write-Host "      Enter a real MAILBOX account (not the distribution group)."
+  Write-Host "      Leave the address blank to abort and go ask IT for one."
+  $SmtpUser = Read-Host "      Mailbox address"
+  if ([string]::IsNullOrWhiteSpace($SmtpUser)) {
+    Write-Host ""
+    Write-Host "Aborted - nothing was installed." -ForegroundColor Red
+    Write-Host "Ask IT for a mailbox the portal can send as (e.g. portal@workspace.com)," -ForegroundColor Yellow
+    Write-Host "then re-run this script." -ForegroundColor Yellow
+    exit 1
+  }
+  Write-Host "      (typing is hidden; stored only in mail-agent\.env on this machine)"
+  $secure = Read-Host "      Password" -AsSecureString
+  $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+  try   { $SmtpPass = [Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr) }
+  finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+  if ([string]::IsNullOrWhiteSpace($SmtpPass)) { Write-Host "ERROR: empty password." -ForegroundColor Red; exit 1 }
+}
 
 # --- 4. Write .env ----------------------------------------------------------
 $envPath = Join-Path $AgentDir ".env"
@@ -60,23 +95,23 @@ SMTP_PORT=$SmtpPort
 SMTP_SECURE=false
 SMTP_USER=$SmtpUser
 SMTP_PASS=$SmtpPass
-SMTP_FROM=
+SMTP_FROM=ONEPWS Production Portal <$SmtpFrom>
 "@
 Set-Content -Path $envPath -Value $envText -Encoding utf8
 Write-Host "[4/6] Wrote $envPath"
 
 # --- 5. Verify BEFORE installing anything -----------------------------------
-Write-Host "[5/6] Testing the mail server login..."
+Write-Host "[5/6] Verifying the mail server connection..."
 Push-Location $AgentDir
 try { & node agent.js --check; $checkExit = $LASTEXITCODE } finally { Pop-Location }
 if ($checkExit -ne 0) {
   Write-Host ""
-  Write-Host "Login FAILED - nothing was installed." -ForegroundColor Red
-  Write-Host "Fix the password (or username) and re-run this script." -ForegroundColor Red
+  Write-Host "Verification FAILED - nothing was installed." -ForegroundColor Red
+  Write-Host "Fix the settings and re-run this script." -ForegroundColor Red
   Write-Host "The .env has been left in place so you can edit it directly if you prefer." -ForegroundColor Yellow
   exit 1
 }
-Write-Host "      login OK." -ForegroundColor Green
+Write-Host "      mail server OK." -ForegroundColor Green
 
 # --- 6. Install / restart the Windows service -------------------------------
 Write-Host "[6/6] Installing the Windows service..."

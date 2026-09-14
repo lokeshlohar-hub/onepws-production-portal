@@ -73,19 +73,26 @@ sock.on('close', () => {
     console.log('RESULT: inconclusive — the conversation did not reach RCPT TO.');
     process.exit(1);
   }
+  // Exit codes, so setup.ps1 can branch on the verdict:
+  //   0  = no login needed      10 = login required      1 = inconclusive
+  let code;
   if (/^2\d\d/.test(rcptReply)) {
-    console.log('RESULT: ✅ This machine CAN send without a login.');
+    console.log('RESULT: This machine CAN send without a login.');
     console.log('        Leave SMTP_USER and SMTP_PASS blank in mail-agent\\.env');
     console.log(`        and set SMTP_FROM to ${FROM}`);
     console.log('        No mailbox account or password is needed.');
+    code = 0;
   } else if (/^5\d\d/.test(rcptReply) && /auth/i.test(rcptReply)) {
-    console.log('RESULT: ❌ The server requires a login from this machine.');
+    console.log('RESULT: The server requires a login from this machine.');
     console.log('        A real mailbox account (address + password) is needed.');
     console.log('        Ask IT for one, e.g. portal@workspace.com.');
+    code = 10;
   } else {
-    console.log('RESULT: ❌ The server refused the recipient: ' + rcptReply);
+    console.log('RESULT: The server refused the recipient: ' + rcptReply);
     console.log('        This may be the FROM address rather than authentication —');
     console.log('        try:  node probe.js --from <a known internal address>');
+    code = 1;
   }
   console.log('-'.repeat(64));
+  process.exit(code);
 });

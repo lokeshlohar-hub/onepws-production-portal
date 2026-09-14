@@ -85,17 +85,34 @@ else {
 }
 
 # --- 4. Write .env ----------------------------------------------------------
+# Values are quoted so the dotenv parser that loads this file (agent.js:
+# require('dotenv').config()) can't misread a password (or token) containing
+# '#' (its unquoted-value grammar stops at '#' — everything after is dropped
+# as a comment) or leading/trailing spaces. An unquoted value with either
+# gets silently truncated, which looks exactly like a wrong password (535
+# Authentication failed) even when it was typed correctly.
+# dotenv only STRIPS the matching outer quote char — it does not unescape a
+# backslash-escaped quote inside (checked against node_modules/dotenv/lib/
+# main.js), so escaping a literal quote would leave a stray backslash in the
+# real value instead of fixing anything. Safer: quote with whichever of "/'
+# the value does NOT contain, so no escaping is ever needed.
+function Protect-EnvValue([string]$Value) {
+  if ($null -eq $Value) { $Value = "" }
+  if ($Value -notmatch '"') { return '"' + $Value + '"' }
+  if ($Value -notmatch "'") { return "'" + $Value + "'" }
+  return '"' + $Value + '"'   # contains both quote chars (rare) - best effort
+}
 $envPath = Join-Path $AgentDir ".env"
 $envText = @"
 PORTAL_URL=$PortalUrl
-MAIL_AGENT_TOKEN=$AgentToken
+MAIL_AGENT_TOKEN=$(Protect-EnvValue $AgentToken)
 POLL_SECONDS=20
 SMTP_HOST=$SmtpHost
 SMTP_PORT=$SmtpPort
 SMTP_SECURE=false
-SMTP_USER=$SmtpUser
-SMTP_PASS=$SmtpPass
-SMTP_FROM=ONEPWS Production Portal <$SmtpFrom>
+SMTP_USER=$(Protect-EnvValue $SmtpUser)
+SMTP_PASS=$(Protect-EnvValue $SmtpPass)
+SMTP_FROM=$(Protect-EnvValue "ONEPWS Production Portal <$SmtpFrom>")
 "@
 Set-Content -Path $envPath -Value $envText -Encoding utf8
 Write-Host "[4/6] Wrote $envPath"

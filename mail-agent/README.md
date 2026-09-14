@@ -28,6 +28,25 @@ server, and reports the result back.
 Every connection is **outbound from the factory**. No port forwarding, no VPN,
 no firewall change, and nothing exposed to the internet.
 
+## Step 0 — does this machine even need a login?
+
+`production@workspace.com` is a distribution **group**, not a mailbox: it has
+no password and cannot be used to log in. It is a perfectly good *recipient*.
+What the agent needs is a way to *send*.
+
+Internal mail servers commonly allow unauthenticated relay from trusted IP
+ranges, usually their own subnet. sys160 (192.168.100.160) sits on the mail
+server's subnet, so it may be permitted where other machines are not. Check
+before asking IT to create an account:
+
+```powershell
+node mail-agent\probe.js
+```
+
+It stops before sending anything — no mail is delivered. It reports either
+"CAN send without a login" (leave `SMTP_USER`/`SMTP_PASS` blank) or "requires a
+login" (ask IT for a real mailbox account, e.g. `portal@workspace.com`).
+
 ## Install on sys160
 
 The repo clone on sys160 lives at

@@ -38,8 +38,11 @@ function requireConfig() {
   if (!PORTAL_URL) missing.push('PORTAL_URL');
   if (!AGENT_TOKEN) missing.push('MAIL_AGENT_TOKEN');
   if (!SMTP_HOST) missing.push('SMTP_HOST');
-  if (!SMTP_USER) missing.push('SMTP_USER');
-  if (!SMTP_PASS) missing.push('SMTP_PASS');
+  // SMTP_USER/SMTP_PASS are intentionally optional: the internal mail server
+  // may allow unauthenticated relay from trusted IPs (sys160 is on its own
+  // subnet). Run `node probe.js` to find out which applies. When they are
+  // blank, SMTP_FROM must be set so the message still has a sender.
+  if (!SMTP_USER && !SMTP_FROM) missing.push('SMTP_FROM (or SMTP_USER)');
   if (missing.length) {
     console.error('Missing required settings in mail-agent/.env: ' + missing.join(', '));
     process.exit(1);
@@ -51,16 +54,19 @@ function requireConfig() {
 // `ignoreTLS` stops nodemailer from attempting an upgrade the server does not
 // advertise; requireTLS must stay off for the same reason.
 function makeTransport() {
-  return nodemailer.createTransport({
+  // Passing an empty auth object makes nodemailer attempt AUTH with blank
+  // credentials, which servers reject — omit it entirely for anonymous relay.
+  const opts = {
     host: SMTP_HOST,
     port: SMTP_PORT,
     secure: SMTP_SECURE,
     ignoreTLS: !SMTP_SECURE,
-    auth: { user: SMTP_USER, pass: SMTP_PASS },
     connectionTimeout: 15000,
     greetingTimeout: 10000,
     socketTimeout: 30000,
-  });
+  };
+  if (SMTP_USER && SMTP_PASS) opts.auth = { user: SMTP_USER, pass: SMTP_PASS };
+  return nodemailer.createTransport(opts);
 }
 
 async function portal(path, options) {
@@ -146,7 +152,9 @@ async function main() {
   requireConfig();
   log(checkOnly ? 'ONEPWS mail relay agent — configuration check' : 'ONEPWS mail relay agent starting');
   log(`  portal : ${PORTAL_URL}`);
-  log(`  smtp   : ${SMTP_HOST}:${SMTP_PORT} (secure=${SMTP_SECURE}) as ${SMTP_USER}`);
+  log(`  smtp   : ${SMTP_HOST}:${SMTP_PORT} (secure=${SMTP_SECURE})`
+    + (SMTP_USER && SMTP_PASS ? ` as ${SMTP_USER}` : ' — no login (anonymous relay)'));
+  log(`  from   : ${SMTP_FROM}`);
   if (!checkOnly) log(`  poll   : every ${POLL_SECONDS}s`);
 
   const transport = makeTransport();
@@ -156,6 +164,13 @@ async function main() {
   try {
     await transport.verify();
     log('SMTP connection OK');
+    if (!(SMTP_USER && SMTP_PASS)) {
+      // Without credentials, verify() only proves the server answered — it
+      // does not prove the server will accept our recipients. probe.js is
+      // what actually confirms relay permission.
+      log('  note: connected without a login. If sending later fails with a 5xx,');
+      log('        run `node probe.js` to confirm this machine may relay.');
+    }
   } catch (err) {
     console.error('SMTP check FAILED:', err.message);
     if (/535|authentication/i.test(err.message)) {

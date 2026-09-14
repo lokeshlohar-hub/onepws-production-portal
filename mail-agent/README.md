@@ -78,8 +78,9 @@ Fill in `.env`:
 | `SMTP_HOST` | `192.168.100.5` |
 | `SMTP_PORT` | `25` |
 | `SMTP_SECURE` | `false` |
-| `SMTP_USER` | `production@workspace.com` |
-| `SMTP_PASS` | that mailbox's password |
+| `SMTP_USER` | leave blank if probe.js says no login is needed; otherwise a real mailbox address |
+| `SMTP_PASS` | that mailbox's password (blank when no login is needed) |
+| `SMTP_FROM` | the address notifications come from, e.g. `ONEPWS Production Portal <portal@workspace.com>` |
 
 Test it in the foreground first — it verifies the mail server and the portal
 token at startup and exits with a clear message if either fails:

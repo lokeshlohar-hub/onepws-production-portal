@@ -52,8 +52,29 @@ function withAliases(p) {
   };
 }
 
-// GET /api/projects — list all projects, each with its full BOM embedded
-router.get('/', async (req, res) => {
+// GET /api/projects is polled by every open screen every 30 s (index.html
+// performAutoRefresh). Re-reading every project and every BOM line on each
+// poll shipped ~1.5 MB out of the database per call and exhausted the
+// Supabase organisation's egress quota within a week. So the full read only
+// happens when the data actually changed: a one-row fingerprint of both
+// tables is checked first.
+//
+// The fingerprint is computed from the rows themselves — row count plus a sum
+// of hashes of each row version's physical id (ctid) and creating transaction
+// (xmin) — so it changes on ANY insert, update or delete, whichever route or
+// engine function (or manual SQL) made it. Plain max(xmin) is NOT enough: a
+// long transaction that commits after a newer one leaves max(xmin) unchanged.
+// Table housekeeping (VACUUM FULL / CLUSTER) can also change it, which only
+// costs one extra full read.
+const LIST_FINGERPRINT_SQL = `
+  SELECT
+    (SELECT count(*)::text || ':' || coalesce(sum(hashtext(ctid::text || '/' || xmin::text)::bigint), 0)::text FROM projects)  AS p,
+    (SELECT count(*)::text || ':' || coalesce(sum(hashtext(ctid::text || '/' || xmin::text)::bigint), 0)::text FROM bom_lines) AS b`;
+
+let listCache = null;   // { fp, payload } — identical for every user
+let listLoading = null; // { fp, promise } — one full read at a time per fingerprint
+
+async function readProjectList() {
   const projRes = await pool.query('SELECT * FROM projects ORDER BY created_at DESC');
   const bomRes  = await pool.query('SELECT * FROM bom_lines ORDER BY created_at');
   const bomByProject = {};
@@ -62,7 +83,29 @@ router.get('/', async (req, res) => {
     (bomByProject[line.project_id] = bomByProject[line.project_id] || []).push(line);
   });
   const projects = projRes.rows.map((p) => ({ ...withAliases(p), bom: bomByProject[p.id] || [] }));
-  res.json({ projects });
+  return { projects };
+}
+
+// A write landing between the fingerprint check and the full read is safe:
+// the newer data is cached under the older fingerprint, so the next poll sees
+// a different fingerprint and reads again. Data is never served stale for
+// longer than one poll.
+async function getProjectList() {
+  const { rows: [f] } = await pool.query(LIST_FINGERPRINT_SQL);
+  const fp = `${f.p}|${f.b}`;
+  if (listCache && listCache.fp === fp) return listCache.payload;
+  if (!listLoading || listLoading.fp !== fp) {
+    const promise = readProjectList()
+      .then((payload) => { listCache = { fp, payload }; return payload; })
+      .finally(() => { if (listLoading && listLoading.promise === promise) listLoading = null; });
+    listLoading = { fp, promise };
+  }
+  return listLoading.promise;
+}
+
+// GET /api/projects — list all projects, each with its full BOM embedded
+router.get('/', async (req, res) => {
+  res.json(await getProjectList());
 });
 
 // GET /api/projects/:id — single project with its full BOM

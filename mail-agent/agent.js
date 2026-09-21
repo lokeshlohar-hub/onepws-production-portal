@@ -15,7 +15,9 @@
 //
 // Configuration comes from mail-agent/.env — see .env.example.
 
-require('dotenv').config();
+// Load .env from THIS folder, not the caller's working directory — otherwise
+// `node mail-agent/agent.js` from the repo root silently finds no settings.
+require('dotenv').config({ path: require('path').join(__dirname, '.env') });
 const nodemailer = require('nodemailer');
 
 const PORTAL_URL = (process.env.PORTAL_URL || '').replace(/\/+$/, '');

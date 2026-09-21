@@ -186,12 +186,18 @@ async function main() {
   } catch (err) {
     console.error('Portal check FAILED:', err.message);
     if (/401/.test(err.message)) {
+      // A rejected token can never fix itself, so there is no point polling.
       console.error('  -> MAIL_AGENT_TOKEN does not match the one set on the portal.');
+      if (!checkOnly) process.exit(1);
     } else if (/503/.test(err.message)) {
-      console.error('  -> The portal has not enabled the relay yet. That is expected before go-live;');
-      console.error('     the SMTP side above is what matters right now.');
+      // The relay may simply not be switched on yet, or may be toggled off for
+      // maintenance. Exiting here would make the Windows service flap and end
+      // up paused; instead wait for it and start delivering when it appears.
+      console.error('  -> The relay is not switched on at the portal yet.');
+      console.error('     Waiting — delivery begins automatically once it is enabled.');
+    } else {
+      console.error('  -> Could not reach the portal (network or cold start). Will keep retrying.');
     }
-    if (!checkOnly) process.exit(1);
   }
 
   if (checkOnly) {

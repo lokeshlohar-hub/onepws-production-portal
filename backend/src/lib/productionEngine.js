@@ -189,8 +189,12 @@ function applyBoardToComponentConversion(line, sawStageName, boardsApproved) {
   const boardQty = line.board_qty || 1;
   const compQty = line.qty || 1;
   const ratio = compQty / boardQty;
-  const newComponents = Math.round(boardsApproved * ratio);
-  line.components_released = (line.components_released || 0) + newComponents;
+  const rawNewComponents = Math.round(boardsApproved * ratio);
+  const currentReleased = line.components_released || 0;
+  // Same cap as the sibling cascade below — never release more than this
+  // line's own planned qty, no matter how many approval batches run.
+  const newComponents = Math.min(rawNewComponents, Math.max(0, compQty - currentReleased));
+  line.components_released = currentReleased + newComponents;
   line.stage_data[sawStageName].history.push({
     ts: new Date().toISOString(),
     ws: 'CONVERSION',
@@ -280,7 +284,7 @@ async function refreshProjectProgress(client, projectId) {
     if (line.seg === 'wood') { woodQty += line.qty; woodDone += done; }
     else if (line.seg === 'ext') { extQty += line.qty; extDone += done; }
   });
-  const progress = totalQty > 0 ? Math.round((totalDone / totalQty) * 100) : 0;
+  const progress = totalQty > 0 ? Math.min(100, Math.round((totalDone / totalQty) * 100)) : 0;
   await client.query('UPDATE projects SET progress = $1 WHERE id = $2', [progress, projectId]);
 
   // Segment-independent completion stamping (v54.6) -- a segment stamps its own
@@ -369,11 +373,20 @@ async function processQcDecision(lineId, { stageName, approveQty, rejectQty, dis
 
       for (const sib of siblingsToUpdate) {
         const sibCompQty = Number(sib.qty) || 1;
-        const cascadeQty = approveQty >= ownerBoardQty
+        const rawCascadeQty = approveQty >= ownerBoardQty
           ? sibCompQty
           : Math.floor(sibCompQty * (approveQty / ownerBoardQty));
+        const currentReleased = Number(sib.components_released) || 0;
+        // Cap what's ever released to a sibling at its own component qty —
+        // without this, repeated partial approvals at the shared saw stage
+        // (each batch checked against the FULL owner board qty rather than
+        // what's already been cascaded) kept re-crediting the sibling's full
+        // qty every round, so components_released — and eventually qc_approved
+        // once those "released" units clear QC — ran far past the line's real
+        // qty (e.g. 1 planned unit ending up with 4 approved).
+        const cascadeQty = Math.min(rawCascadeQty, sibCompQty - currentReleased);
         if (cascadeQty <= 0) continue;
-        const newReleased = (Number(sib.components_released) || 0) + cascadeQty;
+        const newReleased = currentReleased + cascadeQty;
         await client.query('UPDATE bom_lines SET components_released = $1 WHERE line_id = $2', [newReleased, sib.line_id]);
       }
     }

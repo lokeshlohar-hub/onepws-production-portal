@@ -19,6 +19,7 @@ const todoRoutes = require('./routes/todo');
 const mistakeRegisterRoutes = require('./routes/mistakeRegister');
 const dmsRoutes = require('./routes/dms');
 const woodImportRoutes = require('./routes/woodImport');
+const adminAuditRoutes = require('./routes/adminAudit');
 
 const app = express();
 app.use(cors());
@@ -103,6 +104,7 @@ app.use('/api/todo-list', todoRoutes);
 app.use('/api/mistake-register', mistakeRegisterRoutes);
 app.use('/api/dms-documents', dmsRoutes);
 app.use('/api/wood/import', woodImportRoutes);
+app.use('/api/admin-audit', adminAuditRoutes);
 // Serve the frontend from repo root (Phase 19 local deploy)
 const path = require('path');
 app.use(express.static(path.join(__dirname, '..', '..')));

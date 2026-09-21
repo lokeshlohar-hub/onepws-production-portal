@@ -6954,6 +6954,81 @@ async function checkBackendStatus(){
   }
 }
 
+function getDataAuditAdmin(){
+  return `<div class="card">
+    <div class="card-header"><div class="card-title">🩺 Data Integrity Audit</div></div>
+    <div class="card-body">
+      <div class="alert alert-info" style="font-size:12px">Checks every BOM component for a data bug that could make Production Progress read above 100% (or show "Complete" while pieces are still pending): a shared-board component whose QC-approved / released count ended up higher than its own planned quantity. The bug that caused this is already fixed for new approvals — this only finds and optionally cleans up records from before the fix.</div>
+      <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
+        <button class="btn btn-primary btn-sm" onclick="runDataAudit()">🔍 Run Audit</button>
+        <button class="btn btn-outline btn-sm" onclick="runRecomputeProgress()" title="Safe — just re-derives each project's cached progress % / Running-Completed status from its current BOM data. Changes no historical QC record.">🔄 Recompute All Progress (safe)</button>
+        <button class="btn btn-outline btn-sm" style="color:var(--red);border-color:var(--red)" onclick="runRepairOvercounts()" title="Caps any over-counted QC-approved / released values down to the component's own qty. Rewrites historical QC data — run the audit first and review what it found.">🛠 Repair Over-Counted Lines</button>
+      </div>
+      <div id="dataAuditResult"><div class="text-sm text-muted">Click "Run Audit" to scan every project's BOM.</div></div>
+    </div>
+  </div>`;
+}
+function _dataAuditRowsHTML(badLines, badProjects){
+  const linesTable = badLines.length
+    ? '<table style="margin-top:8px"><thead><tr><th>Project</th><th>Component</th><th>Qty</th><th>QC Approved</th><th>Released</th></tr></thead><tbody>'
+      +badLines.map(b=>'<tr><td class="font-mono text-xs">'+b.sap+'</td><td>'+b.item+' <span class="text-xs text-muted">('+b.seg+')</span></td>'
+        +'<td>'+b.qty+'</td><td class="'+(b.qcApproved>b.qty?'text-danger fw-600':'')+'">'+b.qcApproved+'</td>'
+        +'<td class="'+(b.componentsReleased>b.qty?'text-danger fw-600':'')+'">'+b.componentsReleased+'</td></tr>').join('')
+      +'</tbody></table>'
+    : '<div class="text-sm text-success" style="margin-top:8px">✓ No over-counted BOM lines found.</div>';
+  const projTable = badProjects.length
+    ? '<table style="margin-top:8px"><thead><tr><th>Project</th><th>Customer</th><th>Stored Progress</th></tr></thead><tbody>'
+      +badProjects.map(p=>'<tr><td class="font-mono text-xs">'+p.sap+'</td><td>'+(p.customer||'—')+'</td><td class="text-danger fw-600">'+p.progress+'%</td></tr>').join('')
+      +'</tbody></table>'
+    : '<div class="text-sm text-success" style="margin-top:8px">✓ No projects with stored progress above 100%.</div>';
+  return '<div style="margin-top:14px"><div class="fw-600 text-sm">Over-counted BOM lines ('+badLines.length+')</div>'+linesTable+'</div>'
+    +'<div style="margin-top:14px"><div class="fw-600 text-sm">Projects with progress &gt; 100% stored ('+badProjects.length+')</div>'+projTable+'</div>';
+}
+let _lastDataAudit = null;
+async function runDataAudit(){
+  const el=document.getElementById('dataAuditResult');
+  if(!el) return;
+  el.innerHTML='<div class="text-sm text-muted">Scanning…</div>';
+  try{
+    const data = await apiRequest('/admin-audit/report');
+    _lastDataAudit = data;
+    el.innerHTML='<div class="text-xs text-muted">Checked '+data.totalLinesChecked+' BOM lines across '+data.totalProjectsChecked+' projects.</div>'
+      + _dataAuditRowsHTML(data.badLines, data.badProjects);
+  }catch(err){
+    el.innerHTML='<div class="alert alert-danger" style="font-size:12.5px">⚠ '+err.message+'</div>';
+  }
+}
+async function runRecomputeProgress(){
+  const el=document.getElementById('dataAuditResult');
+  if(!el) return;
+  if(!confirm('Re-derive Progress % and Running/Completed status for every project from its current BOM data? This does not change any historical QC record — safe to run any time.')) return;
+  el.innerHTML='<div class="text-sm text-muted">Recomputing…</div>';
+  try{
+    const data = await apiRequest('/admin-audit/recompute-progress', {method:'POST'});
+    toast('Recomputed progress for '+data.projectsChecked+' projects — '+data.projectsChanged+' had a stale value corrected.','✓');
+    runDataAudit();
+  }catch(err){
+    el.innerHTML='<div class="alert alert-danger" style="font-size:12.5px">⚠ '+err.message+'</div>';
+  }
+}
+async function runRepairOvercounts(){
+  if(!_lastDataAudit || !_lastDataAudit.badLines.length){
+    toast('Run the audit first so you can see exactly what will be changed.','⚠');
+    return;
+  }
+  const n = _lastDataAudit.badLines.length;
+  if(!confirm('This will rewrite '+n+' BOM line(s) — capping their QC-approved / released counts down to the planned qty — and recompute affected projects\' progress. This changes historical QC data and cannot be undone. Continue?')) return;
+  const el=document.getElementById('dataAuditResult');
+  el.innerHTML='<div class="text-sm text-muted">Repairing…</div>';
+  try{
+    const data = await apiRequest('/admin-audit/repair-overcounts', {method:'POST'});
+    toast('Repaired '+data.linesRepaired+' BOM line(s), recomputed '+data.projectsRecomputed+' project(s).','✓');
+    runDataAudit();
+  }catch(err){
+    el.innerHTML='<div class="alert alert-danger" style="font-size:12.5px">⚠ '+err.message+'</div>';
+  }
+}
+
 function getUserPermissionAdmin(){
   return '<div class="card">'
     +'<div class="card-header">'
@@ -8184,7 +8259,7 @@ function applyFilters(){
 // Helper: get project status category (auto-computed + manual hold)
 function getProjectStatusCat(p){
   if(p.onHold) return 'hold';
-  if(p.progress===100) return 'completed';
+  if(p.progress>=100) return 'completed';
   return 'running';
 }
 
@@ -10442,8 +10517,14 @@ function applyBoardToComponentConversion(p, b, sawStageName, boardsApproved){
   const boardQty = b.boardQty ?? 1;
   const compQty  = b.qty || 1;
   const ratio = compQty / boardQty;
-  const newComponents = Math.round(boardsApproved * ratio);
-  b.componentsReleased = (b.componentsReleased||0) + newComponents;
+  const rawNewComponents = Math.round(boardsApproved * ratio);
+  const ownerCurrentReleased = b.componentsReleased || 0;
+  // Cap what's ever released at this line's own qty — see matching cap in
+  // the sibling cascade below and in productionEngine.js. Without it, a
+  // saw stage approved across multiple batches keeps re-crediting components
+  // past the line's real qty every round.
+  const newComponents = Math.min(rawNewComponents, Math.max(0, compQty - ownerCurrentReleased));
+  b.componentsReleased = ownerCurrentReleased + newComponents;
   b.stageData[sawStageName].history.push({
     ts: new Date().toISOString().replace('T',' ').slice(0,16),
     ws:'CONVERSION',operator:'Auto',qty:boardsApproved,
@@ -10471,11 +10552,13 @@ function applyBoardToComponentConversion(p, b, sawStageName, boardsApproved){
       const cascadeTargets = linkedChildren.length ? linkedChildren : positionalChildren;
       for(const sibling of cascadeTargets){
         const siblingCompQty = sibling.qty || 1;
-        const cascadeQty = boardsApproved >= ownerBoardQty
+        const rawCascadeQty = boardsApproved >= ownerBoardQty
           ? siblingCompQty
           : Math.floor(siblingCompQty * (boardsApproved / ownerBoardQty));
+        const siblingCurrentReleased = sibling.componentsReleased || 0;
+        const cascadeQty = Math.min(rawCascadeQty, siblingCompQty - siblingCurrentReleased);
         if(cascadeQty <= 0) continue;
-        sibling.componentsReleased = (sibling.componentsReleased||0) + cascadeQty;
+        sibling.componentsReleased = siblingCurrentReleased + cascadeQty;
         // Log cascade on the sibling's Beam Saw stage if it exists, else
         // on its first stage — matches the server's targeting logic.
         const sawStage = (sibling.route||[]).find(s => isSawStage(s));
@@ -13318,7 +13401,7 @@ function refreshProjectProgress(p){
     const lastStage=b.route[b.route.length-1];
     totalDone += lastStage ? (b.stageData[lastStage]?.qcApproved||0) : 0;
   });
-  p.progress = totalQty ? Math.round((totalDone/totalQty)*100) : p.progress;
+  p.progress = totalQty ? Math.min(100, Math.round((totalDone/totalQty)*100)) : p.progress;
   // Stamp each segment's actual-complete date independently, based on that segment's
   // OWN progress (matches computeSegmentCurrentStage's +[char]0x22+Completed+[char]0x22+ badge) -- not the
   // combined total, which could stay under 100% while one segment is already fully done.
@@ -13344,7 +13427,7 @@ function computeSegmentProgress(p, seg){
     const lastStage=b.route[b.route.length-1];
     totalDone += lastStage ? (b.stageData[lastStage]?.qcApproved||0) : 0;
   });
-  return totalQty ? Math.round((totalDone/totalQty)*100) : 0;
+  return totalQty ? Math.min(100, Math.round((totalDone/totalQty)*100)) : 0;
 }
 function computeSegmentCurrentStage(p, seg){
   const active=(p.stages||[]).find(s=>s.seg===seg && s.s==='active');
@@ -20795,6 +20878,7 @@ const ADMIN_SECTIONS = [
         { key:'users',                title:'User & Permission Management', icon:'👤' },
         { key:'deptadminpasswords',   title:'Department Admin Passwords',   icon:'🔑' },
         { key:'backendstatus',        title:'Backend Connection Status',    icon:'🔌' },
+        { key:'dataaudit',            title:'Data Integrity Audit',         icon:'🩺' },
       ]}
     ]
   },
@@ -21249,6 +21333,7 @@ function getAdminHTML(sec){
   if(sec==='users') return getUserPermissionAdmin();
   if(sec==='deptadminpasswords') return getDeptAdminPasswordsAdmin();
   if(sec==='backendstatus') return getBackendStatusAdmin();
+  if(sec==='dataaudit') return getDataAuditAdmin();
 
   return '<div class="card"><div class="card-body"><div class="text-muted text-sm">Section under construction.</div></div></div>';
 }

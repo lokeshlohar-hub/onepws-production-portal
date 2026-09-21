@@ -82,6 +82,14 @@ else {
   try   { $SmtpPass = [Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr) }
   finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
   if ([string]::IsNullOrWhiteSpace($SmtpPass)) { Write-Host "ERROR: empty password." -ForegroundColor Red; exit 1 }
+
+  # Send AS the mailbox we logged in as. Most mail servers refuse a From
+  # address that differs from the authenticated account ("not allowed to send
+  # as"), so only keep a different From if one was passed explicitly.
+  if (-not $PSBoundParameters.ContainsKey('SmtpFrom')) {
+    $SmtpFrom = $SmtpUser
+    Write-Host "      Notifications will be sent from $SmtpFrom." -ForegroundColor Gray
+  }
 }
 
 # --- 4. Write .env ----------------------------------------------------------

@@ -5557,6 +5557,12 @@ function serverProjectToLocal(row) {
     recExt: row.rec_ext, planExt: row.plan_ext, actExt: row.act_ext, dlyExt: row.dly_ext, extSt: row.ext_status,
     progress: row.progress || 0,
     remarks: row.remarks || '',
+    // Hold state — was dropped by this mapper, so a held project showed as
+    // Running again after every refresh even though the server had it on hold.
+    onHold: !!(row.onHold ?? row.on_hold),
+    holdReason: row.holdReason || row.hold_reason || '',
+    holdRemarks: row.holdRemarks || row.hold_remarks || '',
+    holdDate: String(row.holdDate || row.hold_date || '').slice(0, 10),
     certifications: row.certifications || [],
     stages: row.stages || [],
     bom: (row.bom || []).map(serverBomLineToLocal),

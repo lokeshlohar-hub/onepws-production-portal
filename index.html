@@ -142,6 +142,35 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text-prim
   z-index:2;
   box-shadow:0 1px 0 var(--border);
 }
+/* BOM table — sticky frozen columns (Component, Description, L, W, T, Qty)
+   so the identifying data stays visible while scrolling right to Color/
+   Finish, Special Characteristics, etc. The .bom-frozen-col "left" value is
+   content-driven (column widths vary), so it's computed at render time by
+   updateBomFrozenColumns() in JS; this CSS only supplies position/z-index/
+   background. Scoped to .bom-scrollable-content (Project Details BOM tab)
+   so no other table is affected. */
+.bom-scrollable-content table td.bom-frozen-col{
+  position:sticky;
+  z-index:1;
+  background:var(--surface);
+}
+.bom-scrollable-content table tbody tr:hover td.bom-frozen-col{
+  background:var(--surface2);
+}
+.bom-scrollable-content table th.bom-frozen-last,
+.bom-scrollable-content table td.bom-frozen-last{
+  box-shadow:2px 0 4px -2px rgba(0,0,0,.12);
+}
+/* Description is free text and can run long — without a cap, a single long
+   value would blow out the frozen column's width and swallow whichever
+   non-frozen columns (Type, UOM, even Color/Finish) happen to scroll
+   underneath it. Truncated with an ellipsis; full text is on the td's
+   title attribute (see renderSegmentBOMSection). */
+.bom-scrollable-content table td.bom-frozen-desc{
+  max-width:220px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
 table{width:100%;border-collapse:collapse;font-size:12.5px}
 thead th{background:var(--surface2);padding:9px 12px;text-align:left;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;color:var(--text-muted);border-bottom:2px solid var(--border);white-space:nowrap;cursor:pointer;user-select:none}
 thead th:hover{color:var(--accent)}
@@ -4092,6 +4121,29 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
   </div>
 </div>
 
+<!-- MAIL GROUP ADD/EDIT MODAL -->
+<div class="modal-overlay" id="mailGroupModal">
+  <div class="modal">
+    <div class="modal-header"><div class="modal-title" id="mgModalTitle">📁 New Mail Group</div><button class="modal-close" onclick="closeMod('mailGroupModal')">×</button></div>
+    <div class="modal-body">
+      <input type="hidden" id="mg_edit_idx">
+      <div class="form-group"><label class="form-label">Group Name <span class="req">*</span></label><input type="text" class="form-input" id="mg_name" placeholder="e.g. CD PROJECT, ASSEMBLY, QC, PACKING"></div>
+      <div class="form-group">
+        <label class="form-label">Pick from Handover Recipients</label>
+        <div id="mg_recipient_picker" style="max-height:160px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:8px 10px;background:var(--surface);font-size:12.5px"></div>
+      </div>
+      <div class="form-group" style="margin-bottom:0">
+        <label class="form-label">Other Emails (not in the list above)</label>
+        <textarea class="form-input" id="mg_extra_emails" rows="3" style="font-size:12.5px" placeholder="One per line, or comma-separated"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeMod('mailGroupModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveMailGroup()">💾 Save Group</button>
+    </div>
+  </div>
+</div>
+
 <!-- FINAL-STAGE HANDOVER NOTIFICATION MODAL -->
 <div class="modal-overlay" id="handoverNotifyModal">
   <div class="modal" style="max-width:860px">
@@ -4107,6 +4159,7 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
 
       <div class="form-group" style="margin-bottom:12px">
         <label class="form-label">To <span class="req">*</span></label>
+        <div id="handoverToGroupChips" style="margin-bottom:6px"></div>
         <div id="handoverToList" style="max-height:140px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:8px 10px;background:var(--surface);font-size:12.5px"></div>
         <div style="display:flex;gap:6px;margin-top:6px">
           <input type="email" class="form-input" id="handoverToNew" placeholder="Or type a new To address..." style="flex:1;font-size:12.5px" onkeydown="if(event.key==='Enter'){event.preventDefault();addNewHandoverAddress('to');}">
@@ -4116,6 +4169,7 @@ body.app-locked .sidebar,body.app-locked .main{display:none}
 
       <div class="form-group" style="margin-bottom:12px">
         <label class="form-label">Cc</label>
+        <div id="handoverCcGroupChips" style="margin-bottom:6px"></div>
         <div id="handoverCcList" style="max-height:120px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:8px 10px;background:var(--surface);font-size:12.5px"></div>
         <div style="display:flex;gap:6px;margin-top:6px">
           <input type="email" class="form-input" id="handoverCcNew" placeholder="Or type a new Cc address..." style="flex:1;font-size:12.5px" onkeydown="if(event.key==='Enter'){event.preventDefault();addNewHandoverAddress('cc');}">
@@ -4628,6 +4682,12 @@ const M = {
   // when triggering a final-stage handover notification. Empty by default;
   // Admin adds real entries via Admin Panel > Handover Recipients.
   handoverRecipients:[],
+  // Admin-managed named groups of email addresses (e.g. "CD PROJECT",
+  // "ASSEMBLY", "QC") so the sender can add several recipients to a
+  // handover notification with one click instead of checking each address
+  // individually. Empty by default; Admin adds real entries via Admin
+  // Panel > Mail Groups.
+  mailGroups:[],
 };
 
 // ------ LIVE DATABASE ------
@@ -11219,6 +11279,8 @@ async function openBulkHandoverNotifyModal(p, lines){
   });
   renderHandoverAddressList('handoverToList', addresses, 'to');
   renderHandoverAddressList('handoverCcList', addresses, 'cc');
+  renderMailGroupChips('handoverToGroupChips', 'to');
+  renderMailGroupChips('handoverCcGroupChips', 'cc');
   document.getElementById('handoverToNew').value = '';
   document.getElementById('handoverCcNew').value = '';
 
@@ -11504,6 +11566,8 @@ async function openHandoverNotifyModal(autoOpened){
   });
   renderHandoverAddressList('handoverToList', addresses, 'to');
   renderHandoverAddressList('handoverCcList', addresses, 'cc');
+  renderMailGroupChips('handoverToGroupChips', 'to');
+  renderMailGroupChips('handoverCcGroupChips', 'cc');
   document.getElementById('handoverToNew').value = '';
   document.getElementById('handoverCcNew').value = '';
 
@@ -11573,6 +11637,42 @@ async function openHandoverNotifyModal(autoOpened){
 
 // Renders one address checkbox list (To or Cc). See openHandoverNotifyModal
 // for how the addresses array is built and sorted.
+// Renders one-click group chips (from Admin Panel > Mail Groups) above a
+// To/Cc checkbox list. Clicking a chip checks every member of that group in
+// the corresponding list, adding a new checkbox row for any member not
+// already shown — same mechanism addNewHandoverAddress() uses.
+function renderMailGroupChips(containerId, kind){
+  const el = document.getElementById(containerId);
+  if(!el) return;
+  const groups = M.mailGroups||[];
+  if(!groups.length){ el.innerHTML = ''; return; }
+  el.innerHTML = '<div style="display:flex;flex-wrap:wrap;gap:6px">'
+    + groups.map((g,i)=>'<button type="button" class="btn btn-outline btn-sm" style="font-size:11.5px;padding:3px 9px" '
+        + 'onclick="applyMailGroupToHandover('+i+',\''+kind+'\')" title="Add all '+(g.emails||[]).length+' member(s) of '+g.name.replace(/"/g,'&quot;')+'">'
+        + '📁 '+g.name+' <span class="text-xs text-muted">('+(g.emails||[]).length+')</span></button>').join('')
+    + '</div>';
+}
+
+function applyMailGroupToHandover(idx, kind){
+  const group = (M.mailGroups||[])[idx];
+  if(!group || !(group.emails||[]).length) return;
+  const listId = kind==='to' ? 'handoverToList' : 'handoverCcList';
+  const el = document.getElementById(listId);
+  if(!el) return;
+  if(el.querySelector('input[type="checkbox"]') === null){ el.innerHTML = ''; }
+  group.emails.forEach(email=>{
+    const cbs = Array.from(el.querySelectorAll('input[type="checkbox"]'));
+    const existing = cbs.find(cb=>cb.value.toLowerCase()===email.toLowerCase());
+    if(existing){ existing.checked = true; return; }
+    const row = document.createElement('label');
+    row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:3px 0;cursor:pointer';
+    row.innerHTML = '<input type="checkbox" data-kind="'+kind+'" value="'+email.replace(/"/g,'&quot;')+'" checked>'
+      + '<span>'+email+' <span class="text-xs text-muted">— from '+group.name+' group</span></span>';
+    el.insertBefore(row, el.firstChild);
+  });
+  toast('Added "'+group.name+'" ('+group.emails.length+' recipient(s)) to '+(kind==='to'?'To':'Cc')+'.','✓');
+}
+
 function renderHandoverAddressList(containerId, addresses, kind){
   const el = document.getElementById(containerId);
   if(!el) return;
@@ -14065,7 +14165,8 @@ function renderSegmentBOMSection(p, seg){
     const typeCell=b.isRework?'<span class="badge" style="background:#fef3c7;color:#92400e;font-size:9px" title="Auto-created after rejection at '+(b.reworkSourceStage||'—')+' on '+(b.reworkDate||'—')+' — '+(b.reworkReason||'')+'">&#128260; Rework</span>':'<span class="text-xs text-muted">Original</span>';
     const rcBtn='<button class="btn btn-outline btn-sm" style="height:24px;padding:0 8px;font-size:10.5px;white-space:nowrap" onclick="openRouteCardForLine(\''+b.lineId+'\',\''+p.id+'\')" title="Print or save this component\'s Route Card">🖨 Route Card</button>';
     const descCell=b.description?'<span class="text-xs" style="color:var(--text-primary,#0f1b2d);font-weight:600">'+b.description+'</span>':'<span class="text-xs text-muted">—</span>';
-    return '<tr><td>'+(i+1)+'</td><td class="fw-600">'+b.item+'</td><td>'+descCell+'</td><td>'+typeCell+'</td><td class="font-mono">'+(b.l||'—')+'</td><td class="font-mono">'+(b.w||'—')+'</td><td class="font-mono">'+(b.t||'—')+'</td><td>'+b.uom+'</td><td class="fw-600">'+b.qty+'</td><td class="text-xs">'+(b.colorFinish||'—')+'</td><td>'+((b.specialChars||[]).length?b.specialChars.map(c=>'<span class="char-chip">'+c+'</span>').join(''):'<span class="text-xs text-muted">—</span>')+'</td><td class="text-success fw-600">'+done+'</td><td class="'+(pend>0?'text-danger fw-600':'text-muted')+'">'+pend+'</td><td class="text-xs">'+curStage+'</td><td>'+rcBtn+'</td></tr>';
+    const descTitleAttr=b.description?' title="'+String(b.description).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;')+'"':'';
+    return '<tr><td>'+(i+1)+'</td><td class="fw-600 bom-frozen-col">'+b.item+'</td><td class="bom-frozen-col bom-frozen-desc"'+descTitleAttr+'>'+descCell+'</td><td>'+typeCell+'</td><td class="font-mono bom-frozen-col">'+(b.l||'—')+'</td><td class="font-mono bom-frozen-col">'+(b.w||'—')+'</td><td class="font-mono bom-frozen-col">'+(b.t||'—')+'</td><td>'+b.uom+'</td><td class="fw-600 bom-frozen-col bom-frozen-last">'+b.qty+'</td><td class="text-xs">'+(b.colorFinish||'—')+'</td><td>'+((b.specialChars||[]).length?b.specialChars.map(c=>'<span class="char-chip">'+c+'</span>').join(''):'<span class="text-xs text-muted">—</span>')+'</td><td class="text-success fw-600">'+done+'</td><td class="'+(pend>0?'text-danger fw-600':'text-muted')+'">'+pend+'</td><td class="text-xs">'+curStage+'</td><td>'+rcBtn+'</td></tr>';
   }).join('');
 
   return '<div style="margin-bottom:18px;border:1.5px solid '+headerColor+';border-radius:10px;overflow:hidden;max-height:55vh;display:flex;flex-direction:column">'
@@ -14074,7 +14175,7 @@ function renderSegmentBOMSection(p, seg){
       +'<div class="bom-top-scroll-spacer" id="bomTopSpacer_'+seg+'"></div>'
     +'</div>'
     +'<div class="table-wrap bom-scrollable-content" id="bomTableWrap_'+seg+'" onscroll="syncBomBottomScroll(\''+seg+'\')">'
-      +'<table style="margin:0"><thead><tr><th>#</th><th>Component</th><th>Description</th><th>Type</th><th>L</th><th>W</th><th>T</th><th>UOM</th><th>Qty</th><th>Color / Finish</th><th>Special Characteristics</th><th>Fully Cleared</th><th>Pending</th><th>Current Stage</th><th>Route Card</th></tr></thead>'
+      +'<table style="margin:0"><thead><tr><th>#</th><th class="bom-frozen-col">Component</th><th class="bom-frozen-col">Description</th><th>Type</th><th class="bom-frozen-col">L</th><th class="bom-frozen-col">W</th><th class="bom-frozen-col">T</th><th>UOM</th><th class="bom-frozen-col bom-frozen-last">Qty</th><th>Color / Finish</th><th>Special Characteristics</th><th>Fully Cleared</th><th>Pending</th><th>Current Stage</th><th>Route Card</th></tr></thead>'
       +'<tbody>'+(bodyHtml||'<tr><td colspan="15" class="text-sm text-muted" style="padding:12px;text-align:center">No components in this segment.</td></tr>')+'</tbody></table>'
     +'</div>'
   +'</div>';
@@ -14121,6 +14222,7 @@ function initBomScrollSync(seg){
   const update = ()=>{
     const w = wrap.scrollWidth || table.scrollWidth || 0;
     if(w > 0) spacer.style.width = w+'px';
+    updateBomFrozenColumns(seg);
   };
   update();
   if(typeof ResizeObserver !== 'undefined'){
@@ -14128,6 +14230,33 @@ function initBomScrollSync(seg){
     ro.observe(wrap);
     ro.observe(table);
   }
+}
+
+// Computes and applies sticky "left" offsets for the BOM table's frozen
+// columns (Component, Description, L, W, T, Qty — see .bom-frozen-col).
+// Column widths are content-driven, so a fixed CSS left can't work: this
+// measures each frozen header cell's rendered width and stacks the offsets
+// in order, deliberately skipping the non-frozen columns between them
+// (Type, UOM) since those scroll away rather than staying pinned. Re-run
+// from initBomScrollSync's update() — i.e. on first render and whenever a
+// ResizeObserver detects the table's layout changed (tab reveal, column
+// content changes, window resize).
+function updateBomFrozenColumns(seg){
+  const wrap = document.getElementById('bomTableWrap_'+seg);
+  const table = wrap && wrap.querySelector('table');
+  if(!table) return;
+  const headerCells = [...table.querySelectorAll('thead th')];
+  const bodyRows = [...table.querySelectorAll('tbody tr')];
+  let runningLeft = 0;
+  headerCells.forEach((th, idx)=>{
+    if(!th.classList.contains('bom-frozen-col')) return;
+    th.style.left = runningLeft+'px';
+    bodyRows.forEach(tr=>{
+      const td = tr.children[idx];
+      if(td) td.style.left = runningLeft+'px';
+    });
+    runningLeft += th.offsetWidth;
+  });
 }
 
 function openProj(id){
@@ -20901,6 +21030,7 @@ const ADMIN_SECTIONS = [
         { key:'eng',                 title:'Engineers',           icon:'🔩' },
         { key:'operators',           title:'Operator Master',     icon:'👷' },
         { key:'handoverrecipients',  title:'Handover Recipients', icon:'📧' },
+        { key:'mailgroups',          title:'Mail Groups',         icon:'📁' },
       ]},
       { title:'BOM Management', items:[
         { key:'bom',           title:'BOM Components',    icon:'📦' },
@@ -21260,6 +21390,7 @@ function getAdminHTML(sec){
   if(sec==='routing')    return getRoutingAdmin();
   if(sec==='processgroups') return getProcessGroupsAdmin();
   if(sec==='handoverrecipients') return getHandoverRecipientsAdmin();
+  if(sec==='mailgroups') return getMailGroupsAdmin();
   if(sec==='cycletime') return getCycleTimeAdmin();
   if(sec==='dmsdepts')  return getDmsDeptsAdmin();
   if(sec==='dmsorigins') return getDmsOriginsAdmin();
@@ -21425,6 +21556,123 @@ async function deleteHandoverRecipient(idx){
   toast('Recipient "'+r.department+'" deleted.','✓');
   renderAdmin('handoverrecipients',null);
   persistAdminConfig('handoverRecipients');
+}
+
+// Named groups of email addresses (e.g. "CD PROJECT", "ASSEMBLY", "QC",
+// "PACKING") so a handover notification's To/Cc pickers can add several
+// recipients in one click via a group chip instead of checking each address
+// one at a time. Each group's members can be picked from the Handover
+// Recipients master list and/or typed in as free-text emails not yet in
+// that list.
+function getMailGroupsAdmin(){
+  const list = M.mailGroups||[];
+  const rows = list.map((g,i)=>{
+    const emails = g.emails||[];
+    const preview = emails.slice(0,4).join(', ') + (emails.length>4 ? ', +'+(emails.length-4)+' more' : '');
+    return `<tr>
+    <td class="fw-600 text-sm">${g.name}</td>
+    <td class="text-xs text-muted" style="max-width:420px">${preview || '—'}</td>
+    <td class="text-sm" style="text-align:center">${emails.length}</td>
+    <td style="display:flex;gap:4px;flex-wrap:wrap">
+      <button class="btn btn-outline btn-sm" onclick="openMailGroupModal(${i})">✏ Edit</button>
+      <button class="btn btn-danger btn-sm" onclick="deleteMailGroup(${i})">🗑 Delete</button>
+    </td>
+  </tr>`;
+  }).join('');
+
+  return `<div class="card">
+    <div class="card-header">
+      <div><div class="card-title">📁 Mail Groups${lockBadge('ADMIN ONLY')}</div>
+      <div class="text-xs text-muted" style="margin-top:2px">Bundle multiple recipients under one name (e.g. CD Project, CR Project, Assembly, QC, Packing) so they can all be added to a handover email's To/Cc with a single click.</div></div>
+      <button class="btn btn-primary btn-sm" onclick="openMailGroupModal(null)">+ Add Group</button>
+    </div>
+    <div class="card-body">
+      <table>
+        <thead><tr><th>Group Name</th><th>Members</th><th style="width:80px">Count</th><th style="width:170px">Actions</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="4" class="text-sm text-muted" style="padding:14px;text-align:center">No mail groups configured yet. Click + Add Group to set up the first one.</td></tr>'}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+function openMailGroupModal(idx){
+  const g = (idx!=null) ? M.mailGroups[idx] : null;
+  const groupEmails = new Set((g && g.emails || []).map(e=>e.toLowerCase()));
+  document.getElementById('mg_edit_idx').value = idx!=null ? idx : -1;
+  document.getElementById('mg_name').value = g ? g.name : '';
+
+  // Checkbox picker built from the Handover Recipients master list — the
+  // people already typed in there (ravi.nagda, pawan, etc.) shouldn't need
+  // to be retyped when bundling them into a group.
+  const recipients = M.handoverRecipients||[];
+  const pickerEl = document.getElementById('mg_recipient_picker');
+  if(!recipients.length){
+    pickerEl.innerHTML = '<div class="text-xs text-muted" style="padding:4px 0">No Handover Recipients set up yet — add emails below instead.</div>';
+  } else {
+    pickerEl.innerHTML = recipients.map((r,i)=>{
+      const checked = groupEmails.has((r.email||'').toLowerCase()) ? 'checked' : '';
+      return '<label style="display:flex;align-items:center;gap:8px;padding:3px 0;cursor:pointer">'
+        +'<input type="checkbox" class="mg-recipient-cb" value="'+r.email.replace(/"/g,'&quot;')+'" '+checked+'>'
+        +'<span>'+r.email+' <span class="text-xs text-muted">— '+r.department+'</span></span>'
+        +'</label>';
+    }).join('');
+  }
+
+  // Any group member not present in the Handover Recipients list (i.e. not
+  // matched by a picker checkbox) goes in the free-text box instead, so
+  // editing a group never silently drops an address.
+  const pickerEmails = new Set(recipients.map(r=>(r.email||'').toLowerCase()));
+  const extra = g ? (g.emails||[]).filter(e=>!pickerEmails.has(e.toLowerCase())) : [];
+  document.getElementById('mg_extra_emails').value = extra.join('\n');
+
+  document.getElementById('mgModalTitle').textContent = g ? '✏ Edit Mail Group' : '📁 New Mail Group';
+  document.getElementById('mailGroupModal').classList.add('open');
+}
+
+function saveMailGroup(){
+  const idx = parseInt(document.getElementById('mg_edit_idx').value);
+  const name = document.getElementById('mg_name').value.trim();
+  const pickedEmails = Array.from(document.querySelectorAll('.mg-recipient-cb:checked')).map(cb=>cb.value);
+  const extraRaw = document.getElementById('mg_extra_emails').value;
+  const extraEmails = extraRaw.split(/[,;\n]+/).map(s=>s.trim()).filter(Boolean);
+  const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const invalid = extraEmails.filter(e=>!emailRe.test(e));
+
+  if(!name){ toast('Group name is required.','⚠'); return; }
+  if(invalid.length){ toast('Not a valid email address: '+invalid[0],'⚠'); return; }
+
+  const seen = new Set(); const emails = [];
+  pickedEmails.concat(extraEmails).forEach(e=>{
+    const k = e.toLowerCase();
+    if(!seen.has(k)){ seen.add(k); emails.push(e); }
+  });
+  if(!emails.length){ toast('Add at least one member to the group.','⚠'); return; }
+
+  const ts=new Date().toISOString().replace('T',' ').slice(0,16);
+  if(idx===-1){
+    M.mailGroups.push({name, emails});
+    DB.auditLog.unshift({ts,user:CURRENT_USER?CURRENT_USER.fullName:'Admin',action:'Create',module:'Mail Groups',entity:name,field:'New Group',old:'--',nw:emails.length+' member(s)',ip:'192.168.1.1'});
+    toast('Group "'+name+'" added.','✓');
+  } else {
+    const old = M.mailGroups[idx];
+    M.mailGroups[idx] = {name, emails};
+    DB.auditLog.unshift({ts,user:CURRENT_USER?CURRENT_USER.fullName:'Admin',action:'Update',module:'Mail Groups',entity:name,field:'Group',old:(old.emails||[]).length+' member(s)',nw:emails.length+' member(s)',ip:'192.168.1.1'});
+    toast('Group "'+name+'" updated.','✓');
+  }
+  closeMod('mailGroupModal');
+  renderAdmin('mailgroups',null);
+  persistAdminConfig('mailGroups');
+}
+
+async function deleteMailGroup(idx){
+  const g = M.mailGroups[idx]; if(!g) return;
+  if(!(await electronConfirm('Delete mail group "'+g.name+'" ('+(g.emails||[]).length+' member(s))?'))) return;
+  M.mailGroups.splice(idx,1);
+  const ts=new Date().toISOString().replace('T',' ').slice(0,16);
+  DB.auditLog.unshift({ts,user:CURRENT_USER?CURRENT_USER.fullName:'Admin',action:'Delete',module:'Mail Groups',entity:g.name,field:'Group',old:(g.emails||[]).length+' member(s)',nw:'Deleted',ip:'192.168.1.1'});
+  toast('Group "'+g.name+'" deleted.','✓');
+  renderAdmin('mailgroups',null);
+  persistAdminConfig('mailGroups');
 }
 
 // Renders the Process Groups admin section as two stacked cards on one page:

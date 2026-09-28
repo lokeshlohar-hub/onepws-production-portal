@@ -9,6 +9,7 @@
 // server becomes the single source of truth for these calculations.
 
 const { pool } = require('../db');
+const wd = require('./workingDays');
 
 // Self-healing helper — when a stage submit or QC decision hits a line
 // whose stage_data doesn't yet contain the target stage, this checks
@@ -263,7 +264,7 @@ async function spawnReworkBomLine(client, origLine, rejectQty, stageName, catego
 // on the frontend exactly, so both sides agree on what "the deadline" means.
 async function getEffectivePlanDate(client, projectId, segment, fallbackPlanDate) {
   const { rows } = await client.query(
-    `SELECT revised_completion FROM tat_overrides
+    `SELECT revised_completion::text AS revised_completion FROM tat_overrides
      WHERE project_id = $1 AND (segment = $2 OR segment = 'both')
      ORDER BY created_at DESC LIMIT 1`,
     [projectId, segment]
@@ -295,20 +296,34 @@ async function refreshProjectProgress(client, projectId) {
   const woodProgress = woodQty > 0 ? Math.round((woodDone / woodQty) * 100) : 0;
   const extProgress  = extQty  > 0 ? Math.round((extDone  / extQty ) * 100) : 0;
   if (woodProgress >= 100 || extProgress >= 100) {
-    const { rows: pRows } = await client.query('SELECT has_wood, has_ext, plan_wood, plan_ext, act_wood, act_ext FROM projects WHERE id = $1', [projectId]);
+    const { rows: pRows } = await client.query(
+      `SELECT has_wood, has_ext, plan_wood::text AS plan_wood, plan_ext::text AS plan_ext, act_wood, act_ext,
+              on_hold, hold_date::text AS hold_date, CURRENT_DATE::text AS today
+       FROM projects WHERE id = $1`, [projectId]);
     const proj = pRows[0] || {};
-    const effWood = (proj.has_wood && woodProgress >= 100) ? await getEffectivePlanDate(client, projectId, 'wood', proj.plan_wood) : null;
-    const effExt  = (proj.has_ext  && extProgress  >= 100) ? await getEffectivePlanDate(client, projectId, 'ext',  proj.plan_ext)  : null;
+    const holidays = await wd.loadHolidaySet(client);
+    // Delay is counted in TAT working days (no Sundays / holidays). If the
+    // segment finishes while the project is still on Hold, the TAT clock has
+    // been paused since hold_date, so the deadline moves out by those days.
+    const pendingHold = proj.on_hold ? wd.heldWorkingDays(proj.hold_date, proj.today, holidays) : 0;
+    const delayFor = async (seg, planDate) => {
+      const eff = await getEffectivePlanDate(client, projectId, seg, planDate);
+      if (!eff) return null;
+      const deadline = wd.addWorkingDays(String(eff).slice(0, 10), pendingHold, holidays);
+      return wd.workingDaysBetween(deadline, proj.today, holidays);
+    };
+    const dlyWood = (proj.has_wood && woodProgress >= 100 && !proj.act_wood) ? await delayFor('wood', proj.plan_wood) : null;
+    const dlyExt  = (proj.has_ext  && extProgress  >= 100 && !proj.act_ext)  ? await delayFor('ext',  proj.plan_ext)  : null;
     await client.query(
       `UPDATE projects SET
          wood_status = CASE WHEN has_wood AND $4 THEN 'Complete' ELSE wood_status END,
          ext_status  = CASE WHEN has_ext  AND $5 THEN 'Complete' ELSE ext_status END,
          act_wood = CASE WHEN has_wood AND $4 AND act_wood IS NULL THEN CURRENT_DATE ELSE act_wood END,
          act_ext  = CASE WHEN has_ext  AND $5 AND act_ext  IS NULL THEN CURRENT_DATE ELSE act_ext END,
-         dly_wood = CASE WHEN has_wood AND $4 AND act_wood IS NULL AND $2::date IS NOT NULL THEN (CURRENT_DATE - $2::date) ELSE dly_wood END,
-         dly_ext  = CASE WHEN has_ext  AND $5 AND act_ext  IS NULL AND $3::date IS NOT NULL THEN (CURRENT_DATE - $3::date)  ELSE dly_ext  END
+         dly_wood = CASE WHEN has_wood AND $4 AND act_wood IS NULL AND $2::int IS NOT NULL THEN $2::int ELSE dly_wood END,
+         dly_ext  = CASE WHEN has_ext  AND $5 AND act_ext  IS NULL AND $3::int IS NOT NULL THEN $3::int ELSE dly_ext  END
        WHERE id = $1`,
-      [projectId, effWood, effExt, woodProgress >= 100, extProgress >= 100]
+      [projectId, dlyWood, dlyExt, woodProgress >= 100, extProgress >= 100]
     );
   }
   return progress;

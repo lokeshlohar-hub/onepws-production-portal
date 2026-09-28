@@ -2,6 +2,7 @@ const express = require('express');
 const { pool } = require('../db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const engine = require('../lib/productionEngine');
+const wd = require('../lib/workingDays');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -13,6 +14,9 @@ router.use(requireAuth);
 //   - job_work_po   : v54.1, Aluminum Extrusion Job Work PO No.
 //   - remarks       : v54.1, project-level remarks (Update Stage + Overview)
 //   - on_hold + hold_reason/remarks/date/held_by : v54.1, Project Hold persistence
+//   - hold_days_wood, hold_days_ext : working days the TAT clock was paused by
+//     Holds, per segment (already added into plan_wood/plan_ext on Resume;
+//     kept so "Recalculate TAT" can re-apply them)
 //   - drawing_wood, drawing_ext : v54.6, per-segment Drawing/File Reference —
 //     previously entered at project creation but only kept in an in-memory
 //     sub-object that was never sent to the server, so it vanished on reload
@@ -28,6 +32,8 @@ router.use(requireAuth);
     await pool.query(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS hold_remarks TEXT NOT NULL DEFAULT ''`);
     await pool.query(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS hold_date DATE`);
     await pool.query(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS held_by INTEGER`);
+    await pool.query(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS hold_days_wood INTEGER NOT NULL DEFAULT 0`);
+    await pool.query(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS hold_days_ext INTEGER NOT NULL DEFAULT 0`);
   } catch (err) {
     console.error('[schema-init] Failed to ensure projects columns:', err.message);
   }
@@ -45,6 +51,8 @@ function withAliases(p) {
     holdReason:  p.hold_reason  || '',
     holdRemarks: p.hold_remarks || '',
     holdDate:    p.hold_date,
+    holdDaysWood: p.hold_days_wood || 0,
+    holdDaysExt:  p.hold_days_ext  || 0,
     jobWorkPO:   p.job_work_po  || '',
     drawingWood: p.drawing_wood || '',
     drawingExt:  p.drawing_ext  || '',
@@ -349,7 +357,7 @@ router.post('/:id/hold', requireRole('admin', 'superadmin'), async (req, res) =>
        SET on_hold = TRUE,
            hold_reason  = $1,
            hold_remarks = $2,
-           hold_date    = $3,
+           hold_date    = CASE WHEN on_hold AND hold_date IS NOT NULL THEN hold_date ELSE $3::date END,
            held_by      = $4
      WHERE id = $5
      RETURNING id, on_hold, hold_reason, hold_remarks, hold_date`,
@@ -369,21 +377,95 @@ router.post('/:id/hold', requireRole('admin', 'superadmin'), async (req, res) =>
   });
 });
 
-// POST /api/projects/:id/resume — release a project from Hold
+// POST /api/projects/:id/resume — release a project from Hold.
+// TAT is paused while a project is on Hold: every working day (not Sunday, not
+// a holiday) from hold_date up to today is added to the deadline of each
+// segment that hasn't completed yet — plan_wood/plan_ext, and the latest
+// Timeline Override's revised completion if one is in force — so the project
+// comes back with exactly the time it had left when it was held.
 router.post('/:id/resume', requireRole('admin', 'superadmin'), async (req, res) => {
-  const result = await pool.query(
-    `UPDATE projects
-       SET on_hold      = FALSE,
-           hold_reason  = '',
-           hold_remarks = '',
-           hold_date    = NULL,
-           held_by      = NULL
-     WHERE id = $1
-     RETURNING id, on_hold`,
-    [req.params.id]
-  );
-  if (!result.rows[0]) return res.status(404).json({ error: 'Project not found' });
-  res.json({ ok: true, project: { id: result.rows[0].id, onHold: false } });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query(
+      `SELECT id, on_hold, hold_date::text AS hold_date, has_wood, has_ext,
+              plan_wood::text AS plan_wood, plan_ext::text AS plan_ext, act_wood, act_ext,
+              hold_days_wood, hold_days_ext
+       FROM projects WHERE id = $1 FOR UPDATE`,
+      [req.params.id]
+    );
+    const p = rows[0];
+    if (!p) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Project not found' }); }
+
+    const holidays = await wd.loadHolidaySet(client);
+    const today = wd.todayStr();
+    const held = p.on_hold ? wd.heldWorkingDays(p.hold_date, today, holidays) : 0;
+    const shiftWood = held > 0 && p.has_wood && !p.act_wood;
+    const shiftExt  = held > 0 && p.has_ext  && !p.act_ext;
+
+    const planWood = shiftWood && p.plan_wood ? wd.addWorkingDays(p.plan_wood, held, holidays) : p.plan_wood;
+    const planExt  = shiftExt  && p.plan_ext  ? wd.addWorkingDays(p.plan_ext,  held, holidays) : p.plan_ext;
+    const holdDaysWood = (p.hold_days_wood || 0) + (shiftWood ? held : 0);
+    const holdDaysExt  = (p.hold_days_ext  || 0) + (shiftExt  ? held : 0);
+
+    await client.query(
+      `UPDATE projects
+         SET on_hold        = FALSE,
+             hold_reason    = '',
+             hold_remarks   = '',
+             hold_date      = NULL,
+             held_by        = NULL,
+             plan_wood      = $2::date,
+             plan_ext       = $3::date,
+             hold_days_wood = $4,
+             hold_days_ext  = $5
+       WHERE id = $1`,
+      [p.id, planWood, planExt, holdDaysWood, holdDaysExt]
+    );
+
+    // Latest override per still-running segment ('both' covers either).
+    const overrideIds = new Set();
+    for (const [seg, shift] of [['wood', shiftWood], ['ext', shiftExt]]) {
+      if (!shift) continue;
+      const { rows: ov } = await client.query(
+        `SELECT id FROM tat_overrides WHERE project_id = $1 AND (segment = $2 OR segment = 'both')
+         ORDER BY created_at DESC LIMIT 1`, [p.id, seg]);
+      if (ov[0]) overrideIds.add(ov[0].id);
+    }
+    const shiftedOverrides = [];
+    for (const id of overrideIds) {
+      const { rows: ov } = await client.query(
+        'SELECT revised_completion::text AS rc FROM tat_overrides WHERE id = $1', [id]);
+      if (!ov[0] || !ov[0].rc) continue;
+      const rc = wd.addWorkingDays(ov[0].rc, held, holidays);
+      await client.query('UPDATE tat_overrides SET revised_completion = $1::date WHERE id = $2', [rc, id]);
+      shiftedOverrides.push({ id, revisedCompletion: rc });
+    }
+
+    const userId = (req.user && req.user.id) ? req.user.id : null;
+    const logs = [];
+    if (planWood !== p.plan_wood) logs.push(['planWood', p.plan_wood, planWood]);
+    if (planExt !== p.plan_ext) logs.push(['planExt', p.plan_ext, planExt]);
+    for (const [field, oldVal, newVal] of logs) {
+      await client.query(
+        'INSERT INTO project_edit_log (user_id, project_id, field, old_value, new_value) VALUES ($1, $2, $3, $4, $5)',
+        [userId, p.id, field, oldVal, newVal + ' (TAT paused ' + held + ' working day(s) on Hold)']
+      );
+    }
+
+    await client.query('COMMIT');
+    res.json({
+      ok: true,
+      heldDays: held,
+      project: { id: p.id, onHold: false, planWood, planExt, holdDaysWood, holdDaysExt },
+      shiftedOverrides,
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 });
 
 // DELETE /api/projects/:id — permanent delete, cascades to BOM and logs

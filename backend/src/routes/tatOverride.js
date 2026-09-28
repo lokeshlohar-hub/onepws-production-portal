@@ -1,6 +1,7 @@
 const express = require('express');
 const { pool } = require('../db');
 const { requireAuth } = require('../middleware/auth');
+const wd = require('../lib/workingDays');
 const router = express.Router();
 router.use(requireAuth);
 
@@ -56,19 +57,20 @@ router.post('/', async (req, res) => {
     // keep showing its old, wrong delay number forever, since nothing else
     // will naturally re-trigger a recalculation on an already-completed project.
     const { rows: projStateRows } = await client.query(
-      'SELECT has_wood, has_ext, act_wood, act_ext FROM projects WHERE id = $1', [projectId]
+      'SELECT has_wood, has_ext, act_wood::text AS act_wood, act_ext::text AS act_ext FROM projects WHERE id = $1', [projectId]
     );
     const proj = projStateRows[0] || {};
+    const holidays = await wd.loadHolidaySet(client);
     if ((segment === 'wood' || segment === 'both') && proj.has_wood && proj.act_wood) {
       await client.query(
-        'UPDATE projects SET dly_wood = (act_wood - $1::date) WHERE id = $2',
-        [revisedCompletion, projectId]
+        'UPDATE projects SET dly_wood = $1 WHERE id = $2',
+        [wd.workingDaysBetween(revisedCompletion, proj.act_wood, holidays), projectId]
       );
     }
     if ((segment === 'ext' || segment === 'both') && proj.has_ext && proj.act_ext) {
       await client.query(
-        'UPDATE projects SET dly_ext = (act_ext - $1::date) WHERE id = $2',
-        [revisedCompletion, projectId]
+        'UPDATE projects SET dly_ext = $1 WHERE id = $2',
+        [wd.workingDaysBetween(revisedCompletion, proj.act_ext, holidays), projectId]
       );
     }
 

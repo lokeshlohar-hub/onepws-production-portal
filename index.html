@@ -4502,6 +4502,9 @@ const M = {
   dimensionalStudyEnabledMachines:[],
   dimensionalCapabilityThresholds:{cpMin:1.33, cpkMin:1.33},
   dimensionalMeasurementLocations:['Top/Upper','Middle','Bottom'],
+  // TAT holidays — {date:'YYYY-MM-DD', name}. Sundays are always non-working;
+  // these dates are skipped too when counting TAT days (see tatAddWorkingDays).
+  holidays:[],
   tatRules:{
     'CD':  {'Cat 1':{ext:7,wood:20},'Cat 2':{ext:7,wood:34},'Cat 3':{ext:7,wood:50}},
     'CR':  {'Cat 1':{ext:7,wood:20},'Cat 2':{ext:7,wood:34},'Cat 3':{ext:7,wood:50}},
@@ -5623,6 +5626,8 @@ function serverProjectToLocal(row) {
     holdReason: row.holdReason || row.hold_reason || '',
     holdRemarks: row.holdRemarks || row.hold_remarks || '',
     holdDate: String(row.holdDate || row.hold_date || '').slice(0, 10),
+    holdDaysWood: row.holdDaysWood ?? row.hold_days_wood ?? 0,
+    holdDaysExt: row.holdDaysExt ?? row.hold_days_ext ?? 0,
     certifications: row.certifications || [],
     stages: row.stages || [],
     bom: (row.bom || []).map(serverBomLineToLocal),
@@ -8379,8 +8384,9 @@ async function confirmHold(){
   if(!reason){toast('Select a hold reason.','&#9888;');return;}
   const remarks=document.getElementById('holdRemarks').value.trim();
   const snap={onHold:p.onHold,holdReason:p.holdReason,holdRemarks:p.holdRemarks,holdDate:p.holdDate};
+  const wasHeld=p.onHold&&p.holdDate;
   p.onHold=true; p.holdReason=reason; p.holdRemarks=remarks;
-  p.holdDate=new Date().toISOString().split('T')[0];
+  if(!wasHeld) p.holdDate=new Date().toISOString().split('T')[0];
   closeMod('holdModal');
   renderTracker();
   try{
@@ -8398,7 +8404,7 @@ async function confirmHold(){
     const ts=new Date().toISOString().replace('T',' ').slice(0,16);
     DB.auditLog.unshift({ts,user:'Admin User',action:'Hold',module:'Tracker',entity:p.id,field:'onHold',old:'false',nw:'true | '+reason,ip:'192.168.1.1'});
     renderTracker();
-    toast(p.sap+' marked as On Hold - '+reason,'&#9208;');
+    toast(p.sap+' marked as On Hold - '+reason+'. TAT is paused until Resume.','&#9208;');
   }catch(err){
     Object.assign(p,snap);
     renderTracker();
@@ -8418,9 +8424,22 @@ async function removeHold(projId){
       headers:{'Content-Type':'application/json','Authorization':'Bearer '+(localStorage.getItem('onepws_token')||'')}
     });
     if(!res.ok){ throw new Error('HTTP '+res.status); }
+    // TAT was paused while on Hold — the server has pushed each running
+    // segment's deadline (and its latest Timeline Override) out by the
+    // working days held. Mirror that locally.
+    const data=await res.json().catch(()=>({}));
+    if(data&&data.project){
+      p.planWood=data.project.planWood; p.planExt=data.project.planExt;
+      p.holdDaysWood=data.project.holdDaysWood||0; p.holdDaysExt=data.project.holdDaysExt||0;
+    }
+    (data.shiftedOverrides||[]).forEach(so=>{
+      const o=(DB.tatOverrideLog||[]).find(x=>x.id===so.id); if(o) o.revisedCompletion=so.revisedCompletion;
+    });
+    renderTracker();
+    const held=data.heldDays||0;
     const ts=new Date().toISOString().replace('T',' ').slice(0,16);
-    DB.auditLog.unshift({ts,user:'Admin User',action:'Resume',module:'Tracker',entity:projId,field:'onHold',old:'true',nw:'false',ip:'192.168.1.1'});
-    toast(p.sap+' is back to Running.','&#10003;');
+    DB.auditLog.unshift({ts,user:'Admin User',action:'Resume',module:'Tracker',entity:projId,field:'onHold',old:'true',nw:'false | TAT extended '+held+' working day(s)',ip:'192.168.1.1'});
+    toast(p.sap+' is back to Running.'+(held?' TAT extended by '+held+' working day(s) for the Hold period.':''),'&#10003;');
   }catch(err){
     Object.assign(p,snap);
     renderTracker();
@@ -8527,6 +8546,11 @@ function renderTrackerSegmentCells(p, seg){
   const received = dateOnly(isWood ? p.recWood : p.recExt) || '&mdash;';
   const planned = dateOnly(isWood ? p.planWood : p.planExt) || '&mdash;';
   const actual = dateOnly(isWood ? p.actWood : p.actExt) || '&mdash;';
+  const holdDays = isWood ? p.holdDaysWood : p.holdDaysExt;
+  const segDone = !!(isWood ? p.actWood : p.actExt);
+  const plannedNote = (p.onHold && !segDone)
+    ? '<div class="text-xs" style="color:#854d0e;font-family:inherit">&#9208; TAT paused</div>'
+    : holdDays>0 ? '<div class="text-xs text-muted" style="font-family:inherit">incl. +'+holdDays+'d hold</div>' : '';
   const dly = isWood ? p.dlyWood : p.dlyExt;
   const dlyHtml = dly>0 ? '<span class="text-danger fw-600">+'+dly+'d</span>' : dly<0 ? '<span class="text-success fw-600">'+dly+'d early</span>' : '<span class="text-muted">&mdash;</span>';
   const progress = computeSegmentProgress(p, seg);
@@ -8539,7 +8563,7 @@ function renderTrackerSegmentCells(p, seg){
   const poCell = seg==='ext' ? '<td class="text-sm font-mono">'+(p.jobWorkPO||'&mdash;')+'</td>' : '';
   return poCell
     +'<td class="text-sm font-mono">'+received+'</td>'
-    +'<td class="text-sm font-mono">'+planned+'</td>'
+    +'<td class="text-sm font-mono">'+planned+plannedNote+'</td>'
     +'<td class="text-sm font-mono">'+actual+'</td>'
     +'<td>'+dlyHtml+'</td>'
     +'<td><div style="display:flex;align-items:center;gap:5px;min-width:70px"><div class="progress-bar" style="flex:1"><div class="progress-fill" style="width:'+progress+'%;background:'+theme+'"></div></div><span class="text-xs fw-600" style="color:'+theme+'">'+progress+'%</span></div></td>'
@@ -9390,6 +9414,55 @@ function onNpTypeChange(){
 function tatKey(type,cat){
   return (type+(cat?('_'+cat):'')).replace(/\s/g,'_').replace(/&/g,'');
 }
+
+// ------ TAT working-day calendar ------
+// A TAT day is any day that is not a Sunday and not in M.holidays (Admin →
+// TAT Rules → Holidays). Mirrors backend/src/lib/workingDays.js exactly, so
+// the deadline shown here and the delay the server stamps agree. Dates are
+// 'YYYY-MM-DD' strings handled in UTC so the browser timezone can't shift them.
+function _tatD(s){ return new Date(String(s).slice(0,10)+'T00:00:00Z'); }
+function _tatS(d){ return d.toISOString().slice(0,10); }
+function tatHolidaySet(){ return new Set((M.holidays||[]).map(h=>String((h&&h.date)||h).slice(0,10))); }
+function tatIsWorkingDay(dateStr, hs){
+  hs=hs||tatHolidaySet();
+  const d=_tatD(dateStr);
+  return d.getUTCDay()!==0 && !hs.has(_tatS(d));
+}
+// dateStr + n working days (counting from the day after dateStr)
+function tatAddWorkingDays(dateStr, n){
+  const hs=tatHolidaySet(), d=_tatD(dateStr);
+  let left=Math.max(0,Math.round(n||0)), safety=0;
+  while(left>0 && safety++<3660){ d.setUTCDate(d.getUTCDate()+1); if(tatIsWorkingDay(_tatS(d),hs)) left--; }
+  return _tatS(d);
+}
+// Signed working days from `from` to `to` (positive when `to` is later)
+function tatWorkingDaysBetween(from, to){
+  if(!from||!to) return null;
+  const hs=tatHolidaySet(), a=_tatS(_tatD(from)), b=_tatS(_tatD(to));
+  if(a===b) return 0;
+  const sign=b>a?1:-1, d=_tatD(sign>0?a:b), end=sign>0?b:a;
+  let count=0, safety=0;
+  while(_tatS(d)<end && safety++<3660){ d.setUTCDate(d.getUTCDate()+1); if(tatIsWorkingDay(_tatS(d),hs)) count++; }
+  return sign*count;
+}
+// Working days a Hold has consumed: holdDate up to (not including) untilDate
+function tatHeldWorkingDays(holdDate, untilDate){
+  if(!holdDate||!untilDate||untilDate<=holdDate) return 0;
+  const hs=tatHolidaySet(), d=_tatD(holdDate), end=_tatS(_tatD(untilDate));
+  let count=0, safety=0;
+  while(_tatS(d)<end && safety++<3660){ if(tatIsWorkingDay(_tatS(d),hs)) count++; d.setUTCDate(d.getUTCDate()+1); }
+  return count;
+}
+// Deadline "as of today": while a project is on Hold its TAT clock is paused,
+// so the effective deadline keeps moving out by the working days held so far.
+// On Resume the server bakes those days into planWood/planExt permanently.
+function liveTatDeadline(p, seg){
+  const eff=effectivePlanDate(p, seg);
+  if(!eff||!p.onHold||!p.holdDate) return eff;
+  const done = seg==='wood' ? p.actWood : p.actExt;
+  if(done) return eff;
+  return tatAddWorkingDays(eff, tatHeldWorkingDays(p.holdDate, new Date().toISOString().slice(0,10)));
+}
 function calcTAT(){
   const type=document.getElementById('np_type')?.value;
   if(!type||!M.tatRules[type])return;
@@ -9408,9 +9481,8 @@ function calcTAT(){
     const tatEl=document.getElementById(tatId);
     const hintEl=document.getElementById(hintId);
     if(rec&&tatEl){
-      const d=new Date(rec); d.setDate(d.getDate()+days);
-      tatEl.value=d.toISOString().split('T')[0];
-      if(hintEl)hintEl.textContent=label+': '+days+' working days from file receipt';
+      tatEl.value=tatAddWorkingDays(rec, days);
+      if(hintEl)hintEl.textContent=label+': '+days+' working days from file receipt (Sundays & holidays excluded)';
     }
   };
   setTAT('np_wood_received','np_wood_tat','wood_tat_hint',rule.wood);
@@ -13739,7 +13811,7 @@ function detectBottlenecks(startDate,endDate){
 
 // Days remaining until a project's TAT deadline (negative = already overdue)
 function projectDaysToTAT(p){
-  const tat = p.planWood||p.planExt;
+  const tat = p.planWood ? liveTatDeadline(p,'wood') : (p.planExt ? liveTatDeadline(p,'ext') : null);
   if(!tat) return 9999;
   const today=new Date(); today.setHours(0,0,0,0);
   const tatDate=new Date(tat);
@@ -14653,8 +14725,8 @@ function isDashboardDelayed(p){
   const today=new Date().toISOString().split('T')[0];
   const woodDly = p.hasWood && p.actWood && isProductionDelay(p,'wood');
   const extDly  = p.hasExt  && p.actExt  && isProductionDelay(p,'ext');
-  const woodLate = p.hasWood && !p.actWood && p.planWood && today > effectivePlanDate(p,'wood');
-  const extLate  = p.hasExt  && !p.actExt  && p.planExt  && today > effectivePlanDate(p,'ext');
+  const woodLate = p.hasWood && !p.actWood && p.planWood && today > dateOnly(liveTatDeadline(p,'wood'));
+  const extLate  = p.hasExt  && !p.actExt  && p.planExt  && today > dateOnly(liveTatDeadline(p,'ext'));
   return woodDly||extDly||woodLate||extLate;
 }
 
@@ -14779,17 +14851,13 @@ function tatOverrideCalc(){
     document.getElementById('tov_delayDays').value='';
     return;
   }
-  // TAT duration in days from original received → original plan
-  const origRecDate = new Date(origRec);
-  const origPlanDate = new Date(origPlan);
-  const tatDays = Math.round((origPlanDate - origRecDate)/86400000);
-  // Revised completion = revisedStart + tatDays
-  const revStart = new Date(revisedStart);
-  const revComp  = new Date(revStart); revComp.setDate(revComp.getDate()+tatDays);
-  const revCompStr = revComp.toISOString().split('T')[0];
+  // TAT duration in working days (no Sundays/holidays) from original received → original plan
+  const tatDays = tatWorkingDaysBetween(origRec, origPlan);
+  // Revised completion = revisedStart + tatDays working days
+  const revCompStr = tatAddWorkingDays(revisedStart, tatDays);
   document.getElementById('tov_revisedCompletion').value = revCompStr;
-  // Delay days added = revisedStart - origRec (days production was blocked)
-  const delayAdded = Math.round((revStart - origRecDate)/86400000);
+  // Delay days added = working days from origRec to revisedStart (days production was blocked)
+  const delayAdded = tatWorkingDaysBetween(origRec, revisedStart);
   document.getElementById('tov_delayDays').value = delayAdded > 0 ? '+'+delayAdded+' days' : delayAdded+' days';
   return {tatDays, revCompStr, delayAdded};
 }
@@ -21399,7 +21467,7 @@ function getAdminHTML(sec){
     <div class="card">
       <div class="card-header"><div class="card-title">TAT Rules Configuration${lockBadge('ADMIN ONLY')}</div></div>
       <div class="card-body">
-        <div class="alert alert-info mb-3" style="font-size:12px">TAT deadlines auto-calculate in New Project Entry based on Product Type + Category. Only Admin can modify values below.</div>
+        <div class="alert alert-info mb-3" style="font-size:12px">TAT deadlines auto-calculate in New Project Entry based on Product Type + Category. TAT days are <strong>working days</strong>: Sundays and the holidays listed below are not counted. While a project is <strong>On Hold</strong> its TAT is paused; on Resume the deadline moves out by the working days it was held. Only Admin can modify values below.</div>
         <div style="margin-bottom:14px"><button class="btn btn-outline btn-sm" onclick="recalcExistingProjectsTat()">Recalculate TAT for Running Projects</button><span class="text-xs text-muted" style="margin-left:8px">Applies the rules above to projects already in progress. Completed segments are never changed.</span></div>
         ${['CD','CR','AD','R&D'].map(pt=>`
           <div style="margin-bottom:18px">
@@ -21424,6 +21492,26 @@ function getAdminHTML(sec){
             <td><button class="btn btn-success btn-sm" onclick="saveTAT('IOC',null)">Save</button></td>
           </tr></tbody></table>
         </div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <div class="card-header"><div class="card-title">TAT Holidays${lockBadge('ADMIN ONLY')}</div></div>
+      <div class="card-body">
+        <div class="alert alert-info mb-3" style="font-size:12px">Sundays are always excluded from TAT. Add every other non-working day here. After changing holidays, use "Recalculate TAT" above to update existing projects' deadlines.</div>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+          <input type="date" class="form-input" style="height:30px;width:160px" id="tatHolDate">
+          <input type="text" class="form-input" style="height:30px;width:240px" id="tatHolName" placeholder="Holiday name (e.g. Diwali)">
+          <button class="btn btn-primary btn-sm" onclick="addTatHoliday()">+ Add Holiday</button>
+        </div>
+        <table><thead><tr><th>#</th><th>Date</th><th>Day</th><th>Holiday</th><th style="width:90px">Action</th></tr></thead>
+        <tbody>${(M.holidays||[]).length ? [...M.holidays].sort((a,b)=>a.date.localeCompare(b.date)).map((h,i)=>`<tr>
+          <td class="text-muted text-sm">${i+1}</td>
+          <td class="font-mono text-sm">${h.date}</td>
+          <td class="text-sm">${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][_tatD(h.date).getUTCDay()]}</td>
+          <td class="text-sm">${escapeHtmlTat(h.name||'')}</td>
+          <td><button class="btn btn-danger btn-sm" onclick="delTatHoliday('${h.date}')">🗑 Del</button></td>
+        </tr>`).join('') : '<tr><td colspan="5" class="text-sm text-muted" style="padding:10px">No holidays added yet — only Sundays are excluded.</td></tr>'}
+        </tbody></table>
       </div>
     </div>`;
 
@@ -23244,6 +23332,29 @@ function saveTAT(type,cat){
   persistAdminConfig('tatRules');
 }
 
+function escapeHtmlTat(v){ return String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function addTatHoliday(){
+  const date=document.getElementById('tatHolDate')?.value;
+  const name=(document.getElementById('tatHolName')?.value||'').trim();
+  if(!date){toast('Select the holiday date.','⚠');return;}
+  if(!M.holidays) M.holidays=[];
+  if(M.holidays.some(h=>h.date===date)){toast('A holiday is already set for '+date+'.','⚠');return;}
+  if(_tatD(date).getUTCDay()===0) toast(date+' is a Sunday — Sundays are already excluded from TAT.','ℹ');
+  M.holidays.push({date,name});
+  M.holidays.sort((a,b)=>a.date.localeCompare(b.date));
+  persistAdminConfig('holidays');
+  renderAdmin(_adminSec,null);
+  toast('Holiday '+date+(name?' ('+name+')':'')+' added. TAT will skip this day.','✓');
+}
+async function delTatHoliday(date){
+  const h=(M.holidays||[]).find(x=>x.date===date); if(!h) return;
+  if(!(await electronConfirm('Remove holiday '+date+(h.name?' ('+h.name+')':'')+'? It will count as a TAT working day again.'))) return;
+  M.holidays=M.holidays.filter(x=>x.date!==date);
+  persistAdminConfig('holidays');
+  renderAdmin(_adminSec,null);
+  toast('Holiday removed.','✓');
+}
+
 async function recalcExistingProjectsTat(){
   if(!(await electronConfirm(
     'This will recalculate the planned deadline (Wood/Extrusion TAT) for EVERY project using the CURRENT TAT Rules shown above -- INCLUDING already-completed projects. For completed projects this will change their On-Time/Delayed classification and delay-day count to match the new rule. This rewrites historical delivery data. Continue?'
@@ -23255,13 +23366,15 @@ async function recalcExistingProjectsTat(){
     const rule = p.type==='IOC' ? M.tatRules['IOC'] : (M.tatRules[p.type] && M.tatRules[p.type][p.cat]);
     if(!rule){ skippedNoRule++; continue; }
 
+    // Working days (no Sundays/holidays), plus any days the TAT clock was
+    // already paused by past Holds (p.holdDaysWood/Ext, kept by the server).
+    const hasOv = seg => (DB.tatOverrideLog||[]).some(o=>o.projId===p.id && (o.segment===seg||o.segment==='both'));
     if(p.hasWood && p.recWood){
-      const d=new Date(p.recWood); d.setDate(d.getDate()+rule.wood);
-      const newPlan=d.toISOString().split('T')[0];
+      const newPlan=tatAddWorkingDays(dateOnly(p.recWood), rule.wood+(p.holdDaysWood||0));
       const payload={};
-      if(newPlan!==p.planWood) payload.planWood=newPlan;
+      if(newPlan!==dateOnly(p.planWood)) payload.planWood=newPlan;
       if(p.actWood){
-        const newDly=Math.round((new Date(p.actWood)-new Date(newPlan))/86400000);
+        const newDly=tatWorkingDaysBetween(hasOv('wood')?effectivePlanDate(p,'wood'):newPlan, dateOnly(p.actWood));
         if(newDly!==p.dlyWood) payload.dlyWood=newDly;
       }
       if(Object.keys(payload).length){
@@ -23271,12 +23384,11 @@ async function recalcExistingProjectsTat(){
     }
 
     if(p.hasExt && p.recExt){
-      const d=new Date(p.recExt); d.setDate(d.getDate()+rule.ext);
-      const newPlan=d.toISOString().split('T')[0];
+      const newPlan=tatAddWorkingDays(dateOnly(p.recExt), rule.ext+(p.holdDaysExt||0));
       const payload={};
-      if(newPlan!==p.planExt) payload.planExt=newPlan;
+      if(newPlan!==dateOnly(p.planExt)) payload.planExt=newPlan;
       if(p.actExt){
-        const newDly=Math.round((new Date(p.actExt)-new Date(newPlan))/86400000);
+        const newDly=tatWorkingDaysBetween(hasOv('ext')?effectivePlanDate(p,'ext'):newPlan, dateOnly(p.actExt));
         if(newDly!==p.dlyExt) payload.dlyExt=newDly;
       }
       if(Object.keys(payload).length){

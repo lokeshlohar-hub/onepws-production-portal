@@ -1,6 +1,6 @@
 // Working-day calendar for TAT. A TAT day is any day that is not a Sunday and
 // not listed in the admin-managed holiday list (admin_config key 'holidays',
-// an array of { date: 'YYYY-MM-DD', name }). Mirrors the tat* helpers in
+// an array of { date: 'YYYY-MM-DD', name, recurring }). Mirrors the tat* helpers in
 // index.html exactly, so the deadline the frontend shows and the delay the
 // backend stamps are counted the same way.
 //
@@ -12,15 +12,20 @@ async function loadHolidaySet(client) {
     "SELECT config_value FROM admin_config WHERE config_key = 'holidays'"
   );
   const list = rows[0] && Array.isArray(rows[0].config_value) ? rows[0].config_value : [];
-  return new Set(list.map((h) => String((h && h.date) || h).slice(0, 10)).filter(Boolean));
+  // Keys: 'YYYY-MM-DD' for a one-off holiday, 'MM-DD' for one that repeats
+  // every year (h.recurring, set in Admin → Holiday Calendar).
+  return new Set(list.map((h) => {
+    const d = String((h && h.date) || h).slice(0, 10);
+    return (h && h.recurring) ? d.slice(5) : d;
+  }).filter(Boolean));
 }
 
 function toDate(s) { return new Date(String(s).slice(0, 10) + 'T00:00:00Z'); }
 function toStr(d) { return d.toISOString().slice(0, 10); }
 
 function isWorkingDay(dateStr, holidays) {
-  const d = toDate(dateStr);
-  return d.getUTCDay() !== 0 && !holidays.has(toStr(d));
+  const d = toDate(dateStr), ds = toStr(d);
+  return d.getUTCDay() !== 0 && !holidays.has(ds) && !holidays.has(ds.slice(5));
 }
 
 // dateStr + n working days (counting from the day after dateStr).

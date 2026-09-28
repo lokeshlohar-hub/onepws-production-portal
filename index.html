@@ -9422,11 +9422,18 @@ function tatKey(type,cat){
 // 'YYYY-MM-DD' strings handled in UTC so the browser timezone can't shift them.
 function _tatD(s){ return new Date(String(s).slice(0,10)+'T00:00:00Z'); }
 function _tatS(d){ return d.toISOString().slice(0,10); }
-function tatHolidaySet(){ return new Set((M.holidays||[]).map(h=>String((h&&h.date)||h).slice(0,10))); }
+// Holiday set keys: 'YYYY-MM-DD' for a one-off holiday, 'MM-DD' for one that
+// repeats every year (h.recurring) — see Admin → Holiday Calendar.
+function tatHolidaySet(){
+  return new Set((M.holidays||[]).map(h=>{
+    const d=String((h&&h.date)||h).slice(0,10);
+    return (h&&h.recurring) ? d.slice(5) : d;
+  }));
+}
 function tatIsWorkingDay(dateStr, hs){
   hs=hs||tatHolidaySet();
-  const d=_tatD(dateStr);
-  return d.getUTCDay()!==0 && !hs.has(_tatS(d));
+  const ds=_tatS(_tatD(dateStr));
+  return _tatD(ds).getUTCDay()!==0 && !hs.has(ds) && !hs.has(ds.slice(5));
 }
 // dateStr + n working days (counting from the day after dateStr)
 function tatAddWorkingDays(dateStr, n){
@@ -21091,6 +21098,7 @@ const ADMIN_SECTIONS = [
       { title:'Production Planning', items:[
         { key:'stages', title:'Production Stages', icon:'🔧' },
         { key:'tat',    title:'TAT Rules',         icon:'⏱' },
+        { key:'holidays', title:'Holiday Calendar', icon:'📅' },
         { key:'delay',  title:'Delay Categories',  icon:'⚠️' },
       ]},
       { title:'Name Management', items:[
@@ -21463,11 +21471,13 @@ function getAdminHTML(sec){
   if(sec==='dmsdepts')  return getDmsDeptsAdmin();
   if(sec==='dmsorigins') return getDmsOriginsAdmin();
 
+  if(sec==='holidays') return getHolidayCalendarAdmin();
+
   if(sec==='tat') return `
     <div class="card">
       <div class="card-header"><div class="card-title">TAT Rules Configuration${lockBadge('ADMIN ONLY')}</div></div>
       <div class="card-body">
-        <div class="alert alert-info mb-3" style="font-size:12px">TAT deadlines auto-calculate in New Project Entry based on Product Type + Category. TAT days are <strong>working days</strong>: Sundays and the holidays listed below are not counted. While a project is <strong>On Hold</strong> its TAT is paused; on Resume the deadline moves out by the working days it was held. Only Admin can modify values below.</div>
+        <div class="alert alert-info mb-3" style="font-size:12px"><div>TAT deadlines auto-calculate in New Project Entry based on Product Type + Category. TAT days are <strong>working days</strong>: Sundays and the holidays listed below are not counted. While a project is <strong>On Hold</strong> its TAT is paused; on Resume the deadline moves out by the working days it was held. Only Admin can modify values below.</div></div>
         <div style="margin-bottom:14px"><button class="btn btn-outline btn-sm" onclick="recalcExistingProjectsTat()">Recalculate TAT for Running Projects</button><span class="text-xs text-muted" style="margin-left:8px">Applies the rules above to projects already in progress. Completed segments are never changed.</span></div>
         ${['CD','CR','AD','R&D'].map(pt=>`
           <div style="margin-bottom:18px">
@@ -21495,23 +21505,9 @@ function getAdminHTML(sec){
       </div>
     </div>
     <div class="card" style="margin-top:14px">
-      <div class="card-header"><div class="card-title">TAT Holidays${lockBadge('ADMIN ONLY')}</div></div>
-      <div class="card-body">
-        <div class="alert alert-info mb-3" style="font-size:12px">Sundays are always excluded from TAT. Add every other non-working day here. After changing holidays, use "Recalculate TAT" above to update existing projects' deadlines.</div>
-        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
-          <input type="date" class="form-input" style="height:30px;width:160px" id="tatHolDate">
-          <input type="text" class="form-input" style="height:30px;width:240px" id="tatHolName" placeholder="Holiday name (e.g. Diwali)">
-          <button class="btn btn-primary btn-sm" onclick="addTatHoliday()">+ Add Holiday</button>
-        </div>
-        <table><thead><tr><th>#</th><th>Date</th><th>Day</th><th>Holiday</th><th style="width:90px">Action</th></tr></thead>
-        <tbody>${(M.holidays||[]).length ? [...M.holidays].sort((a,b)=>a.date.localeCompare(b.date)).map((h,i)=>`<tr>
-          <td class="text-muted text-sm">${i+1}</td>
-          <td class="font-mono text-sm">${h.date}</td>
-          <td class="text-sm">${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][_tatD(h.date).getUTCDay()]}</td>
-          <td class="text-sm">${escapeHtmlTat(h.name||'')}</td>
-          <td><button class="btn btn-danger btn-sm" onclick="delTatHoliday('${h.date}')">🗑 Del</button></td>
-        </tr>`).join('') : '<tr><td colspan="5" class="text-sm text-muted" style="padding:10px">No holidays added yet — only Sundays are excluded.</td></tr>'}
-        </tbody></table>
+      <div class="card-body" style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+        <div class="text-sm">📅 <strong>${(M.holidays||[]).length}</strong> holiday entr${(M.holidays||[]).length===1?'y':'ies'} configured. Sundays and holidays are skipped when counting TAT days.</div>
+        <button class="btn btn-primary btn-sm" onclick="renderAdmin('holidays',null)">Open Holiday Calendar →</button>
       </div>
     </div>`;
 
@@ -23333,26 +23329,200 @@ function saveTAT(type,cat){
 }
 
 function escapeHtmlTat(v){ return String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-function addTatHoliday(){
-  const date=document.getElementById('tatHolDate')?.value;
-  const name=(document.getElementById('tatHolName')?.value||'').trim();
-  if(!date){toast('Select the holiday date.','⚠');return;}
-  if(!M.holidays) M.holidays=[];
-  if(M.holidays.some(h=>h.date===date)){toast('A holiday is already set for '+date+'.','⚠');return;}
-  if(_tatD(date).getUTCDay()===0) toast(date+' is a Sunday — Sundays are already excluded from TAT.','ℹ');
-  M.holidays.push({date,name});
-  M.holidays.sort((a,b)=>a.date.localeCompare(b.date));
-  persistAdminConfig('holidays');
-  renderAdmin(_adminSec,null);
-  toast('Holiday '+date+(name?' ('+name+')':'')+' added. TAT will skip this day.','✓');
+// ------ Admin → Holiday Calendar ------
+// M.holidays: [{date:'YYYY-MM-DD', name, recurring}]. A recurring holiday
+// (e.g. Republic Day) applies on the same month-day in every year; a one-off
+// holiday (e.g. Diwali, which moves) applies only on its exact date. Sundays
+// are always non-working and never need to be entered.
+let _holYear = new Date().getFullYear();
+let _holEditIdx = null;   // index into M.holidays being edited, or null when adding
+const _HOL_DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+// Holidays that fall in `year`, each with the date it lands on that year.
+function holidaysForYear(year){
+  return (M.holidays||[]).map((h,idx)=>{
+    const d=String(h.date).slice(0,10);
+    if(h.recurring) return {...h, idx, on: year+'-'+d.slice(5)};
+    return d.slice(0,4)===String(year) ? {...h, idx, on:d} : null;
+  }).filter(Boolean).sort((a,b)=>a.on.localeCompare(b.on));
 }
-async function delTatHoliday(date){
-  const h=(M.holidays||[]).find(x=>x.date===date); if(!h) return;
-  if(!(await electronConfirm('Remove holiday '+date+(h.name?' ('+h.name+')':'')+'? It will count as a TAT working day again.'))) return;
-  M.holidays=M.holidays.filter(x=>x.date!==date);
+
+function getHolidayCalendarAdmin(){
+  const y=_holYear;
+  const list=holidaysForYear(y);
+  const byDate={}; list.forEach(h=>{ byDate[h.on]=h; });
+  const editing=_holEditIdx!=null ? M.holidays[_holEditIdx] : null;
+  const formDate=editing ? (editing.recurring ? y+'-'+String(editing.date).slice(5,10) : String(editing.date).slice(0,10)) : '';
+
+  // Working-day count for the year (excludes Sundays + holidays)
+  let working=0, sundays=0;
+  const d=_tatD(y+'-01-01'), hs=tatHolidaySet();
+  while(d.getUTCFullYear()===y){
+    const ds=_tatS(d);
+    if(d.getUTCDay()===0) sundays++; else if(tatIsWorkingDay(ds,hs)) working++;
+    d.setUTCDate(d.getUTCDate()+1);
+  }
+  const holOnWeekday=list.filter(h=>_tatD(h.on).getUTCDay()!==0).length;
+
+  const monthNames=['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const months=monthNames.map((mn,m)=>{
+    const mm=String(m+1).padStart(2,'0');
+    const first=new Date(Date.UTC(y,m,1)), days=new Date(Date.UTC(y,m+1,0)).getUTCDate();
+    let cells='';
+    for(let i=0;i<first.getUTCDay();i++) cells+='<div></div>';
+    for(let day=1;day<=days;day++){
+      const ds=y+'-'+mm+'-'+String(day).padStart(2,'0');
+      const h=byDate[ds], sun=new Date(Date.UTC(y,m,day)).getUTCDay()===0;
+      const style = h
+        ? 'background:var(--red-light);color:var(--red);font-weight:700;border:1px solid var(--red)'
+        : sun ? 'background:var(--surface2);color:var(--text-muted);border:1px solid transparent'
+        : 'background:transparent;color:var(--text);border:1px solid transparent';
+      const tip = h ? escapeHtmlTat(h.name||'Holiday')+(h.recurring?' (every year)':'') : sun ? 'Sunday — always off' : 'Click to add a holiday';
+      cells+='<button type="button" title="'+tip+'" onclick="holCalClick(\''+ds+'\')" style="'+style+';border-radius:5px;height:26px;font-size:11px;cursor:pointer;padding:0">'+day+'</button>';
+    }
+    const cnt=list.filter(h=>h.on.slice(5,7)===mm).length;
+    return `<div style="border:1px solid var(--border);border-radius:9px;padding:9px 10px;background:var(--surface)">
+      <div class="fw-600" style="font-size:12.5px;margin-bottom:6px;display:flex;justify-content:space-between"><span>${mn}</span><span class="text-xs" style="color:var(--red)">${cnt?cnt+' hol.':''}</span></div>
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center">
+        ${['S','M','T','W','T','F','S'].map((w,i)=>`<div class="text-xs" style="color:${i===0?'var(--red)':'var(--text-muted)'};font-weight:600">${w}</div>`).join('')}
+        ${cells}
+      </div>
+    </div>`;
+  }).join('');
+
+  const nowY=new Date().getFullYear();
+  const yearOpts=Array.from({length:9},(_,i)=>nowY-3+i).concat([y]).filter((v,i,a)=>a.indexOf(v)===i).sort((a,b)=>a-b);
+
+  return `<div class="card">
+    <div class="card-header" style="flex-wrap:wrap;gap:8px">
+      <div class="card-title">Holiday Calendar${lockBadge('ADMIN ONLY')}</div>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <button class="btn btn-outline btn-sm" onclick="holSetYear(${y-1})" title="Previous year">◀</button>
+        <select class="form-select" style="height:30px;width:90px" onchange="holSetYear(parseInt(this.value))">
+          ${yearOpts.map(v=>`<option value="${v}" ${v===y?'selected':''}>${v}</option>`).join('')}
+        </select>
+        <button class="btn btn-outline btn-sm" onclick="holSetYear(${y+1})" title="Next year">▶</button>
+        <button class="btn btn-outline btn-sm" onclick="holCopyFromYear(${y-1})" title="Copy ${y-1} one-off holidays to the same dates in ${y}, then adjust any that move">📋 Copy from ${y-1}</button>
+        <button class="btn btn-outline btn-sm" onclick="holExportCsv()">📥 Export CSV</button>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="alert alert-info mb-3" style="font-size:12px"><div>Holidays here are <strong>not counted in TAT</strong>. Sundays are always excluded and don't need to be added. Tick <strong>Repeats every year</strong> for fixed-date holidays (26 Jan, 15 Aug, 2 Oct…) so they carry into every future year automatically. Enter moving festivals (Holi, Diwali…) per year, or use <em>Copy from ${y-1}</em> and adjust the dates. Click any date on the calendar to add or edit it. After changes, run <em>TAT Rules → Recalculate TAT</em> to update existing projects' deadlines.</div></div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:14px">
+        <div style="background:var(--red-light);border-radius:8px;padding:9px 12px"><div class="text-xs" style="color:var(--red)">Holidays in ${y}</div><div class="fw-600" style="font-size:20px;color:var(--red)">${list.length}</div></div>
+        <div style="background:var(--surface2);border-radius:8px;padding:9px 12px"><div class="text-xs text-muted">Holidays on a weekday</div><div class="fw-600" style="font-size:20px">${holOnWeekday}</div></div>
+        <div style="background:var(--surface2);border-radius:8px;padding:9px 12px"><div class="text-xs text-muted">Sundays</div><div class="fw-600" style="font-size:20px">${sundays}</div></div>
+        <div style="background:var(--green-light);border-radius:8px;padding:9px 12px"><div class="text-xs" style="color:var(--green)">TAT working days</div><div class="fw-600" style="font-size:20px;color:var(--green)">${working}</div></div>
+      </div>
+
+      <div id="holForm" style="border:1px solid ${editing?'var(--accent)':'var(--border)'};border-radius:9px;padding:10px 12px;margin-bottom:14px;background:${editing?'var(--accent-light)':'var(--surface2)'}">
+        <div class="fw-600" style="font-size:12.5px;margin-bottom:8px">${editing?'✏ Edit holiday':'+ Add holiday'}</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <input type="date" class="form-input" style="height:30px;width:160px" id="holDate" value="${formDate}">
+          <input type="text" class="form-input" style="height:30px;flex:1;min-width:200px" id="holName" placeholder="Holiday name (e.g. Diwali)" value="${editing?escapeHtmlTat(editing.name||''):''}" onkeydown="if(event.key==='Enter')holSave()">
+          <label class="text-sm" style="display:flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap"><input type="checkbox" id="holRecurring" ${editing&&editing.recurring?'checked':''}> Repeats every year</label>
+          <button class="btn btn-success btn-sm" onclick="holSave()">${editing?'💾 Save changes':'+ Add'}</button>
+          ${editing?`<button class="btn btn-danger btn-sm" onclick="holDelete(${_holEditIdx})">🗑 Delete</button><button class="btn btn-outline btn-sm" onclick="holCancelEdit()">Cancel</button>`:''}
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;margin-bottom:16px">${months}</div>
+
+      <div class="fw-600" style="margin-bottom:6px">Holiday list — ${y}</div>
+      <table><thead><tr><th>#</th><th>Date</th><th>Day</th><th>Holiday</th><th>Type</th><th style="width:150px">Actions</th></tr></thead>
+      <tbody>${list.length ? list.map((h,i)=>{
+        const dow=_tatD(h.on).getUTCDay();
+        return `<tr>
+          <td class="text-muted text-sm">${i+1}</td>
+          <td class="font-mono text-sm">${h.on}</td>
+          <td class="text-sm">${_HOL_DOW[dow]}${dow===0?' <span class="text-xs text-muted">(already off)</span>':''}</td>
+          <td class="text-sm">${escapeHtmlTat(h.name||'')}</td>
+          <td class="text-xs">${h.recurring?'<span class="badge badge-running">🔁 Every year</span>':'<span class="badge badge-planning">'+y+' only</span>'}</td>
+          <td style="display:flex;gap:4px">
+            <button class="btn btn-outline btn-sm" onclick="holEdit(${h.idx})">✏ Edit</button>
+            <button class="btn btn-danger btn-sm" onclick="holDelete(${h.idx})">🗑 Del</button>
+          </td></tr>`;
+      }).join('') : `<tr><td colspan="6" class="text-sm text-muted" style="padding:10px">No holidays for ${y} yet — only Sundays are excluded. Click a date above or use the form to add one.</td></tr>`}
+      </tbody></table>
+    </div>
+  </div>`;
+}
+
+function holRerender(){ renderAdmin('holidays',null); }
+function holFocusForm(){
+  const f=document.getElementById('holForm'); if(f) f.scrollIntoView({behavior:'smooth',block:'center'});
+  document.getElementById('holName')?.focus();
+}
+function holSetYear(y){ if(!y||isNaN(y)) return; _holYear=y; _holEditIdx=null; holRerender(); }
+function holCancelEdit(){ _holEditIdx=null; holRerender(); }
+function holEdit(idx){ _holEditIdx=idx; holRerender(); holFocusForm(); }
+function holCalClick(ds){
+  const h=holidaysForYear(_holYear).find(x=>x.on===ds);
+  if(h) return holEdit(h.idx);
+  _holEditIdx=null; holRerender();
+  const di=document.getElementById('holDate'); if(di) di.value=ds;
+  if(_tatD(ds).getUTCDay()===0) toast('That is a Sunday — Sundays are already excluded from TAT.','ℹ');
+  holFocusForm();
+}
+function holSave(){
+  const date=document.getElementById('holDate')?.value;
+  const name=(document.getElementById('holName')?.value||'').trim();
+  const recurring=!!document.getElementById('holRecurring')?.checked;
+  if(!date){toast('Select the holiday date.','⚠');return;}
+  if(!name){toast('Enter the holiday name.','⚠');return;}
+  if(!M.holidays) M.holidays=[];
+  // Clash: same exact date, or same month-day when either entry repeats yearly
+  const clash=M.holidays.find((h,i)=>{
+    if(i===_holEditIdx) return false;
+    const hd=String(h.date).slice(0,10);
+    if(h.recurring||recurring) return hd.slice(5)===date.slice(5);
+    return hd===date;
+  });
+  if(clash){toast('"'+(clash.name||'A holiday')+'" is already on that date'+(clash.recurring?' (every year)':'')+'. Edit that entry instead.','⚠');return;}
+  const entry={date,name,recurring};
+  const wasEdit=_holEditIdx!=null;
+  if(wasEdit) M.holidays[_holEditIdx]=entry; else M.holidays.push(entry);
+  M.holidays.sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+  _holEditIdx=null;
+  _holYear=parseInt(date.slice(0,4))||_holYear;
   persistAdminConfig('holidays');
-  renderAdmin(_adminSec,null);
-  toast('Holiday removed.','✓');
+  holRerender();
+  toast((wasEdit?'Holiday updated: ':'Holiday added: ')+name+' — '+date+(recurring?' (every year)':'')+'.','✓');
+}
+async function holDelete(idx){
+  const h=(M.holidays||[])[idx]; if(!h) return;
+  if(!(await electronConfirm('Delete holiday "'+(h.name||h.date)+'"'+(h.recurring?' from EVERY year':' ('+h.date+')')+'? That day will count as a TAT working day again.'))) return;
+  M.holidays.splice(idx,1);
+  _holEditIdx=null;
+  persistAdminConfig('holidays');
+  holRerender();
+  toast('Holiday deleted.','✓');
+}
+async function holCopyFromYear(fromYear){
+  const toYear=_holYear;
+  const src=(M.holidays||[]).filter(h=>!h.recurring && String(h.date).slice(0,4)===String(fromYear));
+  if(!src.length){toast('No one-off holidays in '+fromYear+' to copy (every-year holidays already apply to '+toYear+').','ℹ');return;}
+  const hs=tatHolidaySet();
+  const isLeap=new Date(Date.UTC(toYear,1,29)).getUTCMonth()===1;
+  const toAdd=src.map(h=>({date:toYear+String(h.date).slice(4,10),name:h.name,recurring:false}))
+    .filter(h=>isLeap || !h.date.endsWith('-02-29'))
+    .filter(h=>!hs.has(h.date) && !hs.has(h.date.slice(5)));
+  if(!toAdd.length){toast('All holidays from '+fromYear+' are already in '+toYear+'.','ℹ');return;}
+  if(!(await electronConfirm('Copy '+toAdd.length+' holiday(s) from '+fromYear+' to the same dates in '+toYear+'?\nFestivals that move each year will need their dates adjusted afterwards.'))) return;
+  M.holidays.push(...toAdd);
+  M.holidays.sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+  persistAdminConfig('holidays');
+  holRerender();
+  toast(toAdd.length+' holiday(s) copied to '+toYear+'. Check the dates of moving festivals.','✓');
+}
+function holExportCsv(){
+  const y=_holYear, list=holidaysForYear(y);
+  const q=v=>'"'+String(v).replace(/"/g,'""')+'"';
+  const csv='Date,Day,Holiday,Type\n'+list.map(h=>[h.on,_HOL_DOW[_tatD(h.on).getUTCDay()],q(h.name||''),h.recurring?'Every year':y+' only'].join(',')).join('\n');
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+  a.download='Holiday_Calendar_'+y+'.csv'; a.click();
+  toast('Holiday calendar '+y+' exported.','📥');
 }
 
 async function recalcExistingProjectsTat(){

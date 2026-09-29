@@ -15353,7 +15353,7 @@ function renderDailyTab(){
       // Header: name + utilization %
       +'<div class="ws-top">'
         +'<div><div class="ws-name">'+w.name+'</div>'
-        +'<div class="ws-cap-info">Capacity: '+w.cap+' '+w.unit+'</div></div>'
+        +'<div class="ws-cap-info">Capacity: '+w.cap+(w.unit?' '+w.unit:'')+'</div></div>'
         +'<div class="ws-pct '+cl+'">'+pct+'%</div>'
       +'</div>'
       // Progress bar
@@ -15539,11 +15539,25 @@ function showCapacitySource(wsId, date){
       +'<strong>Total for today: '+total+'</strong> &nbsp; (Auto: '+manual+' + Manual: '+Math.max(0,manualEntry)+')</div>';
   }
 
-  // Show in a simple popup
+  // Show in a simple popup. Close via the button, a click on the backdrop,
+  // or Esc. (The button used closest('div[style]'), which matched its own
+  // styled wrapper row, so only the button vanished and the popup stayed.)
+  closeCapacitySource();
+  const overlay=document.createElement('div');
+  overlay.id='capSourcePopup';
+  overlay.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.25);z-index:500';
+  overlay.onclick=e=>{ if(e.target===overlay) closeCapacitySource(); };
   const div=document.createElement('div');
-  div.style.cssText='position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--surface);border-radius:12px;box-shadow:var(--shadow-lg);padding:20px 24px;z-index:500;min-width:380px;max-width:520px;border:1px solid var(--border)';
-  div.innerHTML=html+'<div style="margin-top:14px;text-align:right"><button class="btn btn-primary btn-sm" onclick="this.closest(\'div[style]\').remove()">Close</button></div>';
-  document.body.appendChild(div);
+  div.style.cssText='position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--surface);border-radius:12px;box-shadow:var(--shadow-lg);padding:20px 24px;min-width:380px;max-width:520px;border:1px solid var(--border)';
+  div.innerHTML=html+'<div style="margin-top:14px;text-align:right"><button class="btn btn-primary btn-sm" onclick="closeCapacitySource()">Close</button></div>';
+  overlay.appendChild(div);
+  document.body.appendChild(overlay);
+  document.addEventListener('keydown', _capSourceEsc);
+}
+function _capSourceEsc(e){ if(e.key==='Escape') closeCapacitySource(); }
+function closeCapacitySource(){
+  document.getElementById('capSourcePopup')?.remove();
+  document.removeEventListener('keydown', _capSourceEsc);
 }
 
 

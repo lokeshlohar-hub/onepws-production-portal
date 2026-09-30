@@ -12637,7 +12637,7 @@ function openBulkStageUpdateModal(){
     if(!b) return '';
     const elig = typeof eligibleInputQty === 'function' ? eligibleInputQty(b, st) : b.qty;
     const sd = b.stageData[st] || {completed:0};
-    const pending = Math.max(0, elig - (sd.completed || 0));
+    const pending = b.stageData[st] ? pendingQty(b, st) : Math.max(0, elig - (sd.completed || 0));
     return '<tr>'
       + '<td>'
         + '<div class="fw-600 text-sm">'+b.item+'</div>'
@@ -12660,6 +12660,12 @@ function populateBulkStageMachineDropdown(st){
     const w = M.workstations.find(x => x.id === id);
     return w && w.active !== false && w.maintenanceStatus !== 'breakdown';
   });
+  // Mixed groups (machines + process-only resources, e.g. Aluminum Drilling =
+  // Stand Drilling + Manual drilling) must offer both kinds for selection.
+  const activeProcess = wsIds.filter(id => {
+    const p = (M.processOnlyWorkstations||[]).find(x => x.id === id);
+    return p && p.active !== false;
+  });
   const isProcessOnly = machineWsIds.length === 0;
   const machineSel = document.getElementById('bulkStageMachine');
   const reqIndicator = document.getElementById('bulkMachineReq');
@@ -12674,6 +12680,10 @@ function populateBulkStageMachineDropdown(st){
       + activeMachines.map(id => {
           const w = M.workstations.find(x => x.id === id);
           return '<option value="'+id+'">🔧 '+w.name+'</option>';
+        }).join('')
+      + activeProcess.map(id => {
+          const p = M.processOnlyWorkstations.find(x => x.id === id);
+          return '<option value="'+id+'">⚙️ '+p.name+'</option>';
         }).join('');
   }
 }
@@ -12701,6 +12711,11 @@ function onBulkStageMachineChange(){
     }
   } else if(machineId){
     opNames = M.operators.filter(o => o.workstation === machineId).sort((a,b)=>a.seq-b.seq).map(o => o.name);
+    // Process-only resource picked in a mixed group with no operators
+    // registered to it — show everyone, same fallback as process-only stages.
+    if(!opNames.length && processWsIds.includes(machineId)){
+      opNames = M.operators.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(o => o.name);
+    }
   }
   opSel.innerHTML = '<option value="">-- Select operator --</option>'
     + opNames.map(n => '<option value="'+n.replace(/"/g,'&quot;')+'">'+n+'</option>').join('');
@@ -12773,7 +12788,8 @@ async function submitBulkStageUpdate(){
       // v54.6 - mirror single-submit: update daily capacity so Capacity Planning
       // reflects this bulk-submitted entry immediately (was missing from bulk path,
       // so Capacity Planning stayed at 0 for machines used only via bulk submit)
-      if(machineId){
+      // Process-only resources (e.g. Manual drilling) carry no machine capacity.
+      if(machineId && M.workstations.some(w => w.id === machineId)){
         try { await autoUpdateCapacityFromStage(CUR_PROJ, st, date, qty, b.item, machineId); }
         catch(capErr){ console.error('[bulk] autoUpdateCapacityFromStage failed:', capErr); }
       }

@@ -10643,7 +10643,16 @@ function ensureBomLineStructure(b){
 function pendingQty(b, stageName){
   const sd = b.stageData[stageName];
   const elig = eligibleInputQty(b, stageName);
-  return Math.max(0, elig - sd.completed);
+  let pend = elig - sd.completed;
+  // Component stages can never hold more good units (approved + awaiting QC)
+  // than the line's own qty — guards against any upstream over-release
+  // (e.g. shared-board cascade) turning a qty-1 line into 4 completed.
+  // Mirrors pendingQty() in backend productionEngine.js.
+  if(!isBoardStage(stageName)){
+    const good = (sd.completed||0) - (sd.qcRejected||0);
+    pend = Math.min(pend, (b.qty||0) - good);
+  }
+  return Math.max(0, pend);
 }
 
 // After Beam Saw QC clears N boards, convert to components and release downstream.

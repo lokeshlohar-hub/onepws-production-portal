@@ -151,7 +151,16 @@ function eligibleInputQty(line, stageName) {
 // mirrors pendingQty()
 function pendingQty(line, stageName) {
   const sd = line.stage_data[stageName] || {};
-  return Math.max(0, eligibleInputQty(line, stageName) - (sd.completed || 0));
+  const completed = Number(sd.completed) || 0;
+  let pend = eligibleInputQty(line, stageName) - completed;
+  // Component stages can never hold more good units (approved + awaiting QC)
+  // than the line's own qty — hard stop against any upstream over-release
+  // (e.g. shared-board cascade) turning a qty-1 line into 4 completed.
+  if (!(isBoardStage(stageName) && !line.is_rework)) {
+    const good = completed - (Number(sd.qc_rejected) || 0);
+    pend = Math.min(pend, (Number(line.qty) || 0) - good);
+  }
+  return Math.max(0, pend);
 }
 
 // mirrors isComponentComplete()

@@ -8898,7 +8898,9 @@ function setupSegmentForEdit(seg, p){
   if(remEl) remEl.value = data?.remarks||'';
   if(seg==='ext'){
     const poEl=document.getElementById('np_ext_po'), planEl=document.getElementById('np_ext_plan_date');
-    if(poEl){ poEl.disabled=true; poEl.value=p.jobWorkPO||''; }
+    // Production admins (and Master Admin) may still enter/correct the Job
+    // Work PO after the Aluminum segment exists — it often arrives later.
+    if(poEl){ poEl.disabled=!canEditJobWorkPO(); poEl.value=p.jobWorkPO||''; }
     if(planEl){ planEl.disabled=true; planEl.value=dateOnly(data?.plannedCuttingDate)||''; }
   }
 
@@ -9845,6 +9847,7 @@ async function saveProjectAddSegment(btn){
   }
   const p = DB.projects.find(x=>x.id===_editingProjectId);
   if(!p){ toast('Project not found — please reopen from the project.','⚠'); return; }
+  let headerSaved = false; // a header-only save (e.g. Job Work PO) is a valid change
 
   // v54.5 - Master Admin header-edit save. Before BOM save, if superadmin
   // has changed any project-header field, PATCH those changes and update
@@ -9895,8 +9898,25 @@ async function saveProjectAddSegment(btn){
         if (headerDelta.recExt   !== undefined) p.recExt   = headerDelta.recExt;
         if (headerDelta.planExt  !== undefined) p.planExt  = headerDelta.planExt;
         toast('Header updated: ' + (hResp.changed || Object.keys(headerDelta)).join(', '), '\u2705');
+        headerSaved = true;
       } catch (herr) {
         toast('Header save failed: ' + herr.message + ' - BOM save aborted.', '\u26A0');
+        return;
+      }
+    }
+  } else if (p.hasExt && canEditJobWorkPO()) {
+    // Production admin: Job Work PO is the only header field they can change
+    // on an existing Aluminum segment. Same abort-on-failure rule as above.
+    const poEl = document.getElementById('np_ext_po');
+    const newPO = (poEl && poEl.value || '').trim().toUpperCase();
+    if (newPO !== (p.jobWorkPO || '')) {
+      try {
+        await apiUpdateProject(p.id, { jobWorkPO: newPO });
+        p.jobWorkPO = newPO;
+        headerSaved = true;
+        toast('Job Work PO updated', '\u2705');
+      } catch (herr) {
+        toast('Job Work PO save failed: ' + herr.message + ' - BOM save aborted.', '\u26A0');
         return;
       }
     }
@@ -9951,6 +9971,7 @@ async function saveProjectAddSegment(btn){
     plans.push({seg, isNewSegment, bom, rec, tat: document.getElementById('np_'+seg+'_tat')?.value||''});
   }
   if(!allEdits.length && !plans.length){
+    if(headerSaved){ setTimeout(()=>goUpdateProj(p.id),1300); return; }
     toast('No changes to save — edit an existing component or add a new one.','⚠');
     return;
   }
@@ -10455,6 +10476,14 @@ function isHandoverReady(b){
   if(!finalStage) return false;
   const sd = b.stageData && b.stageData[finalStage];
   return !!(sd && sd.qcApproved > 0);
+}
+
+// Who may edit the Job Work PO on an existing Aluminum segment: Master Admin
+// or a Production department admin.
+function canEditJobWorkPO(){
+  if(!CURRENT_USER) return false;
+  if(CURRENT_USER.role === 'superadmin') return true;
+  return CURRENT_USER.role === 'admin' && CURRENT_USER.department === 'Production';
 }
 
 // Production/Quality Admin gate for the auto-open Handover Notification

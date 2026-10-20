@@ -1,0 +1,29 @@
+# Builds the Windows Portal desktop installer in the cloud (no Windows PC needed):
+#   gcloud builds submit electron --project onepws-apps --region asia-south1 --config cloudbuild-win.yaml
+# Output (private): gs://onepws-apps-build-private/portal-desktop/<version>/
+# Installed copies update from sys160's feed (build.publish.url), so the files
+# are then copied there.
+steps:
+  - id: build
+    name: 'electronuserland/builder:wine'
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -e
+        npm ci --no-audit --no-fund
+        npx electron-builder --win nsis --x64 --publish never
+        ls -la dist
+  - id: stash
+    name: 'gcr.io/cloud-builders/gsutil'
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -e
+        V=$$(grep -o '"version": *"[^"]*"' package.json | head -1 | sed 's/.*"\([^"]*\)"$$/\1/')
+        gsutil -m cp "dist/ONEPWS-Portal-Setup-$$V.exe" "dist/ONEPWS-Portal-Setup-$$V.exe.blockmap" dist/latest.yml \
+          "gs://onepws-apps-build-private/portal-desktop/$$V/"
+options:
+  machineType: 'E2_HIGHCPU_8'
+timeout: 1800s

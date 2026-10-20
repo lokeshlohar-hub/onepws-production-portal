@@ -13,7 +13,7 @@
 
 param(
   [Parameter(Mandatory = $true)][string]$AgentToken,
-  [string]$PortalUrl = "https://onepws-portal-207920932496.asia-south1.run.app",
+  [string]$PortalUrl = "https://onepws-portal-261772287521.asia-south1.run.app",
   [string]$SmtpHost  = "192.168.100.5",
   [int]   $SmtpPort  = 25,
   [string]$SmtpFrom  = "portal@workspace.com",

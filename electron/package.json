@@ -1,6 +1,6 @@
 {
   "name": "onepws-portal",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "ONEPWS Production Portal desktop wrapper",
   "main": "src/main.js",
   "author": "ONEPWS",

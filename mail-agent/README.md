@@ -73,7 +73,7 @@ Fill in `.env`:
 
 | Setting | Value |
 |---|---|
-| `PORTAL_URL` | `https://onepws-portal-207920932496.asia-south1.run.app` |
+| `PORTAL_URL` | `https://onepws-portal-261772287521.asia-south1.run.app` |
 | `MAIL_AGENT_TOKEN` | the shared secret (must match the Cloud Run env var exactly) |
 | `SMTP_HOST` | `192.168.100.5` |
 | `SMTP_PORT` | `25` |
@@ -116,19 +116,16 @@ get restarted.
 ## Enabling it on the portal side
 
 The portal only queues mail when `MAIL_AGENT_TOKEN` is set on the Cloud Run
-service. Until then it reports "not configured" and the app falls back to the
-original mailto: flow, so **start the agent first, then enable the portal** —
-otherwise messages would queue with nothing to deliver them.
+service; without it the app falls back to the original mailto: flow.
 
-```powershell
-gcloud run services update onepws-portal --project studio-9093266581-e412a --region asia-south1 --update-env-vars MAIL_AGENT_TOKEN=<the same secret>
-```
-
-To roll back, remove it again:
-
-```powershell
-gcloud run services update onepws-portal --project studio-9093266581-e412a --region asia-south1 --remove-env-vars MAIL_AGENT_TOKEN
-```
+Since 2026-10-20 the portal runs in the company Google Cloud project
+**`onepws-apps`**, and `MAIL_AGENT_TOKEN` is stored in Secret Manager there as
+`portal-MAIL_AGENT_TOKEN` (same value as before — the agent's `.env` did not
+change). It is already enabled. Changing or removing it is done by the project
+owner (Abhijeet) — developers have no Google Cloud access. If the token must be
+rotated: generate a new random value, ask the owner to add it as a new secret
+version and redeploy, then put the same value in the agent's `.env` and restart
+the `ONEPWSMailAgent` service.
 
 ## Operating notes
 

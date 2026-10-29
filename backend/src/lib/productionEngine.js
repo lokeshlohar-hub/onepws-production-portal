@@ -361,6 +361,20 @@ async function processQcDecision(lineId, { stageName, approveQty, rejectQty, dis
     const projSap = projRes.rows[0] ? projRes.rows[0].sap : line.project_id;
     const projCustomer = projRes.rows[0] ? projRes.rows[0].customer : '';
 
+    // Never decide more than is actually waiting at this stage. Without this
+    // check a double-click, a stale QC screen, or a route that lists a stage
+    // twice approved the same pieces again, pushing qc_queue negative and
+    // qc_approved past what was produced — which strands the line downstream.
+    if (!Number.isInteger(approveQty) || !Number.isInteger(rejectQty) || approveQty < 0 || rejectQty < 0) {
+      throw new Error('Approve and reject quantities must be whole numbers, 0 or more');
+    }
+    const waiting = Math.max(0, Number(sd.qc_queue) || 0);
+    if (approveQty + rejectQty > waiting) {
+      throw new Error(waiting === 0
+        ? `Nothing is waiting for QC at ${stageName} — it may already have been approved. Refresh the screen.`
+        : `Only ${waiting} waiting for QC at ${stageName} — refresh the screen; some may already have been approved.`);
+    }
+
     sd.qc_queue -= approveQty + rejectQty;
     sd.qc_approved += approveQty;
 

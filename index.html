@@ -10857,6 +10857,9 @@ function renderStageQcStatus(){
   (p.bom||[]).forEach(b=>{
     ensureBomLineStructure(b);
     b.route.forEach((st,i)=>{
+      // A route can visit the same stage twice (e.g. Beam Saw before and
+      // after PU Casting) but both visits share one stageData entry — list it once.
+      if(b.route.indexOf(st) !== i) return;
       const sd=b.stageData[st];
       if(sd.qcQueue>0){
         rows.push({b, st, qty:sd.qcQueue, nextStage:b.route[i+1]||'Final (Last Stage)'});
@@ -10913,7 +10916,11 @@ function currentActiveStageOfLine(b){
   for(const st of (b.route||[])){
     const sd = b.stageData[st] || {completed:0};
     const elig = typeof eligibleInputQty === 'function' ? eligibleInputQty(b, st) : b.qty;
-    if((sd.completed || 0) < elig) return st;
+    // Also require something actually submittable here (pendingQty caps a
+    // component stage at the line's own qty, same as the server). Without
+    // it, an over-approved previous stage (e.g. QC approved 2 of a qty-1
+    // line) parks the line forever on a stage that offers 0 to complete.
+    if((sd.completed || 0) < elig && pendingQty(b, st) > 0) return st;
   }
   // Every stage looked satisfied by eligible-qty math, but that can also
   // happen when nothing has actually been produced yet (e.g. board_qty was
@@ -10927,6 +10934,10 @@ function currentActiveStageOfLine(b){
   const finalApproved=lastStage?(b.stageData[lastStage]?.qcApproved||0):0;
   const committedQty=b.componentsReleased||b.originalQty||b.qty;
   if(finalApproved>=committedQty && committedQty>0) return null;
+  // Nothing to submit anywhere, but pieces are waiting for QC — show the
+  // line at that stage ("Awaiting QC") rather than back at its first stage.
+  const waitingAt = route.find(st => (b.stageData[st]?.qcQueue || 0) > 0);
+  if(waitingAt) return waitingAt;
   return route[0]||null;
 }
 
@@ -11008,7 +11019,7 @@ function renderBomComponentPicker(p){
         if(activeStage){
           const elig = typeof eligibleInputQty === 'function' ? eligibleInputQty(b, activeStage) : b.qty;
           const sd = b.stageData[activeStage] || {completed:0, qcQueue:0};
-          pending = Math.max(0, elig - (sd.completed || 0));
+          pending = b.stageData[activeStage] ? pendingQty(b, activeStage) : Math.max(0, elig - (sd.completed || 0));
           awaitingQc = sd.qcQueue || 0;
         }
         const sizeStr = [b.l, b.w, b.t].filter(v => v).map(v => v+'').join(' × ');
@@ -12908,6 +12919,7 @@ function collectQcPendingBySegment(){
       ensureBomLineStructure(b);
       const seg = b.seg === 'wood' ? 'wood' : 'ext';
       (b.route||[]).forEach((st,i) => {
+        if(b.route.indexOf(st) !== i) return; // repeated stage = same stageData, count once
         const sd = b.stageData[st];
         if(sd && sd.qcQueue > 0){
           if(!bySeg[seg][p.id]) bySeg[seg][p.id] = { p, lines:[], totalQty:0 };
@@ -13047,7 +13059,10 @@ function renderQcProjectInspection(projId){
   (p.bom||[]).forEach(b => {
     if((b.seg === 'wood' ? 'wood' : 'ext') !== seg) return;
     ensureBomLineStructure(b);
-    (b.route||[]).forEach(st => {
+    (b.route||[]).forEach((st, i) => {
+      // Repeated stage in the route shares one stageData entry. Listing it
+      // twice let a select-all batch approve the same pieces twice.
+      if(b.route.indexOf(st) !== i) return;
       const sd = b.stageData[st];
       if(sd && sd.qcQueue > 0){
         rows.push({

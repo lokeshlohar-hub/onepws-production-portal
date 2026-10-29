@@ -26673,16 +26673,19 @@ window.toggleAutoRefresh = () => {
 (function () {
   'use strict';
 
-  // Cached once per page load; the modal opens often and this never changes
-  // between opens. Failure to fetch simply leaves sending disabled.
+  // Cached for a minute: the modal opens often, but the relay's health (not
+  // just whether sending is configured) can change while the page is open.
+  // Failure to fetch simply leaves sending disabled.
   var mailStatus = null;
-  async function getMailStatus() {
-    if (mailStatus !== null) return mailStatus;
+  var mailStatusAt = 0;
+  async function getMailStatus(force) {
+    if (!force && mailStatus !== null && Date.now() - mailStatusAt < 60000) return mailStatus;
     try {
       mailStatus = await apiRequest('/handover-log/mail-status', { method: 'GET' });
     } catch (e) {
       mailStatus = { canSend: false };
     }
+    mailStatusAt = Date.now();
     return mailStatus;
   }
   window.getHandoverMailStatus = getMailStatus;
@@ -26727,7 +26730,11 @@ window.toggleAutoRefresh = () => {
         });
         if (resp && resp.sent) { toast('Email sent with the PDF attached'); return true; }
         if (resp && resp.queued) {
-          toast('Email queued — sending via the factory mail server');
+          if (status.agent && status.agent.online === false) {
+            toast('Email queued, but the mail relay on sys160 is not responding — it will go out once the relay is back', '⚠');
+          } else {
+            toast('Email queued — sending via the factory mail server');
+          }
           watchHandoverDelivery(resp.id);
           return true;
         }
@@ -26768,6 +26775,110 @@ window.toggleAutoRefresh = () => {
     new MutationObserver(function () { labelSendButton(); })
       .observe(modalEl, { attributes: true, attributeFilter: ['class'] });
   }
+})();
+</script>
+
+<!-- ============================================================== -->
+<!-- v57 MAIL RELAY HEALTH BANNER (additive block)                  -->
+<!-- Admins see a banner when handover emails are not going out.    -->
+<!-- In October 2026 the sys160 relay silently failed for a week;   -->
+<!-- the only sign was a toast to whoever pressed Send.             -->
+<!-- ============================================================== -->
+<script>
+(function () {
+  'use strict';
+  var CHECK_EVERY_MS = 5 * 60 * 1000;
+  var DISMISS_KEY = 'onepws_mail_banner_dismissed';
+
+  function isAdmin() {
+    return typeof CURRENT_USER !== 'undefined' && CURRENT_USER &&
+      (CURRENT_USER.role === 'superadmin' || CURRENT_USER.role === 'admin');
+  }
+  function loggedIn() {
+    return typeof AUTH_TOKEN !== 'undefined' && AUTH_TOKEN &&
+      !document.body.classList.contains('app-locked');
+  }
+  function ago(seconds) {
+    if (seconds === null || seconds === undefined) return null;
+    if (seconds < 120) return 'just now';
+    var m = Math.round(seconds / 60);
+    if (m < 120) return m + ' min ago';
+    var h = Math.round(m / 60);
+    if (h < 48) return h + ' hours ago';
+    return Math.round(h / 24) + ' days ago';
+  }
+  function waitedFor(minutes) {
+    if (minutes < 120) return minutes + ' min';
+    if (minutes < 2880) return Math.round(minutes / 60) + ' hours';
+    return Math.round(minutes / 1440) + ' days';
+  }
+
+  function render(st) {
+    var bar = document.getElementById('v57MailBanner');
+    var q = (st && st.queue) || {};
+    var waiting = (q.pending || 0) + (q.sending || 0);
+    var message = null;
+    var tone = null;
+
+    if (st && st.attention === 'stalled') {
+      var seen = st.agent ? ago(st.agent.secondsSinceSeen) : null;
+      message = '<b>Handover emails are not going out.</b> ' + waiting + ' waiting, the oldest for '
+        + waitedFor(q.oldestWaitingMinutes || 0) + '. The mail relay on sys160 '
+        + (seen ? 'last reached the portal ' + seen : 'has not reached the portal')
+        + '. Check the <code>ONEPWSMailAgent</code> service on sys160 — emails send automatically once it is back.';
+      tone = 'stalled';
+    } else if (st && st.attention === 'failed') {
+      message = '<b>' + q.failedRecent + ' handover email' + (q.failedRecent === 1 ? '' : 's')
+        + ' failed in the last 7 days</b> — the mail server refused ' + (q.failedRecent === 1 ? 'it' : 'them')
+        + ' after 5 attempts. The recipients have not received ' + (q.failedRecent === 1 ? 'it' : 'them') + '.';
+      tone = 'failed';
+    }
+
+    // A dismissal holds only while the situation is unchanged.
+    var key = message ? tone + ':' + waiting + ':' + (q.failedRecent || 0) : '';
+    var dismissed = null;
+    try { dismissed = sessionStorage.getItem(DISMISS_KEY); } catch (e) {}
+
+    if (!message || dismissed === key) {
+      if (bar) bar.remove();
+      return;
+    }
+    if (!bar) {
+      var content = document.querySelector('.main .content');
+      if (!content) return;
+      bar = document.createElement('div');
+      bar.id = 'v57MailBanner';
+      bar.setAttribute('role', 'alert');
+      content.insertBefore(bar, content.firstChild);
+    }
+    var red = tone === 'stalled';
+    bar.style.cssText = 'display:flex;gap:12px;align-items:flex-start;margin:0 0 12px 0;padding:10px 14px;'
+      + 'border-radius:8px;font-size:12.5px;line-height:1.45;'
+      + 'border:1px solid ' + (red ? 'var(--red,#e02424)' : 'var(--yellow,#d97706)') + ';'
+      + 'background:' + (red ? 'var(--red-light,#fdf2f2)' : 'var(--yellow-light,#fffbeb)') + ';'
+      + 'color:var(--text-primary,#0f1b2d)';
+    bar.innerHTML = '<span style="font-size:15px;line-height:1.2">' + (red ? '📭' : '⚠') + '</span>'
+      + '<span style="flex:1">' + message + '</span>'
+      + '<button type="button" aria-label="Dismiss" title="Dismiss" '
+      + 'style="border:0;background:none;cursor:pointer;font-size:16px;line-height:1;color:var(--text-muted,#8492a6)">×</button>';
+    bar.querySelector('button').addEventListener('click', function () {
+      try { sessionStorage.setItem(DISMISS_KEY, key); } catch (e) {}
+      bar.remove();
+    });
+  }
+
+  async function check() {
+    if (document.hidden || !loggedIn() || !isAdmin()) return;
+    if (typeof window.getHandoverMailStatus !== 'function') return;
+    var st = await window.getHandoverMailStatus(true);
+    if (!st || !st.canSend || st.mode !== 'relay') { render(null); return; }
+    render(st);
+  }
+
+  // First check shortly after sign-in finishes loading data, then every 5 min.
+  setTimeout(check, 15000);
+  setInterval(check, CHECK_EVERY_MS);
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) check(); });
 })();
 </script>
 

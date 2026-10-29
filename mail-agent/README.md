@@ -136,8 +136,33 @@ the `ONEPWSMailAgent` service.
 - **If the agent is stopped**, nothing is lost — messages accumulate in
   `mail_outbox` and flush when it starts again. Senders see a warning that the
   relay may not be running.
+- **Stranded messages recover themselves.** A message the agent claimed but
+  never reported back (agent stopped mid-batch, a second copy closed with
+  Ctrl+C) is handed out again 15 minutes after it was claimed.
+- **Changing `.env` restarts the agent.** It checks `.env` every 10 seconds and,
+  when the file changes, exits so the Windows service starts it again with the
+  new settings. No manual restart needed. (In October 2026 the address was
+  corrected in `.env` but the running agent kept the old one for a week.)
+- **Every portal request times out after 30 seconds**, so an unresponsive
+  portal can't freeze the agent while the service still shows Running.
+- **Admins are warned in the portal.** Each agent request records when it last
+  got through (`portal.mail_agent_status`). If handover mail has been waiting
+  10 minutes or more, Master Admin and Admin users see a red banner saying how
+  long, and when the relay last reached the portal. A yellow banner shows
+  emails that failed in the last 7 days.
 - **Nothing blocks the audit trail**: handover_log rows are written by the
   portal independently of whether the email was delivered.
+
+### If the banner says emails are not going out
+
+1. On sys160: `Get-Service ONEPWSMailAgent` should be `Running`.
+2. Read the end of `C:\onepws\logs\mail-agent-stdout.log`.
+   - `poll failed: ... HTTP 503` with no message, or `fetch failed` → it can't
+     reach the portal. Check `PORTAL_URL` in `mail-agent\.env` is the live URL.
+   - `HTTP 401 Invalid agent token` → `MAIL_AGENT_TOKEN` doesn't match the
+     portal's.
+   - `FAILED MO-… 535` → the mailbox password changed.
+3. `Restart-Service ONEPWSMailAgent -Force` and watch the log for `portal OK`.
 
 Check the queue at any time:
 

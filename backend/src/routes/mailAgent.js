@@ -24,6 +24,13 @@ const router = express.Router();
 const MAX_BATCH = 10;
 const MAX_ATTEMPTS = 5;
 
+// A claimed row that is never reported back (the agent was stopped, crashed,
+// or a second copy was closed mid-batch) is handed out again once its claim is
+// this old. It must comfortably exceed the time one batch can legitimately
+// take — up to MAX_BATCH messages, each bounded by the agent's SMTP and HTTP
+// timeouts — or a slow but healthy batch could be delivered twice.
+const CLAIM_LEASE = '15 minutes';
+
 function tokensMatch(provided, expected) {
   const a = Buffer.from(String(provided || ''));
   const b = Buffer.from(String(expected || ''));
@@ -41,19 +48,51 @@ router.use((req, res, next) => {
   if (!tokensMatch(req.get('X-Agent-Token'), expected)) {
     return res.status(401).json({ error: 'Invalid agent token' });
   }
+  touchHeartbeat(req);
   next();
 });
+
+// Record that the agent got through, so the portal can tell a live relay from
+// one that is running somewhere but not reaching us. Throttled to one write a
+// minute (the agent polls every 20 s). Never fails the request: if the table is
+// missing, delivery still works and only the status report is blank.
+function touchHeartbeat(req) {
+  pool.query(
+    `INSERT INTO mail_agent_status (id, last_seen, agent_version, agent_host)
+     VALUES (1, now(), $1, $2)
+     ON CONFLICT (id) DO UPDATE
+        SET last_seen = now(), agent_version = EXCLUDED.agent_version, agent_host = EXCLUDED.agent_host
+      WHERE mail_agent_status.last_seen IS NULL
+         OR mail_agent_status.last_seen < now() - interval '60 seconds'`,
+    [String(req.get('X-Agent-Version') || 'unknown').slice(0, 40),
+     String(req.get('X-Agent-Host') || '').slice(0, 80)]
+  ).catch(() => {});
+}
 
 // GET /api/mail-agent/pending — claim up to MAX_BATCH messages to deliver.
 // Claiming is a single UPDATE ... RETURNING guarded by FOR UPDATE SKIP LOCKED,
 // so two agents (or an overlapping poll from a slow one) can never pick up the
 // same message twice.
+//
+// Rows whose claim has outlived CLAIM_LEASE are claimable again; if they have
+// already used every attempt they are marked failed instead, so nothing can
+// sit in 'sending' forever.
 router.get('/pending', async (req, res) => {
+  await pool.query(
+    `UPDATE mail_outbox
+        SET status = 'failed',
+            last_error = coalesce(last_error || ' | ', '') || 'claimed but never reported after ' || attempts || ' attempts'
+      WHERE status = 'sending' AND attempts >= $1
+        AND last_attempt < now() - interval '${CLAIM_LEASE}'`,
+    [MAX_ATTEMPTS]
+  );
   const { rows } = await pool.query(
     `UPDATE mail_outbox SET status = 'sending', attempts = attempts + 1, last_attempt = now()
       WHERE id IN (
         SELECT id FROM mail_outbox
-         WHERE status = 'pending' AND attempts < $2
+         WHERE (status = 'pending'
+                OR (status = 'sending' AND last_attempt < now() - interval '${CLAIM_LEASE}'))
+           AND attempts < $2
          ORDER BY created_at
          FOR UPDATE SKIP LOCKED
          LIMIT $1

@@ -5,6 +5,12 @@ const { isMailConfigured, sendHandoverMail, verifyConnection, mailConfigSummary 
 const { buildEmailHtml, buildEmailText, buildPdfBuffer, pdfFileName } = require('../lib/handoverDoc');
 
 const router = express.Router();
+
+// Mail relay health thresholds for /mail-status.
+// The agent polls every 20 s and stamps mail_agent_status at most once a
+// minute, so a healthy agent is never more than ~80 s stale.
+const AGENT_ONLINE_SECONDS = 180;
+const STALLED_AFTER_MINUTES = 10;
 router.use(requireAuth);
 
 function rowToHandover(row) {
@@ -116,14 +122,48 @@ router.get('/mail-status', async (req, res) => {
   // draining the queue — a stalled agent is the realistic failure here.
   if (relay && !summary.configured) {
     try {
-      const { rows } = await pool.query(
+      const { rows: [q] } = await pool.query(
         `SELECT count(*) FILTER (WHERE status='pending')::int AS pending,
+                count(*) FILTER (WHERE status='sending')::int AS sending,
                 count(*) FILTER (WHERE status='failed')::int  AS failed,
-                max(sent_at) AS last_sent
+                count(*) FILTER (WHERE status='failed'
+                                   AND created_at > now() - interval '7 days')::int AS failed_recent,
+                max(sent_at) AS last_sent,
+                (extract(epoch FROM now() - min(created_at)
+                   FILTER (WHERE status IN ('pending','sending'))) / 60)::int AS waiting_minutes
            FROM mail_outbox`
       );
-      base.queue = { pending: rows[0].pending, failed: rows[0].failed, lastSent: rows[0].last_sent };
+      base.queue = {
+        pending: q.pending, sending: q.sending, failed: q.failed,
+        failedRecent: q.failed_recent, lastSent: q.last_sent,
+        oldestWaitingMinutes: q.waiting_minutes,
+      };
     } catch (_) { /* table may not exist yet on an older DB — not fatal */ }
+
+    try {
+      const { rows: [a] } = await pool.query(
+        `SELECT last_seen, agent_version, agent_host,
+                extract(epoch FROM now() - last_seen)::int AS age
+           FROM mail_agent_status WHERE id = 1`
+      );
+      if (a) {
+        base.agent = {
+          lastSeen: a.last_seen, version: a.agent_version, host: a.agent_host,
+          secondsSinceSeen: a.age,
+          online: a.age !== null && a.age < AGENT_ONLINE_SECONDS,
+        };
+      }
+    } catch (_) { /* migration 004 not applied — report without it */ }
+
+    // One flag the UI acts on. A healthy relay delivers within a poll or two,
+    // so mail waiting longer than this means it is not getting through —
+    // whatever the reason (agent stopped, wrong address, mail server down).
+    // That single symptom is what went unnoticed for a week in October 2026.
+    const q = base.queue || {};
+    if ((q.oldestWaitingMinutes || 0) >= STALLED_AFTER_MINUTES) base.attention = 'stalled';
+    else if ((q.failedRecent || 0) > 0) base.attention = 'failed';
+    else base.attention = null;
+
     return res.json(base);
   }
 

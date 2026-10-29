@@ -17,8 +17,21 @@
 
 // Load .env from THIS folder, not the caller's working directory — otherwise
 // `node mail-agent/agent.js` from the repo root silently finds no settings.
-require('dotenv').config({ path: require('path').join(__dirname, '.env') });
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+const ENV_PATH = path.join(__dirname, '.env');
+require('dotenv').config({ path: ENV_PATH });
 const nodemailer = require('nodemailer');
+
+// Sent with every portal request so the portal can show which agent, on which
+// machine, last got through.
+const AGENT_VERSION = '1.1.0';
+
+// Every portal request is bounded: a hung request must never freeze the poll
+// loop while the Windows service still reports Running.
+const PORTAL_TIMEOUT_MS = 30000;
 
 const PORTAL_URL = (process.env.PORTAL_URL || '').replace(/\/+$/, '');
 const AGENT_TOKEN = process.env.MAIL_AGENT_TOKEN || '';
@@ -75,8 +88,11 @@ async function portal(path, options) {
   const res = await fetch(PORTAL_URL + path, Object.assign({
     headers: {
       'X-Agent-Token': AGENT_TOKEN,
+      'X-Agent-Version': AGENT_VERSION,
+      'X-Agent-Host': os.hostname(),
       'Content-Type': 'application/json',
     },
+    signal: AbortSignal.timeout(PORTAL_TIMEOUT_MS),
   }, options || {}));
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -137,8 +153,8 @@ async function tick(transport) {
           body: JSON.stringify({ id: msg.id, ok: false, error: err.message }),
         });
       } catch (reportErr) {
-        // Couldn't even report the failure; the row is left 'sending' and will
-        // be picked up again once its attempt count allows.
+        // Couldn't even report the failure. The row stays 'sending' until the
+        // portal's claim lease expires, then it is handed out again.
         log('could not report failure:', reportErr.message);
       }
     }
@@ -205,12 +221,28 @@ async function main() {
     process.exit(0);
   }
 
+  watchEnvFile();
+
   const loop = async () => {
     if (stopping) return;
     await tick(transport).catch((e) => log('tick error:', e.message));
     if (!stopping) setTimeout(loop, POLL_SECONDS * 1000);
   };
   loop();
+}
+
+// Settings are read once, at startup. In October 2026 .env was corrected to the
+// new portal address but the already-running agent kept using the old one for
+// a week, failing every poll. So when .env changes, exit and let the Windows
+// service (NSSM restarts the app whenever it exits) start a fresh process that
+// reads the new settings. Run by hand, it simply stops and says why.
+function watchEnvFile() {
+  fs.watchFile(ENV_PATH, { interval: 10000 }, (curr, prev) => {
+    if (curr.mtimeMs === prev.mtimeMs) return;
+    log('.env changed — exiting so the service restarts with the new settings');
+    stopping = true;
+    setTimeout(() => process.exit(0), 2000);
+  });
 }
 
 ['SIGINT', 'SIGTERM'].forEach((sig) => process.on(sig, () => {

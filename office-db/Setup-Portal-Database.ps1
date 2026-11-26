@@ -27,7 +27,7 @@ try {
 
   Write-Step 'PostgreSQL on this PC'
   $pg = Find-PgBin
-  if (-not $pg) { throw 'PostgreSQL 15 or newer was not found under Program Files. This must be the OnePWS Dispatch server.' }
+  if (-not $pg) { throw 'PostgreSQL 15 or newer was not found under Program Files. Run this on the OnePWS Dispatch server (192.168.114.39), not on sys160 or another PC.' }
   Write-Ok ('PostgreSQL ' + $pg.Major + ' (' + $pg.Bin + ')')
 
   $envPath = Join-Path $PortalDir '.env'

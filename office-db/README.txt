@@ -12,7 +12,8 @@ What changes
 
 Before you start
   - onepws.in must be active on Cloudflare (nameservers moved, status "Active").
-  - The office server is the OnePWS Dispatch server, with PostgreSQL 17.
+  - The office server is the OnePWS Dispatch server at 192.168.114.39, with PostgreSQL 17. Run every script
+    in this folder ON THAT PC (not on sys160 - sys160 keeps only its mail agent, which is not touched).
   - You need: the "postgres" password of that PostgreSQL; the Supabase connection string of portal_app (SESSION
     pooler, port 5432 - it is the portal's current DATABASE_URL with port 6543 changed to 5432).
   - Copy this whole "office-db" folder to the office server (any folder; Setup copies it to C:\OnePWS\Portal).

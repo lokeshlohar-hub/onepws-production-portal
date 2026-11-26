@@ -2,3 +2,6 @@ docker-start.sh text eol=lf
 Dockerfile text eol=lf
 *.sh text eol=lf
 gradlew text eol=lf
+office-db/*.ps1 text eol=crlf
+office-db/*.bat text eol=crlf
+office-db/*.txt text eol=crlf

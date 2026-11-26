@@ -30,7 +30,19 @@ app.use(express.json());
 // running the code you think it's running — this exists specifically because
 // "is the deployment actually up to date" has been the real cause behind more
 // than one reported bug that looked like an application issue.
-const BACKEND_VERSION = '2026-08-02-final-polish-finish';
+const BACKEND_VERSION = '2026-11-26-office-db-option';
+// Which database answers, and how fast (one "select 1") - no data, no sign-in needed. Used to check the office
+// database switch-over and the tunnel's speed (office-db/README.txt).
+app.get('/api/health/db', async (req, res) => {
+  const { pool, dbLocation } = require('./db');
+  const t0 = Date.now();
+  try {
+    await pool.query('select 1');
+    res.json({ ok: true, database: dbLocation, ms: Date.now() - t0 });
+  } catch (e) {
+    res.status(503).json({ ok: false, database: dbLocation, ms: Date.now() - t0, error: 'database unreachable' });
+  }
+});
 app.get('/api/health', (req, res) => res.json({
   ok: true,
   service: 'onepws-backend',

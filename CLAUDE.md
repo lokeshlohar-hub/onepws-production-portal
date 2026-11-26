@@ -12,7 +12,12 @@
   (Cloud Run `onepws-portal`, project `onepws-apps`, `asia-south1`).
   The two older URLs only forward there and disappear ~2026-10-22 — never put
   them in new code or docs.
-- Database: Supabase `onepws-dispatch`, schema `portal`, role `portal_app`.
+- Database: Supabase `onepws-dispatch`, schema `portal`, role `portal_app` — MOVING (2026-11) to the office
+  server's PostgreSQL (OnePWS Dispatch server, database `onepws_portal`, same schema/role names) reached through a
+  Cloudflare Tunnel (`portal-db.onepws.in`). Switch = env `PORTAL_DB_TUNNEL_HOST` + secrets `OFFICE_DATABASE_URL`,
+  `CF_ACCESS_CLIENT_ID/SECRET` (docker-start.sh runs `cloudflared access tcp` on 127.0.0.1:15432; db.js picks the URL);
+  without the variable everything stays on `DATABASE_URL`. `/api/health/db` says which database answers.
+  Procedure and scripts: `office-db/README.txt`.
 - Frontend = root `index.html` (+ `dialog-helpers.js`, `csv-import.js`), served
   by the Express backend in `backend/`; PDF extractor sidecar in `extractor/`.
 - Shells: `tablet-app/` (Capacitor Android, update feed `tablet/latest.json`

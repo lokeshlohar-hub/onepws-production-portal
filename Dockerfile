@@ -6,8 +6,18 @@ FROM node:20-slim
 
 # Python for the extractor sidecar (PyMuPDF wheel needs no build tools on slim).
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends python3 python3-pip python3-venv \
+    && apt-get install -y --no-install-recommends python3 python3-pip python3-venv ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
+
+# Cloudflare's connector, used only when PORTAL_DB_TUNNEL_HOST is set: it carries the database connection to the
+# office PostgreSQL through the Cloudflare tunnel (see office-db/README.txt). Pinned version + SHA-256 published by
+# Cloudflare for that release; the build fails if the download does not match.
+ARG CLOUDFLARED_VERSION=2026.11.2
+ARG CLOUDFLARED_SHA256=56f13335143ec0e22772963290683a84a04114a35ec64cbc794a4d39ff9bb8cf
+RUN curl -fsSL -o /usr/local/bin/cloudflared \
+      "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-amd64" \
+    && echo "${CLOUDFLARED_SHA256}  /usr/local/bin/cloudflared" | sha256sum -c - \
+    && chmod +x /usr/local/bin/cloudflared
 
 WORKDIR /app
 

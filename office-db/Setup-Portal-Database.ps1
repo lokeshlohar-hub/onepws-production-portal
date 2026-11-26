@@ -38,12 +38,19 @@ try {
   if (-not $settings['BACKUP_DIR']) { $settings['BACKUP_DIR'] = (Join-Path $PortalDir 'backups') }
 
   Write-Step 'Database "onepws_portal" and login "portal_app"'
-  $superPw = Read-Secret 'Password of the PostgreSQL "postgres" user (the one used when the Dispatch server was set up)'
+  $superFile = Join-Path $PortalDir 'postgres-superuser-password.txt'
+  if (Test-Path $superFile) {
+    $superPw = ([IO.File]::ReadAllText($superFile)).Trim()
+    Write-Host '   using the "postgres" password saved by Reset-Postgres-Password' -ForegroundColor DarkGray
+  } else {
+    Write-Host '   Nobody remembers it? Close this window and run Reset-Postgres-Password.bat first.' -ForegroundColor DarkGray
+    $superPw = Read-Secret 'Password of the PostgreSQL "postgres" user (set when PostgreSQL was installed on this PC)'
+  }
   $env:PGHOST = '127.0.0.1'; $env:PGPORT = '5432'; $env:PGUSER = 'postgres'; $env:PGPASSWORD = $superPw; $env:PGDATABASE = 'postgres'; $env:PGSSLMODE = 'disable'
   try {
     $sql = "do `$`$ begin if not exists (select 1 from pg_roles where rolname = '" + $PortalRole + "') then create role " + $PortalRole + " login password '" + $pw + "'; else alter role " + $PortalRole + " login password '" + $pw + "'; end if; end `$`$;"
     $r = Invoke-Exe $pg.Psql @('-v', 'ON_ERROR_STOP=1', '-tAc', $sql)
-    if ($r.Code -ne 0) { throw ('PostgreSQL refused the login: ' + $r.Out) }
+    if ($r.Code -ne 0) { throw ('PostgreSQL refused the login: ' + $r.Out + ' (wrong "postgres" password? Run Reset-Postgres-Password.bat, then this again.)') }
     $r = Invoke-Exe $pg.Psql @('-tAc', "select 1 from pg_database where datname = '" + $PortalDb + "'")
     if ($r.Code -ne 0) { throw ('Cannot reach PostgreSQL as "postgres": ' + $r.Out) }
     if ($r.Out.Trim() -ne '1') {

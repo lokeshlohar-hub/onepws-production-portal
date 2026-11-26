@@ -14,9 +14,20 @@ Before you start
   - onepws.in must be active on Cloudflare (nameservers moved, status "Active").
   - The office server is the OnePWS Dispatch server at 192.168.114.39, with PostgreSQL 17. Run every script
     in this folder ON THAT PC (not on sys160 - sys160 keeps only its mail agent, which is not touched).
-  - You need: the "postgres" password of that PostgreSQL; the Supabase connection string of portal_app (SESSION
+  - You need: the "postgres" password of that PostgreSQL (nobody remembers it? run Reset-Postgres-Password.bat
+    first - see STEP 0); the Supabase connection string of portal_app (SESSION
     pooler, port 5432 - it is the portal's current DATABASE_URL with port 6543 changed to 5432).
   - Copy this whole "office-db" folder to the office server (any folder; Setup copies it to C:\OnePWS\Portal).
+
+
+STEP 0 - Only if nobody remembers the "postgres" password   (1 minute)
+  Right-click Reset-Postgres-Password.bat > Run as administrator, type YES.
+    - for about 10 seconds only "postgres", only from this PC itself, may sign in without a password; the script
+      sets a new generated password and puts the original rules (pg_hba.conf) back - also if anything fails - and
+      checks that a sign-in without a password is refused again. No data and no other login is changed.
+    - if PostgreSQL has to be restarted for it, the Dispatch app is offline for a few seconds: run it at a quiet time.
+    - the new password is saved in C:\OnePWS\Portal\postgres-superuser-password.txt (Administrators only); STEP 1
+      uses it by itself. Keep a copy in the company password manager.
 
 
 STEP 1 - Office server: create the database and copy the data   (about 5 minutes)
@@ -106,6 +117,7 @@ STEP 6 - Afterwards
     running, does the tunnel show HEALTHY in Cloudflare?
 
 Files in this folder
+  Reset-Postgres-Password.bat / .ps1 step 0 (only if needed)
   Setup-Portal-Database.bat / .ps1   step 1 (first copy)        Refresh-Portal-Database.bat   step 5 (final sync)
   Install-Portal-Tunnel.bat / .ps1   step 3                     Backup-Portal-Now.bat          backup now
   portal-backup.ps1                  nightly backup             portal-common.ps1              shared helpers
